@@ -1,0 +1,8 @@
+Independent review result: REJECT
+
+The initial Phase 2 implementation lacked complete adversarial coverage for:
+- prepared multi-file transaction recovery;
+- Attempt Round overflow/backward movement;
+- revalidation of Delivery evidence after terminal transition.
+
+The implementation must add these checks before Heavy acceptance.

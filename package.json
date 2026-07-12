@@ -1,0 +1,22 @@
+{
+  "name": "spec-loop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "spec-loop": "dist/cli.js" },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "check": "npm run build && node dist/cli.js --help"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3"
+  }
+}

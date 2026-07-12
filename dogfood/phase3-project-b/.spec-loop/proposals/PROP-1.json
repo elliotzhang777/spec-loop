@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "proposal_id": "PROP-1",
+  "project_id": "PROJ-PHASE3-B",
+  "source": "manual dogfood review",
+  "suggested_goal": "Change status() to return ready so the real test passes",
+  "risk_level": "heavy",
+  "priority": "P0",
+  "reason": "Heavy fixture requires independent and human verification",
+  "initial_acceptance": [
+    {
+      "id": "AC-1",
+      "text": "npm test passes for ready status"
+    }
+  ],
+  "created_at": "2026-07-12T04:24:32.545Z"
+}

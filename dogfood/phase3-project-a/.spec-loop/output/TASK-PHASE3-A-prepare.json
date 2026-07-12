@@ -1,0 +1,9 @@
+{
+  "task_id": "TASK-PHASE3-A",
+  "round": 1,
+  "state": "working",
+  "base_commit": "c395992cf4e41d63fb58a709ba154f8d25d74e45",
+  "worktree": "/Users/zhangbo/personal-workspace/workspace/spec-loop/dogfood/phase3-project-a/.spec-loop/worktrees/task-phase3-a",
+  "prompt": "Implement add(a,b) in math.mjs with the smallest correct change. Run npm test. Do not edit .spec-loop or Git metadata.",
+  "prepared_at": "2026-07-12T04:24:54.254Z"
+}

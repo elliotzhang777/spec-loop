@@ -1,0 +1,35 @@
+
+> spec-loop@0.1.0 test
+> npm run build && node --test test/*.test.mjs
+
+
+> spec-loop@0.1.0 build
+> tsc
+
+✔ empty templates and placeholders fail (372.54083ms)
+✔ fabricated TASK_STATE lifecycle fails state history check (970.085125ms)
+✔ Attempt is rejected in draft state (357.177275ms)
+✔ malformed Ledger JSON fails (962.095787ms)
+✔ duplicate and unknown Ledger fields fail (1119.035129ms)
+✔ non-continuous Attempt and placeholder fingerprint fail (962.538258ms)
+✔ unknown Budget field fails (933.714503ms)
+✔ Run Log divergence fails (948.873865ms)
+✔ Round may not move backwards or exceed current Round (1095.222783ms)
+✔ prepared multi-file transaction recovers before check (1129.959171ms)
+✔ Standard dogfood reaches delivered with runtime evidence (1733.210635ms)
+✔ Heavy dogfood performs two rounds and independent human acceptance (2302.666677ms)
+✔ Heavy pass rejects missing human check (771.376786ms)
+✔ Delivery rejects incomplete AC mapping (929.05534ms)
+✔ guard continues within limits (2.08366ms)
+✔ guard stops on absolute attempt budget (0.184668ms)
+✔ guard requests user on repeated error (0.151647ms)
+✔ guard requests user on no progress (0.162766ms)
+✔ guard stops on token budget (0.153701ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8980.489002

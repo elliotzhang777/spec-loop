@@ -1,0 +1,12 @@
+COMMAND ["npm","test"]
+EXIT 0
+
+STDOUT
+
+> test
+> node test.mjs
+
+project-b tests passed
+
+STDERR
+

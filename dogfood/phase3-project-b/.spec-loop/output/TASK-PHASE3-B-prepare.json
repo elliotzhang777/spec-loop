@@ -1,0 +1,9 @@
+{
+  "task_id": "TASK-PHASE3-B",
+  "round": 1,
+  "state": "working",
+  "base_commit": "2bff80abbd4e728bac6cf4bf995b28bf8040bde2",
+  "worktree": "/Users/zhangbo/personal-workspace/workspace/spec-loop/dogfood/phase3-project-b/.spec-loop/worktrees/task-phase3-b",
+  "prompt": "Change status() in status.mjs to return ready with the smallest correct change. Run npm test. Do not edit .spec-loop or Git metadata.",
+  "prepared_at": "2026-07-12T04:24:54.454Z"
+}

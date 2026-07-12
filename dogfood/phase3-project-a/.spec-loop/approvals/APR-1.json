@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "approval_id": "APR-1",
+  "proposal_id": "PROP-1",
+  "proposal_hash": "1c6b3aeb674c83da50997a3e94ad60cd6ec22c30470e98466439ea767d7d049a",
+  "approved_by": "zhangbo",
+  "approved_at": "2026-07-12T04:24:32.147Z",
+  "approved_scope": [
+    "create_task",
+    "execute_in_worktree"
+  ],
+  "risk_level": "standard"
+}

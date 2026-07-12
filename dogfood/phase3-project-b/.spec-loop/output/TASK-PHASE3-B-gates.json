@@ -1,0 +1,14 @@
+[
+  {
+    "id": "test",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "exit_code": 0,
+    "duration_ms": 283,
+    "head": "85bf9f7ec92e3a83da766b94b8979ed3a690c34a",
+    "artifact": ".spec-loop/output/TASK-PHASE3-B-gate-test.txt",
+    "sha256": "cdec4be394e87d8bf51d93e5bb8e0ed64025ef6f4666c1c51640d4b687abbeaa"
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "EV-2",
+  "task_id": "TASK-DOGFOOD-HEAVY",
+  "round": 2,
+  "code_revision": "heavy-accepted-r2",
+  "type": "test",
+  "artifact": "evidence/EV-2.artifact",
+  "sha256": "77a2bcd3f5fe85e784a4a5fb4453e659267d455dee23a17e85dffad344558944",
+  "exit_code": 0,
+  "created_at": "2026-07-12T02:34:53.117Z"
+}

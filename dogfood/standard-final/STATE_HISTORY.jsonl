@@ -1,0 +1,5 @@
+{"state_version":1,"status":"draft","round":0,"command":"init","state_hash":"0f34113e9432e02ed7166c434232b16d52c09a02a9dbd8fbf12c775ee847ad34"}
+{"state_version":2,"status":"planned","round":0,"command":"plan","state_hash":"656bf41d1f097742c105e1ef4c1bdc7919095c1919d34b8dba8eec5159df90fa"}
+{"state_version":3,"status":"working","round":1,"command":"round","state_hash":"5180b98894aa2579570c64843c9d5ff69d1fbb9a4ccd0391a4d4d0900b3d8026"}
+{"state_version":4,"status":"verifying","round":1,"command":"verify-pass","state_hash":"481f7ab51d674c0d4df263c9fc8550d4c0c12aa5bc06cb5bb90fea7022ffbea7"}
+{"state_version":5,"status":"delivered","round":1,"command":"deliver","state_hash":"cb975b1ef2cbcefeb198a6261e622cb0b188d3552caf69f3bacf297eb95eda9a"}

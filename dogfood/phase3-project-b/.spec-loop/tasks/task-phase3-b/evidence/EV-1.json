@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "EV-1",
+  "task_id": "TASK-PHASE3-B",
+  "round": 1,
+  "code_revision": "85bf9f7ec92e3a83da766b94b8979ed3a690c34a",
+  "type": "test",
+  "artifact": "evidence/EV-1.artifact",
+  "sha256": "cdec4be394e87d8bf51d93e5bb8e0ed64025ef6f4666c1c51640d4b687abbeaa",
+  "exit_code": 0,
+  "created_at": "2026-07-12T04:27:37.872Z"
+}

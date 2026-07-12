@@ -1,0 +1,3 @@
+Independent review: REJECT
+
+Earlier Dogfood test evidence predates the final Attempt validation and secret-rejection implementation. It cannot prove the current code. A new guarded Round must generate fresh full-suite evidence.

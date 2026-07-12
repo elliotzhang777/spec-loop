@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "task_id": "TASK-PHASE3-B",
+  "repository": "/Users/zhangbo/personal-workspace/workspace/spec-loop/dogfood/phase3-project-b/repo",
+  "worktree": "/Users/zhangbo/personal-workspace/workspace/spec-loop/dogfood/phase3-project-b/.spec-loop/worktrees/task-phase3-b",
+  "branch": "spec-loop/task-phase3-b",
+  "base_commit": "2bff80abbd4e728bac6cf4bf995b28bf8040bde2",
+  "head": "2bff80abbd4e728bac6cf4bf995b28bf8040bde2",
+  "created_at": "2026-07-12T04:24:33.467Z"
+}
