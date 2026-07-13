@@ -110,14 +110,15 @@ export async function reconcileHarness(root:string,taskId:string){
   for(const name of required[state.stage])if(!(await exists(path.join(control(root),'output',name))))throw new Error(`harness state ${state.stage} is missing ${name}`);
   const hashFiles:Record<string,string>={prepare:`${taskId}-prepare.json`,provider:`${taskId}-provider.txt`,collect:`${taskId}-collect.json`,gates:`${taskId}-gates.json`,report:`${taskId}-harness-report.md`};for(const [key,expected] of Object.entries(state.evidence_hashes)){const file=hashFiles[key];if(!file||sha256(await readFile(path.join(control(root),'output',file)))!==expected)throw new Error(`harness Evidence hash mismatch: ${key}`)}
   const headChanged=head!==state.head;
+  const staleHeadEvidence=headChanged||state.last_error?.startsWith('workspace HEAD changed')===true;
   const reconciled={
     ...state,
     head,
-    stage:headChanged?'prepared':state.stage,
+    stage:staleHeadEvidence?'prepared':state.stage,
     sequence:state.sequence+1,
-    evidence_hashes:headChanged?{prepare:state.evidence_hashes.prepare}:state.evidence_hashes,
+    evidence_hashes:staleHeadEvidence?{prepare:state.evidence_hashes.prepare}:state.evidence_hashes,
     updated_at:new Date().toISOString(),
-    last_error:headChanged?'workspace HEAD changed; rerun execute/collect/verify':state.last_error,
+    last_error:staleHeadEvidence?'workspace HEAD changed; rerun execute/collect/verify':state.last_error,
   };
   await writeHarnessState(root,reconciled);return reconciled;
 }

@@ -31,6 +31,7 @@ test('Harness enforces stage order and reconcile checks durable files',async()=>
 
 test('Harness reconcile rolls stale collected evidence back to a rerunnable stage',async()=>{
   const f=await throughCollect('DRIFT'),manifest=JSON.parse(await readFile(path.join(f.root,'.spec-loop','output',`${f.taskId}-workspace.json`),'utf8'));await writeFile(path.join(manifest.worktree,'drift.txt'),'new committed fact\n');git(manifest.worktree,['add','drift.txt']);git(manifest.worktree,['commit','-m','change head after collect']);
+  const stateFile=path.join(f.root,'.spec-loop','output',`${f.taskId}-harness-state.json`),persisted=JSON.parse(await readFile(stateFile,'utf8'));persisted.head=git(manifest.worktree,['rev-parse','HEAD']);persisted.last_error='workspace HEAD changed; rerun collect/verify';await writeFile(stateFile,JSON.stringify(persisted,null,2)+'\n');
   let result=cli(['harness','reconcile',f.root,f.taskId,'--json']);assert.equal(result.code,0,result.stderr);const state=JSON.parse(result.stdout);assert.equal(state.stage,'prepared');assert.deepEqual(Object.keys(state.evidence_hashes),['prepare']);assert.match(state.last_error,/rerun execute\/collect\/verify/);
   assert.equal(cli(['harness','execute',f.root,f.taskId,'--prompt','refresh evidence']).code,0);result=cli(['harness','collect',f.root,f.taskId,'--json']);assert.equal(result.code,0,result.stderr);assert.equal(JSON.parse(result.stdout).head,git(manifest.worktree,['rev-parse','HEAD']));
 });
