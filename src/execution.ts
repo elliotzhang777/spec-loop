@@ -109,7 +109,17 @@ export async function reconcileHarness(root:string,taskId:string){
   const required:Record<HarnessState['stage'],string[]>={prepared:[`${taskId}-prepare.json`],executed:[`${taskId}-prepare.json`,`${taskId}-provider.txt`],collected:[`${taskId}-prepare.json`,`${taskId}-provider.txt`,`${taskId}-collect.json`],verified:[`${taskId}-prepare.json`,`${taskId}-provider.txt`,`${taskId}-collect.json`,`${taskId}-gates.json`],reported:[`${taskId}-prepare.json`,`${taskId}-provider.txt`,`${taskId}-collect.json`,`${taskId}-gates.json`,`${taskId}-harness-report.md`]};
   for(const name of required[state.stage])if(!(await exists(path.join(control(root),'output',name))))throw new Error(`harness state ${state.stage} is missing ${name}`);
   const hashFiles:Record<string,string>={prepare:`${taskId}-prepare.json`,provider:`${taskId}-provider.txt`,collect:`${taskId}-collect.json`,gates:`${taskId}-gates.json`,report:`${taskId}-harness-report.md`};for(const [key,expected] of Object.entries(state.evidence_hashes)){const file=hashFiles[key];if(!file||sha256(await readFile(path.join(control(root),'output',file)))!==expected)throw new Error(`harness Evidence hash mismatch: ${key}`)}
-  const reconciled={...state,head,sequence:state.sequence+1,updated_at:new Date().toISOString(),last_error:head===state.head?state.last_error:'workspace HEAD changed; rerun collect/verify'};await writeHarnessState(root,reconciled);return reconciled;
+  const headChanged=head!==state.head;
+  const reconciled={
+    ...state,
+    head,
+    stage:headChanged?'prepared':state.stage,
+    sequence:state.sequence+1,
+    evidence_hashes:headChanged?{prepare:state.evidence_hashes.prepare}:state.evidence_hashes,
+    updated_at:new Date().toISOString(),
+    last_error:headChanged?'workspace HEAD changed; rerun execute/collect/verify':state.last_error,
+  };
+  await writeHarnessState(root,reconciled);return reconciled;
 }
 
 export async function writebackDelivery(root:string,taskId:string){const item=(await scanTasks(root)).find(t=>t.task_id===taskId);if(!item)throw new Error('task not found');const state=await readState(item.path);if(state.status!=='delivered')throw new Error('task is not delivered');const evidence=await evidenceRecords(item.path);const content=`# Project Write-back — ${taskId}\n\n- Project: ${(await readProject(root)).project_id}\n- Status: delivered\n- Round: ${state.current_round}\n- Revision: ${state.code_revision}\n- Evidence: ${evidence.map(e=>e.id).join(', ')}\n\nThis is a generated external-system write-back draft. No external write was performed.\n`;const file=path.join(control(root),'output',`${taskId}-writeback.md`);await atomicWriteMany(root,[{file,content}]);return file}
