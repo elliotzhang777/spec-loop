@@ -5,6 +5,7 @@
 - 创建日期：2026-07-12
 - 最后更新：2026-07-12
 - Roadmap：[roadmap.md](../roadmap.md)
+- 总体架构：[architecture.md](../architecture.md)
 
 ## 背景与问题
 
@@ -55,7 +56,7 @@
 |---|---|---|---|
 | [FEAT-001 文件驱动生命周期](../02-feature/FEAT-001-file-task-lifecycle.md) | 建立任务契约、状态、验收和 Delivery | P0 | 已完成 |
 | [FEAT-002 运行账本与 Guard](../02-feature/FEAT-002-runtime-ledger-guard.md) | 多轮失败可记录、限制和恢复 | P0 | 已完成 |
-| [FEAT-003 Project Loop 与 Agent 执行](../02-feature/FEAT-003-project-loop-agent-execution.md) | 管理项目多任务并让 Codex 受控单步执行 | P1 | 已完成 |
+| [FEAT-003 Project Loop 与 Agent 执行](../02-feature/FEAT-003-project-loop-agent-execution.md) | 管理项目多任务并让 Codex 受控单步执行 | P1 | 待验证 |
 | [FEAT-004 受控自动闭环](../02-feature/FEAT-004-controlled-automation.md) | 批准后替代循环内重复 Prompt | P1 | 草稿 |
 | [FEAT-005 Scheduling 与隔离](../02-feature/FEAT-005-scheduling-isolation.md) | 报告型调度、并发隔离和安全控制 | P1 | 草稿 |
 | [FEAT-006 工程 Toolchain](../02-feature/FEAT-006-engineering-toolchains.md) | 自动构建、测试并生成平台证据 | P2 | 草稿 |
@@ -63,8 +64,8 @@
 
 ## 实际结果
 
-- 最终结果：Phase 1–3 已交付，支持 Project Loop、Codex worktree 单步执行和 T1 Gate。
-- 指标结果：自动化测试通过；Phase 1–2 和两个 Phase 3 真实 Project Dogfood delivered。
+- 当前结果：Phase 1–2 已交付；Phase 3 核心原型与安全加固实现已具备，但正式验收尚未完成。
+- 指标结果：30 项自动化、对抗和恢复测试通过；既有两个 Project Dogfood 仅证明原型，需以加固后的独立 Heavy 验收重新签署。
 - 遗留事项：Scheduling、自动多 Round、受控并发、平台 Toolchain 和 Portfolio 尚未实现。
 
 ## 变更记录

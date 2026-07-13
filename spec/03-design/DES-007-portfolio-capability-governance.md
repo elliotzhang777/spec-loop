@@ -26,7 +26,7 @@ Versioned Capability Registry → Eval → Approval → Canary → Observe → P
 
 ## 详细设计
 
-### Portfolio
+### 项目组合
 
 只读聚合 project/task/progress/blocker/risk/budget/dependency/conflict/delivery/automation。删除后从事实重建。
 
@@ -75,4 +75,3 @@ Phase 5 未满足进入条件，不创建工单。
 | 日期 | 变更 | 原因 | 关联工单 |
 |---|---|---|---|
 | 2026-07-12 | 建立 Portfolio 与能力治理设计 | 最终 Roadmap | - |
-

@@ -37,11 +37,11 @@ Ledger 是 Attempt 事实源；Log 和 Summary 可以从状态、Budget、Ledger
 - `RUN_LOG.md`：Ledger 的确定性表格投影。
 - `RUN_SUMMARY.md`：仅从 State、Budget、Ledger 生成。
 
-### Attempt
+### 执行尝试（Attempt）
 
 字段：schema version、attempt、round、timestamp、action、outcome、error fingerprint、tokens、work units。编号从 1 连续；Round 不得倒退或超过当前 Round；只允许在 working/verifying/iterating 写入。
 
-### Guard
+### 运行守卫（Guard）
 
 | 条件 | 决策 |
 |---|---|
@@ -97,4 +97,3 @@ iterating 开启新 Round 前必须自动 Guard，只有 continue 可继续。
 | 日期 | 变更 | 原因 | 关联工单 |
 |---|---|---|---|
 | 2026-07-12 | 重组 Phase 2 最终设计 | 规格库模板化 | TASK-002 |
-

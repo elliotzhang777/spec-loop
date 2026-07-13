@@ -1,6 +1,6 @@
 # TASK-009：Git worktree 与 T1 通用 Gate
 
-- 状态：已完成
+- 状态：待验证
 - 优先级：P0
 - 负责人：Codex
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)

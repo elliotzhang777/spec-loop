@@ -16,7 +16,7 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 
 - Phase 1：Light/Standard/Heavy、文件契约、状态机、Round、AC、Evidence 和 Delivery。
 - Phase 2：Attempt、Ledger、Budget、Guard、事实 Summary 和失败恢复。
-- Phase 3：Project metadata、项目多任务 Registry、Triage Proposal/Approval、Provider 配置、Git worktree、T1 Gate、Codex Harness 和 Project write-back（已完成）。
+- Phase 3：Project Loop 核心原型已完成；安全加固、故障恢复和完整 Harness Evidence 闭环已进入待验证，正式验收尚未完成。
 
 当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 3 不包含后台 Scheduling、自动多 Round、自动 push/merge 或 Connector 写入。
 
@@ -46,7 +46,7 @@ node dist/cli.js verify tasks/example --result pass --evidence evidence/test.txt
 node dist/cli.js deliver tasks/example
 ```
 
-See [spec/README.md](spec/README.md) for the specification library and [spec/roadmap.md](spec/roadmap.md) for the product roadmap.
+规格库入口见 [spec/README.md](spec/README.md)，阶段路线见 [spec/roadmap.md](spec/roadmap.md)，系统模块和控制链见 [spec/architecture.md](spec/architecture.md)。
 
 ## Current capability
 
@@ -59,4 +59,4 @@ Light / Standard / Heavy task governance
 + D0 local Delivery record
 ```
 
-Project Loop 和 Codex 受控单步执行已完成；自动工程 Toolchain 平台预设（Spring Boot、Xcode、微信小程序）、受控 Scheduling、自动多 Round 和 Portfolio 属于 Phase 4–5，尚未实现。
+Project Loop 和 Codex 受控单步执行原型已经具备，Phase 3 加固实现等待独立 Heavy 验收；自动工程 Toolchain 平台预设（Spring Boot、Xcode、微信小程序）、受控 Scheduling、自动多 Round和 Portfolio 属于 Phase 4–5，尚未实现。

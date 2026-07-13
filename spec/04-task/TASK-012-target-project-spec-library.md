@@ -1,6 +1,6 @@
 # TASK-012：目标工程规格库
 
-- 状态：已完成
+- 状态：待验证
 - 优先级：P0
 - 负责人：Codex
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
@@ -20,9 +20,10 @@
 - [x] AC-4：Project metadata 明确记录 `spec_root`。
 - [x] AC-5：自动化测试覆盖创建、失败校验和恢复补建。
 - [x] AC-6：批准 Proposal 创建 Task 时，同步生成目标工程真实 Task 规格并写入 AC 和控制任务引用。
+- [x] AC-7：显式 `--adopt-existing` 可接管 ID、标题和 AC 与 Proposal 完全一致的草稿 Task，并拒绝覆盖非草稿、已绑定或内容不一致的规格。
 
 ## 交付记录
 
 - 实现：`src/project.ts` 的目标规格库 scaffold/check，以及 CLI `project spec-init/spec-check`。
 - 验证：`test/project.test.mjs`。
-- 约束：同名目标 Task 规格拒绝覆盖；交付后实际结果回写将在 Project write-back 增强中继续收紧。
+- 约束：同名目标 Task 默认拒绝覆盖；只有显式接管且草稿内容与批准内容一致时才建立控制绑定。交付后实际结果回写将在 Project write-back 增强中继续收紧。

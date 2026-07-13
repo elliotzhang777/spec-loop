@@ -8,7 +8,7 @@ import { atomicWriteMany, assertNoSecrets } from './files.js';
 import { appendAttempt, checkTask, deliverTask, initTask, planTask, readState, runtimeInit, startRound, verifyTask } from './task.js';
 import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
 import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
-import { collectHarness, createWorkspace, executeHarness, prepareHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
+import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -120,8 +120,8 @@ tasksCmd.command('resumable').argument('<project-dir>').option('--json').action(
 
 const triage=program.command('triage').description('Manual proposal and approval flow');
 triage.command('propose').argument('<project-dir>').requiredOption('--source <source>').requiredOption('--goal <goal>').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).addOption(new Option('--priority <priority>').choices(['P0','P1','P2','P3']).default('P1')).requiredOption('--reason <reason>').requiredOption('--ac <criterion...>').action((dir,o)=>action(async()=>console.log(await createProposal(root(dir),{source:o.source,goal:o.goal,risk:o.risk,priority:o.priority,reason:o.reason,criteria:o.ac}))));
-triage.command('approve').argument('<project-dir>').argument('<proposal-id>').requiredOption('--by <identity>').action((dir,id,o)=>action(async()=>console.log(await approveProposal(root(dir),id,o.by))));
-triage.command('create-task').argument('<project-dir>').argument('<proposal-id>').requiredOption('--id <task-id>').requiredOption('--title <title>').action((dir,p,o)=>action(async()=>console.log(await createTaskFromProposal(root(dir),p,o.id,o.title))));
+triage.command('approve').argument('<project-dir>').argument('<proposal-id>').requiredOption('--by <identity>').option('--ttl-hours <hours>','approval validity in hours','24').action((dir,id,o)=>action(async()=>console.log(await approveProposal(root(dir),id,o.by,Number(o.ttlHours)))));
+triage.command('create-task').argument('<project-dir>').argument('<proposal-id>').requiredOption('--id <task-id>').requiredOption('--title <title>').option('--adopt-existing','bind an approved draft in the target spec library').action((dir,p,o)=>action(async()=>console.log(await createTaskFromProposal(root(dir),p,o.id,o.title,Boolean(o.adoptExisting)))));
 
 const providers=program.command('providers').description('Provider configuration and diagnostics');
 providers.command('show').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const results=await providerDoctor(root(dir));print(results,o.json)}));
@@ -139,6 +139,7 @@ harness.command('execute').argument('<project-dir>').argument('<task-id>').requi
 harness.command('collect').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await collectHarness(root(dir),id),o.json)));
 harness.command('verify').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>{const r=await runGates(root(dir),id);print(r,o.json);if(r.some(x=>x.exit_code!==0))process.exitCode=1}));
 harness.command('report').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await reportHarness(root(dir),id),o.json)));
+harness.command('reconcile').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await reconcileHarness(root(dir),id),o.json)));
 
 program.command('writeback').argument('<project-dir>').argument('<task-id>').action((dir,id)=>action(async()=>console.log(await writebackDelivery(root(dir),id))));
 

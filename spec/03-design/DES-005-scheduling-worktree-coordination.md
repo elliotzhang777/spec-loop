@@ -12,7 +12,7 @@
 
 ## 现状与约束
 
-- 现状：Phase 3 已交付多任务管理、串行单步 Harness 和 worktree 隔离，但没有 Scheduler。
+- 现状：Phase 3 已具备多任务管理、串行单步 Harness 和 worktree 隔离原型，加固实现待正式验收；当前没有 Scheduler。
 - 技术约束：依赖单步 worktree 和 Phase 4 Controller 幂等。
 - 不在范围：跨机器分布式 Worker 和默认生产写入。
 
@@ -28,7 +28,7 @@ Budget / Denylist / Pause / Kill / Connector Policy
 
 ## 详细设计
 
-### Scheduling
+### 调度
 
 保存 run ID、scan cursor、idempotency key 和项目 lease。report-only 阶段不创建 Task、不改代码。
 
@@ -40,7 +40,7 @@ task lease 包含 owner、expiry、fencing token；resource claim 覆盖 repo pa
 
 Pause 阻止新 Triage/Task/Round，允许安全 Gate 收尾。Kill 取消 Agent/命令，将操作标记 interrupted/unknown，保留 worktree/证据，reconcile 后才恢复。
 
-### Connector
+### 连接器
 
 按项目授权，只读开始；评论/标签和有限状态更新单独批准。merge、delete、生产数据、credential、签名和发布默认 deny。
 

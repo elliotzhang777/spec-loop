@@ -10,6 +10,7 @@ export const stateSchema = z.object({
 
 export const specSchema = z.object({
   schema_version: z.literal(1), task_id: z.string(), title: z.string().min(3), level: z.enum(LEVELS),
+  target_spec: z.string().min(1).optional(), proposal_id: z.string().regex(/^PROP-[1-9]\d*$/).optional(),
 }).strict();
 
 export const acceptanceSchema = z.object({
@@ -54,4 +55,3 @@ export const evidenceSchema = z.object({
   code_revision: z.string().min(1), type: z.enum(['command', 'test', 'review', 'artifact']), artifact: z.string().min(1),
   sha256: z.string().regex(/^[a-f0-9]{64}$/), exit_code: z.number().int(), created_at: z.iso.datetime(),
 }).strict();
-

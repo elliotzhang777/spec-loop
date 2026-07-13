@@ -46,6 +46,7 @@ export function assertNoSecrets(value: string, label: string): void {
 
 interface TxWrite { target: string; temp: string; hash: string }
 interface Journal { id: string; status: 'prepared'; writes: TxWrite[] }
+interface CrossRootJournal extends Journal { allowed_roots: string[] }
 
 async function safeTarget(root: string, target: string): Promise<string> {
   const resolved = path.resolve(target);
@@ -96,6 +97,57 @@ export async function atomicWriteMany(root: string, values: Array<{ file: string
   await recoverTransactions(root);
 }
 
+function withinAnyRoot(file: string, roots: string[]): boolean {
+  const resolved = path.resolve(file);
+  return roots.some((root) => resolved === path.resolve(root) || resolved.startsWith(path.resolve(root) + path.sep));
+}
+
+export async function recoverCrossRootTransactions(coordinatorRoot: string, allowedRoots: string[]): Promise<void> {
+  const dir = path.join(coordinatorRoot, '.spec-loop-cross-tx');
+  if (!(await exists(dir))) return;
+  const normalized = allowedRoots.map((root) => path.resolve(root));
+  for (const name of (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()) {
+    const journalPath = path.join(dir, name);
+    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as CrossRootJournal;
+    if (journal.allowed_roots.length !== normalized.length || journal.allowed_roots.some((root) => !normalized.includes(root))) throw new Error(`cross-root transaction ${journal.id}: allowed roots changed`);
+    for (const write of journal.writes) {
+      if (!withinAnyRoot(write.target, normalized) || !withinAnyRoot(write.temp, normalized)) throw new Error(`cross-root transaction ${journal.id}: path escapes allowed roots`);
+      if (await exists(write.temp)) {
+        const content = await readFile(write.temp);
+        if (sha256(content) !== write.hash) throw new Error(`cross-root transaction ${journal.id}: corrupt temp file`);
+        await mkdir(path.dirname(write.target), { recursive: true });
+        await rename(write.temp, write.target);
+      } else if (!(await exists(write.target)) || sha256(await readFile(write.target)) !== write.hash) {
+        throw new Error(`cross-root transaction ${journal.id}: target diverged or is missing`);
+      }
+    }
+    await rm(journalPath);
+  }
+}
+
+export async function atomicWriteAcrossRoots(coordinatorRoot: string, allowedRoots: string[], values: Array<{ file: string; content: string | Buffer }>): Promise<void> {
+  const roots = allowedRoots.map((root) => path.resolve(root));
+  await recoverCrossRootTransactions(coordinatorRoot, roots);
+  const txDir = path.join(coordinatorRoot, '.spec-loop-cross-tx');
+  await mkdir(txDir, { recursive: true });
+  const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
+  const writes: TxWrite[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const target = path.resolve(values[i].file);
+    if (!withinAnyRoot(target, roots)) throw new Error(`cross-root transaction target escapes allowed roots: ${target}`);
+    const owner = roots.find((root) => target === root || target.startsWith(root + path.sep));
+    if (!owner) throw new Error(`no owner root for ${target}`);
+    const tempDir = path.join(owner, '.spec-loop-cross-tx-data');
+    await mkdir(tempDir, { recursive: true });
+    const temp = path.join(tempDir, `${id}-${i}.tmp`);
+    await writeFile(temp, values[i].content);
+    writes.push({ target, temp, hash: sha256(values[i].content) });
+  }
+  const journal: CrossRootJournal = { id, status: 'prepared', allowed_roots: roots, writes };
+  await writeFile(path.join(txDir, `${id}.json`), JSON.stringify(journal, null, 2));
+  await recoverCrossRootTransactions(coordinatorRoot, roots);
+}
+
 export async function readJsonStrict(file: string): Promise<unknown> {
   const raw = await readFile(file, 'utf8');
   // JSON.parse accepts duplicate keys, so reject them with a small structural scanner.
@@ -111,4 +163,3 @@ export async function readJsonStrict(file: string): Promise<unknown> {
   try { return JSON.parse(raw); }
   catch (error) { throw new Error(`${path.basename(file)}: malformed JSON: ${(error as Error).message}`); }
 }
-

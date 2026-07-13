@@ -1,6 +1,8 @@
-# Roadmap
+# 路线图
 
 > 本文件是 spec-loop 阶段方向的权威定义。具体产品行为、技术方案和执行工作分别下沉到 Product、Feature、Design 和 Task。
+
+系统核心模块、控制链、事实源和安全边界见[系统总体架构](architecture.md)。
 
 ## 项目愿景
 
@@ -9,14 +11,14 @@
 - 预期价值：用户从“循环内操作员”上移为目标、批准和高风险判断者，spec-loop 管理 Project、Task、Agent 执行、验证、迭代和 Delivery。
 - 北极星指标：无需人在循环内追加“继续修复/运行测试”Prompt，且最终通过独立验证的任务比例。
 
-## 已完成基础
+## 当前阶段基线
 
 | 阶段 | 目标结果 | 关联特性 | 状态 |
 |---|---|---|---|
 | Phase 0 | 建立产品规格和验收基线 | [PROD-001](01-product/PROD-001-local-spec-loop.md) | 已完成 |
 | Phase 1 | 单任务文件生命周期、Round、Evidence 和 Delivery | [FEAT-001](02-feature/FEAT-001-file-task-lifecycle.md) | 已完成 |
 | Phase 2 | Attempt、Ledger、Budget、Guard、Summary 和失败恢复 | [FEAT-002](02-feature/FEAT-002-runtime-ledger-guard.md) | 已完成 |
-| Phase 3 | Project Loop、Codex worktree 单步执行和 T1 Gate | [FEAT-003](02-feature/FEAT-003-project-loop-agent-execution.md) | 已完成 |
+| Phase 3 | Project Loop、Codex worktree 单步执行和 T1 Gate | [FEAT-003](02-feature/FEAT-003-project-loop-agent-execution.md) | 待验证 |
 
 ## 最终 Phase 3–5
 
@@ -30,13 +32,13 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 不得跳阶段。后一阶段必须保持前一阶段的全量回归、Heavy Dogfood 和独立验证。
 
-## Phase 3：Project Loop 与受控单步执行（已完成）
+## Phase 3：Project Loop 与受控单步执行（待正式验收）
 
 ### 目标
 
 从“一个任务目录”扩展为“一个工程中的多个可查询、可恢复任务”，并让 Codex 在隔离 worktree 中完成用户明确批准的单步工程工作。
 
-### Product Control Plane
+### 产品控制面
 
 - 严格 Project metadata：项目 ID、名称、Git 路径、默认分支/版本、输出位置、风险、可选 Issue 引用。
 - 目标工程规格库：在业务仓库内维护 Roadmap、Product、Feature、Design、Task 和验证看板，并提供补建与完整性校验。
@@ -46,7 +48,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 - Proposal Approval：批准绑定 Proposal/Spec hash、批准人、时间、范围和风险。
 - Task Delivery 生成 Project 回写摘要；第一版不写外部系统。
 
-### Execution Foundation
+### 执行基础
 
 - Provider registry：Codex、Claude Code、Qoder；默认 Codex。
 - 第一阶段真实执行只要求 Codex Dogfood，其他 Provider 完成严格配置与 Adapter 合同。
@@ -132,7 +134,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 在多个可靠 Project Loop 上建立只读可重建 Portfolio、跨项目排序建议、可复用能力资产、长期指标和受控优化流程。
 
-### Portfolio
+### 项目组合
 
 - 聚合项目、任务、进度、阻塞、风险、预算、依赖、冲突、Delivery 和自动化运行情况。
 - Portfolio 只能从 Project State/Task/运行事实重建，不能成为新的状态事实源。
@@ -189,7 +191,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## 路线图变更规则
 
-- Phase 3 已正式 Delivery；Phase 4 仍需另行建立并批准 Heavy 主工单后才能开始。
+- Phase 3 核心原型已完成，加固实现等待独立 Heavy 验收；通过前不得启动 Phase 4。
 - Phase 4 必须长期 report-only 和真实低风险运行稳定后才能开始 Phase 5。
 - 每个 Phase 建立独立 Heavy Task，包含 SPEC、AC、风险、自动测试、真实 Dogfood、独立 Verifier 和正式 Delivery。
 - 后续能力不得削弱已有 Task State、Ledger、Guard、Evidence、Heavy 门禁和恢复要求。

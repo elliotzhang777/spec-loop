@@ -33,7 +33,7 @@ interface ToolchainAdapter {
 
 命令使用 argv 数组、固定 cwd、环境 allowlist、timeout，记录 stdout/stderr、exit code、duration 和 Git HEAD。
 
-### Spring Boot
+### Spring Boot 工具链
 
 发现 Maven/Gradle wrapper、Java version 和 module；运行 test/verify/check；后续解析 Surefire、JaCoCo、Checkstyle 和 SpotBugs。
 

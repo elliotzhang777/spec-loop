@@ -1,6 +1,6 @@
 # TASK-003：Phase 3 Project Loop（Heavy 主工单）
 
-- 状态：已完成
+- 状态：进行中
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-12
@@ -31,10 +31,10 @@
 
 - [x] AC-1：项目和任务可严格注册、查询、恢复和重建。
 - [x] AC-2：Proposal 未批准不能成为正式 Task。
-- [x] AC-3：Codex 在 worktree 完成真实任务，Evidence 绑定 HEAD。
+- [ ] AC-3：Codex 在受控 worktree 完成真实任务，Harness Evidence 经状态机、哈希、任务与 HEAD 一致性校验。
 - [x] AC-4：Delivery 生成 Project 回写摘要。
 - [x] AC-5：两个真实项目 Dogfood delivered。
-- [x] AC-6：Phase 1–3 全量测试和独立 Verifier PASS。
+- [ ] AC-6：Phase 1–3 全量测试、对抗/故障恢复测试和独立 Verifier PASS。
 - [x] AC-7：每个目标工程具备可补建、可校验且不覆盖已有内容的分层规格库。
 
 ## 验证计划
@@ -49,16 +49,18 @@
 
 - Agent 越权、Registry 状态分叉、worktree 污染、外部 CLI 差异、错误 Evidence revision。
 
-## 交付记录
+## 当前结论
 
-- 完成日期：2026-07-12
-- 交付物：Project/目标工程规格库/Registry/Triage/Provider/Worktree/Gate/Harness/Writeback、测试和两个 Project Dogfood。
-- 遗留风险：Claude Code/Qoder 未真实 Dogfood；完整 worktree GC 后续补强。
+- Project Loop 核心原型：已完成。
+- 安全加固与故障恢复：进行中。
+- 完整 Harness Evidence 闭环：进行中。
+- Phase 3 正式验收：待完成。
+- 原 2026-07-12 Delivery 结论撤回，待 TASK-013 验证后重新签署。
 
 ## 关闭检查
 
-- [x] 子工单全部完成
-- [x] 全部 AC 有当前 Evidence
+- [ ] 子工单全部完成
+- [ ] 全部 AC 有当前 Evidence
 - [x] 两个 Dogfood delivered
-- [x] 独立 Verifier 和人工检查通过
-- [x] 上游规格和看板已同步
+- [ ] 独立 Verifier 和人工检查通过
+- [ ] 上游规格和看板已同步

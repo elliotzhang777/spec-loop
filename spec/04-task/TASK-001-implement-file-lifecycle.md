@@ -66,7 +66,7 @@
 
 | 日期 | 验证人 | 环境 | 结果 | 证据/输出 |
 |---|---|---|---|---|
-| 2026-07-12 | node:test + 独立检查 | 本地 Node.js | 通过 | `artifacts/final-phase1-2-test.txt` |
+| 2026-07-12 | node:test + 独立检查 | 本地 Node.js | 通过 | [`artifacts/final-phase1-2-test.txt`](../../artifacts/final-phase1-2-test.txt) |
 | 2026-07-12 | spec-loop | Standard Dogfood | delivered | `dogfood/standard-final/DELIVERY.md` |
 | 2026-07-12 | 独立 Verifier + 人工检查 | Heavy Dogfood | delivered | `dogfood/heavy-final/DELIVERY.md` |
 
@@ -83,4 +83,3 @@
 | 日期 | 变更 | 原因 |
 |---|---|---|
 | 2026-07-12 | 完成 Phase 1 并补录工单 | 规格库模板化 |
-
