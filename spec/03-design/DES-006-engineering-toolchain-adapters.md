@@ -3,7 +3,7 @@
 - 状态：部分完成（T1 已交付，T2/T3 为草稿）
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-07-15
 - 所属特性：[FEAT-006](../02-feature/FEAT-006-engineering-toolchains.md)
 
 ## 设计目标
@@ -21,7 +21,7 @@
 ```typescript
 interface ToolchainAdapter {
   detect(repository: string): Promise<DetectionResult>;
-  planGates(task: TaskContract): Promise<GateDefinition[]>;
+  planGates(task: TaskContract, impact: ChangeImpact, stage: VerificationStage): Promise<GatePlan>;
   runGate(gate: GateDefinition, context: GateContext): Promise<GateResult>;
   collectEvidence(result: GateResult): Promise<EvidenceDraft[]>;
 }
@@ -32,6 +32,29 @@ interface ToolchainAdapter {
 ### T1 通用命令
 
 命令使用 argv 数组、固定 cwd、环境 allowlist、timeout，记录 stdout/stderr、exit code、duration 和 Git HEAD。
+
+### 影响分析与 Gate Plan
+
+T2/T3 `planGates` 读取 base/HEAD diff、touched files、模块依赖、Task AC、风险等级、测试配置变更和验证时机，输出：
+
+- `stage`：feedback、candidate、delivery 或 phase；
+- `impact`：resource、local-code、cross-module、core/security/release；
+- `selected_gates` 与每项覆盖的 AC/风险；
+- `skipped_gates` 与跳过理由；
+- `escalation_triggers`；
+- 预估时间和资源成本。
+
+默认矩阵：
+
+| 改动类型 | Feedback 默认 Gate | Delivery 默认 Gate |
+|---|---|---|
+| 文档 | 格式、链接、Schema | Task 规格一致性检查 |
+| 图标/文案/静态资源/局部样式 | 资源检查、目标 build、定向 smoke/视觉确认 | Task 完整 Gate 一次 |
+| 局部业务代码 | 受影响单测、相邻集成测试、目标 build | Task 完整 Gate |
+| 公共契约/数据迁移/并发/安全/依赖/构建系统 | 相关子系统或全量回归 | 完整 Gate + 独立 Verifier |
+| 阶段验收/外部发布 | 不适用 | 阶段计划规定的全量、对抗和 Dogfood |
+
+选择范围必须可解释、可审计。定向 Gate 失败、依赖关系不明确或 touched files 超出声明范围时自动升级；不得静默缩小验证范围。
 
 ### Spring Boot 工具链
 
@@ -58,6 +81,8 @@ interface ToolchainAdapter {
 |---|---|---|---|
 | 本地环境差异 | Gate 不稳定 | detect + doctor + 固定配置 | 回退 T0 Evidence |
 | Xcode 资源冲突 | 测试污染 | 独立 DerivedData + simulator lease | 串行执行 |
+| 验证范围过大 | 反馈周期失控、重复消耗 | 分离 feedback 与 delivery，选择最小充分 Gate | 回退人工 Gate Plan |
+| 验证范围过小 | 回归漏检 | 依赖分析、升级条件、最终完整 Gate | 升级到子系统或全量回归 |
 
 ## 验证策略
 
@@ -65,15 +90,16 @@ interface ToolchainAdapter {
 
 ## 工单拆分
 
-实现顺序为 Phase 3 T1 runner、Phase 4 Spring/Xcode/小程序 T2 与必要 T3、Phase 5 Adapter 资产治理。各阶段未授权前不创建工单。
+实现顺序为 Phase 3 T1 runner、TASK-016 验证范围规范、Phase 4 Spring/Xcode/小程序 T2 与必要 T3、Phase 5 Adapter 资产治理。各阶段未授权前不创建实现工单。
 
 ## 实际实现
 
 - 已实现：T1 runner 使用固定 cwd、受限环境、timeout，记录退出码、stdout/stderr、artifact hash 与真实 Git HEAD；由 TASK-009 交付并完成真实 Dogfood。
-- 未实现：Spring Boot、Xcode/iOS、微信小程序的 T2/T3 平台预设和原生结果解析。
+- 未实现：Spring Boot、Xcode/iOS、微信小程序的 T2/T3 平台预设、原生结果解析和自动 Gate Planner。
 
 ## 变更记录
 
 | 日期 | 变更 | 原因 | 关联工单 |
 |---|---|---|---|
 | 2026-07-12 | 建立 Toolchain 设计草案 | 规格库重组 | - |
+| 2026-07-15 | 增加影响分析和分级 Gate Plan | 低风险反馈优先快速验证，最终交付统一完整验证 | TASK-016 |

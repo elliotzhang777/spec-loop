@@ -3,7 +3,7 @@
 - 状态：待验证
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-07-15
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 
 ## 设计目标
@@ -61,6 +61,19 @@ Provider ID 为 codex/claude-code/qoder，默认 Codex。统一 Adapter 执行 i
 
 每个执行 Task 独立 branch/worktree，记录 base commit。Gate 使用 argv、固定 cwd、环境 allowlist 和 timeout，Evidence 记录命令、退出码、artifact hash、duration、Round 和真实 HEAD。
 
+### 验证时机与 Harness 边界
+
+Controller 在每次验证前记录 `verification_stage`、touched files、影响模块、任务风险、计划 Gate 和升级理由。Phase 3 由主控人工判断；Phase 4 由 Toolchain Gate Planner 生成建议，Controller 仍对最终范围负责。
+
+- `feedback`：用于用户快速试用。只运行资源校验、目标编译、定向测试或 smoke；不要求完整 `prepare → execute → collect → verify → report`，结果不能直接签署 Delivery。
+- `candidate`：改动已经提交且工作树干净。运行受影响模块与必要集成 Gate，Evidence 必须绑定当前 HEAD。
+- `delivery`：用户反馈批次结束，最终候选稳定。运行 Task 已批准的完整 Gate、独立 Verifier 和必要 Heavy 人工检查。
+- `phase`：仅阶段工单显式触发，运行跨 Task/跨阶段全量回归、对抗测试和真实 Dogfood。
+
+图标、文案、静态资源和局部样式属于低风险资源改动：默认执行资源格式/尺寸检查、目标应用构建、包内资源检查及人工视觉确认。除非同时触及构建配置、签名、公共代码或发布边界，否则不在每次反馈后运行全量业务测试。用户确认后，正式 Delivery Gate 仍按 Task 计划统一执行一次。
+
+Harness Report 必须注明实际运行的验证层级和 Gate 集合。未运行的 Gate 不能伪造为 PASS；缩小范围不降低 AC，扩大范围必须有明确触发原因。
+
 ### 恢复
 
 Harness 每步有 prepared/running/succeeded/failed/unknown；崩溃后 reconcile Git、worktree 和 artifact，无法确定时 needs_user。
@@ -92,7 +105,7 @@ Harness 每步有 prepared/running/succeeded/failed/unknown；崩溃后 reconcil
 
 ## 工单拆分
 
-Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试。正式结论等待独立 Heavy 验收。
+Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试；TASK-016 定义分级验证范围。正式结论等待独立 Heavy 验收。
 
 ## 实际实现
 
@@ -105,3 +118,4 @@ Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Re
 |---|---|---|---|
 | 2026-07-12 | 融合 Project Loop 与 Provider 执行设计 | 最终 Roadmap | - |
 | 2026-07-12 | 将 Loop 核心角色和阶段演进迁移到总体架构 | 避免专项设计承担系统级权威定义 | TASK-015 |
+| 2026-07-15 | 定义 feedback/candidate/delivery/phase 四级验证 | 避免低风险反馈重复触发完整 Harness | TASK-016 |
