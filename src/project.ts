@@ -25,9 +25,22 @@ function resolveSpecRoot(repository:string,specRoot:string):{repo:string;specRoo
   return {repo,specRoot:resolved};
 }
 
+async function assertRealDirectoryChain(root:string,target:string,label:string):Promise<void>{
+  const relative=path.relative(root,target);
+  if(relative.startsWith(`..${path.sep}`)||relative==='..'||path.isAbsolute(relative))throw new Error(`${label} escapes target repository`);
+  let current=path.resolve(root);
+  const parts=relative?relative.split(path.sep):[];
+  for(const part of ['.',...parts]){
+    if(part!=='.')current=path.join(current,part);
+    let info;
+    try{info=await lstat(current)}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error}
+    if(info.isSymbolicLink()||!info.isDirectory())throw new Error(`${label} must use real directories: ${path.relative(root,current)||'.'}`);
+  }
+}
+
 export async function initTargetSpecLibrary(root:string):Promise<{created:string[];preserved:string[]}>{
   const project=await readProject(root),resolved=resolveSpecRoot(project.repository,project.spec_root),template=await loadTargetSpecTemplate(),created:string[]=[],preserved:string[]=[],writes=[];
-  if(await entryExists(resolved.specRoot)){const info=await lstat(resolved.specRoot);if(info.isSymbolicLink()||!info.isDirectory())throw new Error('spec_root must be a real directory')}
+  await assertRealDirectoryChain(resolved.repo,resolved.specRoot,'spec_root');
   const dirs=[...new Set(template.assets.map(item=>path.dirname(path.join(resolved.specRoot,item.path))))];
   for(const dir of dirs){if(await entryExists(dir)){const info=await lstat(dir);if(info.isSymbolicLink()||!info.isDirectory())throw new Error(`target spec directory must be a real directory: ${path.relative(resolved.repo,dir)}`)}}
   for(const item of template.assets){const file=path.join(resolved.specRoot,item.path);if(await entryExists(file))preserved.push(file);else{created.push(file);writes.push({file,content:item.content})}}
@@ -41,7 +54,7 @@ export async function checkTargetSpecLibrary(root:string):Promise<{ok:boolean;er
   let repo:string,specRoot:string;
   try{({repo,specRoot}=resolveSpecRoot(project.repository,project.spec_root))}catch(error){errors.push((error as Error).message);return {ok:false,errors}}
   const template=await loadTargetSpecTemplate();
-  if(await entryExists(specRoot)){const info=await lstat(specRoot);if(info.isSymbolicLink()||!info.isDirectory()){errors.push('spec_root may not be a symbolic link and must be a directory');return {ok:false,errors}}}
+  try{await assertRealDirectoryChain(repo,specRoot,'spec_root')}catch(error){errors.push((error as Error).message);return {ok:false,errors}}
   const invalidAssetDirs=new Set<string>();
   const assetDirs=new Set(template.assets.map(item=>path.dirname(path.join(specRoot,item.path))));
   for(const dir of assetDirs){

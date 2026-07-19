@@ -78,10 +78,13 @@ export async function loadTargetSpecTemplate(assetRoot=defaultTargetSpecAssetRoo
   return {schema_version:1,template_version:parsed.template_version,assets};
 }
 
-const placeholderToken=/^(?:tbd|todo|unknown|placeholder|fill me|lorem ipsum|待填写|待补充|未知|<[^>\r\n]+>|\{\{[^}\r\n]+\}\})[。.;；]?$/i;
+const placeholderToken=/^(?:tbd|todo|unknown|placeholder|fill me|lorem ipsum|待填写|待补充|未知)(?:\s*[([（].*?[\])）])?[。.;；]?$/i;
+const placeholderMarker=/<[^>\r\n]+>|\{\{[^}\r\n]+\}\}/;
+const placeholderMarkerOnly=/^(?:<[^>\r\n]+>|\{\{[^}\r\n]+\}\})[。.;；]?$/;
 
-function isPlaceholderToken(value:string):boolean{
-  return placeholderToken.test(value.trim().replace(/^`|`$/g,''));
+function isPlaceholderToken(value:string,allowEmbeddedMarker=false):boolean{
+  const normalized=value.trim().replace(/^`|`$/g,'');
+  return placeholderToken.test(normalized)||placeholderMarkerOnly.test(normalized)||(allowEmbeddedMarker&&placeholderMarker.test(normalized));
 }
 
 /** Detect unresolved values, while allowing prose and code that discuss placeholder terms. */
@@ -94,13 +97,13 @@ export function containsRealPlaceholder(markdown:string):boolean{
     if(trimmed.startsWith('|')){
       const row=trimmed.endsWith('|')?trimmed.slice(1,-1):trimmed.slice(1);
       const cells=row.split('|');
-      if(cells.some(isPlaceholderToken))return true;
+      if(cells.some(cell=>isPlaceholderToken(cell,true)))return true;
       continue;
     }
     let value=trimmed.replace(/^#{1,6}\s+/,'').replace(/^(?:[-*+] |\d+[.)]\s+)/,'').replace(/^\[[ xX]\]\s+/,'');
     const separator=Math.max(value.lastIndexOf('：'),value.lastIndexOf(':'));
     if(separator>=0)value=value.slice(separator+1).trim();
-    if(isPlaceholderToken(value))return true;
+    if(isPlaceholderToken(value,separator>=0))return true;
   }
   return false;
 }

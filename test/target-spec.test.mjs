@@ -86,6 +86,8 @@ test('project init and spec-init share assets, fill gaps and never overwrite ent
 test('placeholder detection rejects unresolved values but permits explanatory prose and code',()=>{
   assert.equal(containsRealPlaceholder('# Result\n\nTODO\n'),true);
   assert.equal(containsRealPlaceholder('# Result\n\n- Owner: <owner>\n'),true);
+  assert.equal(containsRealPlaceholder('# Result\n\n- Endpoint: https://<host>/v1\n'),true);
+  assert.equal(containsRealPlaceholder('# Result\n\n- Owner: TODO (assign before delivery)\n'),true);
   assert.equal(containsRealPlaceholder('| Item | Value\n|---|---\n| owner | 待填写\n'),true);
   assert.equal(containsRealPlaceholder('# Rules\n\nThis checker rejects TODO, TBD, unknown and placeholder values.\n\n```text\nprojects/<project>/\nTODO\n```\n'),false);
 });
@@ -139,4 +141,21 @@ test('spec-init and spec-check reject symlinked specification layers',async()=>{
   result=cli(['project','spec-init',f.root,'--json']);
   assert.notEqual(result.code,0);
   assert.match(result.stderr,/target spec directory must be a real directory/);
+});
+
+test('spec-init and spec-check reject symlinked ancestors of a nested spec_root',async()=>{
+  const f=await projectFixture('ANCESTOR'),outside=path.join(f.root,'outside'),link=path.join(f.repo,'linked');
+  await rm(path.join(f.repo,'spec'),{recursive:true});
+  await mkdir(outside);
+  await symlink(outside,link);
+  const projectFile=path.join(f.root,'.spec-loop','PROJECT.md');
+  const project=await readFile(projectFile,'utf8');
+  await writeFile(projectFile,project.replace('spec_root: spec','spec_root: linked/spec'));
+  let result=cli(['project','spec-check',f.root,'--json']);
+  assert.notEqual(result.code,0);
+  assert.match(result.stdout,/spec_root must use real directories: linked/);
+  result=cli(['project','spec-init',f.root,'--json']);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/spec_root must use real directories: linked/);
+  await assert.rejects(lstat(path.join(outside,'spec')),/ENOENT/);
 });
