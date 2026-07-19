@@ -5,6 +5,7 @@
 - 负责人：Codex
 - 创建日期：2026-07-12
 - 最后更新：2026-07-12
+- 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 任务等级：Light
 

@@ -109,7 +109,7 @@ Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Re
 
 ## 实际实现
 
-- 最终实现：`src/project.ts`、`src/execution.ts` 及 CLI Project/Task/Triage/Provider/Workspace/Gate/Harness/Writeback 命令。
+- 最终实现：`src/project.ts`、`src/target-spec.ts`、`assets/target-spec/`、`src/execution.ts` 及 CLI Project/Task/Triage/Provider/Workspace/Gate/Harness/Writeback 命令；目标规格初始化、补建和检查共享版本清单。
 - 与设计差异：Phase 3 未引入持久 Registry 缓存，而是每次扫描重建；符合不形成第二状态源的要求。
 
 ## 变更记录

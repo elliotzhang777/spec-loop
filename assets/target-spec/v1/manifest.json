@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "template_version": "1.0.0",
+  "files": [
+    { "path": "README.md", "role": "guide", "kind": "document", "check_placeholders": true },
+    { "path": "roadmap.md", "role": "roadmap", "kind": "document", "check_placeholders": true },
+    { "path": "architecture.md", "role": "architecture", "kind": "document", "check_placeholders": true },
+    { "path": "pending-board.md", "role": "pending-board", "kind": "document", "check_placeholders": true },
+    { "path": "verification-board.md", "role": "verification-board", "kind": "document", "check_placeholders": true },
+    { "path": "01-product/_template.md", "role": "product-template", "kind": "template", "check_placeholders": false },
+    { "path": "02-feature/_template.md", "role": "feature-template", "kind": "template", "check_placeholders": false },
+    { "path": "03-design/_template.md", "role": "design-template", "kind": "template", "check_placeholders": false },
+    { "path": "04-task/_template.md", "role": "task-template", "kind": "template", "check_placeholders": false }
+  ]
+}

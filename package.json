@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": ["dist", "assets/target-spec"],
   "bin": { "spec-loop": "dist/cli.js" },
   "scripts": {
     "build": "tsc",

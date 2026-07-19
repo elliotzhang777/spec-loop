@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { atomicWriteAcrossRoots, atomicWriteMany, assertSubstantive, exists, readMarkdown, recoverCrossRootTransactions, sha256, stringifyMarkdown } from './files.js';
 import { readState } from './task.js';
 import { initialFiles } from './templates.js';
+import { containsRealPlaceholder, loadTargetSpecTemplate } from './target-spec.js';
 
 const risk = z.enum(['light', 'standard', 'heavy']);
 export const projectSchema = z.object({ schema_version:z.literal(1), project_id:z.string().regex(/^PROJ-[A-Z0-9-]+$/), name:z.string().min(2), repository:z.string().min(1), spec_root:z.string().min(1).default('spec'), default_branch:z.string().min(1), tasks_root:z.string().min(1), output_root:z.string().min(1), risk_level:risk, external_issue:z.string().nullable(), created_at:z.iso.datetime(), updated_at:z.iso.datetime() }).strict();
@@ -14,36 +15,92 @@ const proposalSchema = z.object({ schema_version:z.literal(1), proposal_id:z.str
 const approvalSchema = z.object({ schema_version:z.literal(1), approval_id:z.string().regex(/^APR-[1-9]\d*$/), proposal_id:z.string(), proposal_hash:z.string().length(64), approved_by:z.string().min(2), approved_at:z.iso.datetime(), expires_at:z.iso.datetime(), approved_scope:z.array(z.enum(['create_task','execute_in_worktree'])).min(1), risk_level:risk }).strict();
 
 const control=(root:string)=>path.join(root,'.spec-loop');
-const targetSpecFiles=(name:string)=>[
-  {file:'README.md',content:`# ${name} 规格库\n\n本目录是目标工程自身的产品、特性、设计、任务与验证事实源。Spec-Loop 的运行状态保存在项目控制目录，不能替代这里的业务规格。\n\n## 追踪链\n\n\`roadmap → product → feature → design → task → evidence/delivery\`\n`},
-  {file:'roadmap.md',content:`# ${name} Roadmap\n\n## 当前阶段\n\n- 规格库已初始化，尚未批准产品实施阶段。\n\n## 变更规则\n\n所有工程任务必须关联本规格库中的 Product、Feature、Design 或 Task，并在交付后回写实际结果。\n`},
-  {file:'pending-board.md',content:'# 待完成任务看板\n\n当前无已批准工单。看板是可重建视图，不是状态事实源。\n'},
-  {file:'verification-board.md',content:'# 验证看板\n\n当前无等待独立验证的工单。\n'},
-  {file:'01-product/_template.md',content:'# PROD-NNN：产品规格标题\n\n- 状态：草稿\n- 负责人：待定\n\n## 背景与问题\n\n待填写。\n\n## 产品目标\n\n待填写。\n\n## 范围\n\n待填写。\n\n## 实际结果\n\n待交付后回写。\n'},
-  {file:'02-feature/_template.md',content:'# FEAT-NNN：特性标题\n\n- 状态：草稿\n- 所属产品：待填写\n\n## 用户价值\n\n待填写。\n\n## 行为与规则\n\n待填写。\n\n## 验收标准\n\n- AC-1：待填写。\n\n## 实际交付\n\n待交付后回写。\n'},
-  {file:'03-design/_template.md',content:'# DES-NNN：设计标题\n\n- 状态：草稿\n- 所属特性：待填写\n\n## 设计目标\n\n待填写。\n\n## 方案与取舍\n\n待填写。\n\n## 风险与验证\n\n待填写。\n\n## 实际实现\n\n待交付后回写。\n'},
-  {file:'04-task/_template.md',content:'# TASK-NNN：工程工单标题\n\n- 状态：草稿\n- 所属设计：待填写\n\n## 目标\n\n待填写。\n\n## 验收标准\n\n- [ ] AC-1：待填写。\n\n## 交付记录\n\n待交付后回写 Evidence、Round 和 revision。\n'},
-];
+async function entryExists(file:string):Promise<boolean>{
+  try{await lstat(file);return true}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error}
+}
+
+function resolveSpecRoot(repository:string,specRoot:string):{repo:string;specRoot:string}{
+  const repo=path.resolve(repository),resolved=path.resolve(repo,specRoot);
+  if(!resolved.startsWith(repo+path.sep))throw new Error('spec_root escapes target repository');
+  return {repo,specRoot:resolved};
+}
 
 export async function initTargetSpecLibrary(root:string):Promise<{created:string[];preserved:string[]}>{
-  const project=await readProject(root);const specRoot=path.resolve(project.repository,project.spec_root);const created:string[]=[];const preserved:string[]=[];const writes=[];
-  for(const item of targetSpecFiles(project.name)){const file=path.join(specRoot,item.file);if(await exists(file))preserved.push(file);else{created.push(file);writes.push({file,content:item.content})}}
-  for(const dir of ['01-product','02-feature','03-design','04-task'])await mkdir(path.join(specRoot,dir),{recursive:true});
-  if(writes.length)await atomicWriteMany(project.repository,writes);
+  const project=await readProject(root),resolved=resolveSpecRoot(project.repository,project.spec_root),template=await loadTargetSpecTemplate(),created:string[]=[],preserved:string[]=[],writes=[];
+  if(await entryExists(resolved.specRoot)){const info=await lstat(resolved.specRoot);if(info.isSymbolicLink()||!info.isDirectory())throw new Error('spec_root must be a real directory')}
+  const dirs=[...new Set(template.assets.map(item=>path.dirname(path.join(resolved.specRoot,item.path))))];
+  for(const dir of dirs){if(await entryExists(dir)){const info=await lstat(dir);if(info.isSymbolicLink()||!info.isDirectory())throw new Error(`target spec directory must be a real directory: ${path.relative(resolved.repo,dir)}`)}}
+  for(const item of template.assets){const file=path.join(resolved.specRoot,item.path);if(await entryExists(file))preserved.push(file);else{created.push(file);writes.push({file,content:item.content})}}
+  for(const dir of dirs)await mkdir(dir,{recursive:true});
+  if(writes.length)await atomicWriteMany(resolved.repo,writes);
   return {created,preserved};
 }
 
 export async function checkTargetSpecLibrary(root:string):Promise<{ok:boolean;errors:string[]} >{
-  const project=await readProject(root),repo=path.resolve(project.repository),specRoot=path.resolve(repo,project.spec_root),errors:string[]=[];
-  if(!specRoot.startsWith(repo+path.sep)){errors.push('spec_root escapes target repository');return {ok:false,errors}}
-  if(await exists(specRoot)){const info=await lstat(specRoot);if(info.isSymbolicLink())errors.push('spec_root may not be a symbolic link')}
-  const placeholder=/(?:\b(?:tbd|todo|unknown|placeholder|fill me)\b|待填写|待补充|<[^>]+>|\{\{[^}]+\}\})/i;
-  for(const item of targetSpecFiles(project.name)){const file=path.join(specRoot,item.file);if(!(await exists(file))){errors.push(`missing target spec file: ${path.relative(repo,file)}`);continue}const info=await lstat(file);if(info.isSymbolicLink()){errors.push(`target spec file may not be a symbolic link: ${path.relative(repo,file)}`);continue}const content=await readFile(file,'utf8');if(content.trim().length<20)errors.push(`empty target spec file: ${path.relative(repo,file)}`);if(!item.file.endsWith('_template.md')&&placeholder.test(content))errors.push(`placeholder content in target spec file: ${path.relative(repo,file)}`)}
-  const layers=[['01-product',/^PROD-[0-9]{3}-.+\.md$/, /^# (PROD-[0-9]{3})[：:]/],['02-feature',/^FEAT-[0-9]{3}-.+\.md$/, /^# (FEAT-[0-9]{3})[：:]/],['03-design',/^DES-[0-9]{3}-.+\.md$/, /^# (DES-[0-9]{3})[：:]/],['04-task',/^TASK-[A-Z0-9][A-Z0-9-]*\.md$/, /^# (TASK-[A-Z0-9][A-Z0-9-]*)[：:]/]] as const;
+  const project=await readProject(root),errors:string[]=[];
+  let repo:string,specRoot:string;
+  try{({repo,specRoot}=resolveSpecRoot(project.repository,project.spec_root))}catch(error){errors.push((error as Error).message);return {ok:false,errors}}
+  const template=await loadTargetSpecTemplate();
+  if(await entryExists(specRoot)){const info=await lstat(specRoot);if(info.isSymbolicLink()||!info.isDirectory()){errors.push('spec_root may not be a symbolic link and must be a directory');return {ok:false,errors}}}
+  const invalidAssetDirs=new Set<string>();
+  const assetDirs=new Set(template.assets.map(item=>path.dirname(path.join(specRoot,item.path))));
+  for(const dir of assetDirs){
+    if(dir===specRoot||!(await entryExists(dir)))continue;
+    const info=await lstat(dir);
+    if(info.isSymbolicLink()||!info.isDirectory()){errors.push(`target spec layer must be a real directory: ${path.relative(repo,dir)}`);invalidAssetDirs.add(dir)}
+  }
+  for(const item of template.assets){
+    const file=path.join(specRoot,item.path);
+    if(invalidAssetDirs.has(path.dirname(file)))continue;
+    if(!(await entryExists(file))){errors.push(`missing target spec file: ${path.relative(repo,file)}`);continue}
+    const info=await lstat(file);
+    if(info.isSymbolicLink()||!info.isFile()){errors.push(`target spec file must be a regular file and may not be a symbolic link: ${path.relative(repo,file)}`);continue}
+    const content=await readFile(file,'utf8');
+    if(content.trim().length<20)errors.push(`empty target spec file: ${path.relative(repo,file)}`);
+    if(item.check_placeholders&&containsRealPlaceholder(content))errors.push(`placeholder content in target spec file: ${path.relative(repo,file)}`);
+  }
+  const layers=[
+    {dir:'01-product',id:/^PROD-[0-9]{3}$/,heading:/^# (PROD-[^：:\s]+)[：:]/m,trace:/^- Roadmap：.*roadmap\.md/m},
+    {dir:'02-feature',id:/^FEAT-[0-9]{3}$/,heading:/^# (FEAT-[^：:\s]+)[：:]/m,trace:/^- 所属产品：.*\b(PROD-[0-9]{3})\b/m},
+    {dir:'03-design',id:/^DES-[0-9]{3}$/,heading:/^# (DES-[^：:\s]+)[：:]/m,trace:/^- 所属特性：.*\b(FEAT-[0-9]{3})\b/m},
+    {dir:'04-task',id:/^TASK-(?:[0-9]{3}|[A-Z0-9]+(?:-[A-Z0-9]+)*)$/,heading:/^# (TASK-[^：:\s]+)[：:]/m,trace:/^- 所属设计：.*\b(DES-[0-9]{3})\b/m},
+  ];
   const statuses=new Set(['草稿','已批准','进行中','待验证','已完成','已取消']);
   const documents:Array<{id:string;dir:string;file:string;content:string}>=[];
-  for(const [dir,nameRe,headingRe] of layers){const layer=path.join(specRoot,dir);if(!(await exists(layer)))continue;for(const name of await readdir(layer)){if(name==='_template.md'||!name.endsWith('.md'))continue;const file=path.join(layer,name),info=await lstat(file);if(info.isSymbolicLink()){errors.push(`target spec may not be a symbolic link: ${path.relative(repo,file)}`);continue}const content=await readFile(file,'utf8'),heading=content.match(headingRe);if(!nameRe.test(name))errors.push(`invalid target spec filename: ${path.relative(repo,file)}`);if(!heading||!name.startsWith(heading[1]))errors.push(`target spec ID differs from filename: ${path.relative(repo,file)}`);else documents.push({id:heading[1],dir,file,content});const status=content.match(/^- 状态：(.+)$/m)?.[1];if(!status||!statuses.has(status))errors.push(`invalid or missing target spec status: ${path.relative(repo,file)}`);if(placeholder.test(content))errors.push(`placeholder content in target spec: ${path.relative(repo,file)}`)}}
-  const ids=new Set(documents.map(x=>x.id));for(const doc of documents){let upstream:RegExp|null=null;if(doc.dir==='02-feature')upstream=/\bPROD-[0-9]{3}\b/;else if(doc.dir==='03-design')upstream=/\bFEAT-[0-9]{3}\b/;else if(doc.dir==='04-task'&&!/^- Proposal：PROP-[1-9]\d*$/m.test(doc.content))upstream=/\bDES-[0-9]{3}\b/;if(upstream){const ref=doc.content.match(upstream)?.[0];if(!ref)errors.push(`missing upstream trace in target spec: ${path.relative(repo,doc.file)}`);else if(!ids.has(ref))errors.push(`broken upstream trace ${ref} in target spec: ${path.relative(repo,doc.file)}`)}if(doc.dir==='04-task'&&/^- Proposal：/m.test(doc.content)&&!/^\- Spec-Loop Task：.+$/m.test(doc.content))errors.push(`proposal task missing Spec-Loop Task trace: ${path.relative(repo,doc.file)}`)}
+  for(const config of layers){
+    const layer=path.join(specRoot,config.dir);
+    if(!(await entryExists(layer)))continue;
+    if(invalidAssetDirs.has(layer))continue;
+    const layerInfo=await lstat(layer);
+    if(layerInfo.isSymbolicLink()||!layerInfo.isDirectory()){errors.push(`target spec layer must be a real directory: ${path.relative(repo,layer)}`);continue}
+    for(const name of await readdir(layer)){
+      if(name==='_template.md'||!name.endsWith('.md'))continue;
+      const file=path.join(layer,name),info=await lstat(file);
+      if(info.isSymbolicLink()||!info.isFile()){errors.push(`target spec must be a regular file and may not be a symbolic link: ${path.relative(repo,file)}`);continue}
+      const content=await readFile(file,'utf8'),heading=content.match(config.heading),id=heading?.[1];
+      if(!id||!config.id.test(id))errors.push(`invalid or missing target spec ID: ${path.relative(repo,file)}`);
+      const stem=name.slice(0,-3),suffix=id&&stem.startsWith(`${id}-`)?stem.slice(id.length+1):null;
+      const validFilename=Boolean(id&&(stem===id||(suffix!==null&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suffix))));
+      if(!validFilename)errors.push(`invalid target spec filename or ID mismatch: ${path.relative(repo,file)}`);
+      if(id&&config.id.test(id)&&validFilename)documents.push({id,dir:config.dir,file,content});
+      const status=content.match(/^- 状态：(.+)$/m)?.[1]?.trim();
+      if(!status||!statuses.has(status))errors.push(`invalid or missing target spec status: ${path.relative(repo,file)}`);
+      if(containsRealPlaceholder(content))errors.push(`placeholder content in target spec: ${path.relative(repo,file)}`);
+    }
+  }
+  const ids=new Set(documents.map(x=>x.id));
+  for(const doc of documents){
+    const config=layers.find(x=>x.dir===doc.dir)!;
+    const proposalTask=doc.dir==='04-task'&&/^- Proposal：PROP-[1-9]\d*$/m.test(doc.content);
+    if(doc.dir==='01-product'){
+      if(!config.trace.test(doc.content))errors.push(`missing upstream trace in target spec: ${path.relative(repo,doc.file)}`);
+    }else if(!proposalTask){
+      const ref=doc.content.match(config.trace)?.[1];
+      if(!ref)errors.push(`missing upstream trace in target spec: ${path.relative(repo,doc.file)}`);
+      else if(!ids.has(ref))errors.push(`broken upstream trace ${ref} in target spec: ${path.relative(repo,doc.file)}`);
+    }
+    if(proposalTask&&!/^- Spec-Loop Task：\S.+$/m.test(doc.content))errors.push(`proposal task missing Spec-Loop Task trace: ${path.relative(repo,doc.file)}`);
+  }
   return {ok:errors.length===0,errors};
 }
 
