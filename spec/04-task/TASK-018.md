@@ -1,6 +1,6 @@
 # TASK-018：治理工程目录与历史证据归档
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-07-19
@@ -33,13 +33,18 @@
 
 ## 验收标准
 
-- [ ] AC-1：根目录的版本化内容只保留工程入口配置、源码、测试、运行时资产和规格库。
-- [ ] AC-2：历史 artifacts 与 dogfood 按 Phase 归档到 spec/05-delivery，原始内容保持不变。
-- [ ] AC-3：源码与测试不做无收益的模块拆分，CLI、打包和运行行为保持兼容。
-- [ ] AC-4：所有旧路径引用更新，规格库入口、总体架构和目录治理工单同步说明新布局。
-- [ ] AC-5：本地控制、事务、依赖和编译产物边界明确，空的历史目录被清理。
-- [ ] AC-6：全量测试、spec-check、diff-check 和 npm pack dry-run 通过。
+- [x] AC-1：根目录的版本化内容只保留工程入口配置、源码、测试、运行时资产和规格库。
+- [x] AC-2：历史 artifacts 与 dogfood 按 Phase 归档到 spec/05-delivery，原始内容保持不变。
+- [x] AC-3：源码与测试不做无收益的模块拆分，CLI、打包和运行行为保持兼容。
+- [x] AC-4：所有旧路径引用更新，规格库入口、总体架构和目录治理工单同步说明新布局。
+- [x] AC-5：本地控制、事务、依赖和编译产物边界明确，空的历史目录被清理。
+- [x] AC-6：全量测试、spec-check、diff-check 和 npm pack dry-run 通过。
 
 ## 交付记录
 
-任务 Delivery 后回写 Round、Evidence 和 revision。
+- 交付日期：2026-07-19
+- Round：1
+- 候选 revision：`547853eb5f2eae6f200e31087968f3bba04ca35b`
+- Evidence：EV-1（`.spec-loop/output/TASK-018-final-evidence.md`）
+- 结果：Harness Gate PASS，全量测试 42/42 通过，独立 Verifier PASS。
+- 归档结果：148 个历史文件以 100% 内容不变的 rename 迁入 `spec/05-delivery/phase-1-2/` 与 `spec/05-delivery/phase-3-withdrawn/`。
