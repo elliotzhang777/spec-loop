@@ -8,7 +8,7 @@
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 - 任务等级：Heavy
-- 依赖工单：TASK-003、TASK-009～012
+- 依赖工单：TASK-003、TASK-009～012、TASK-017
 
 ## 目标
 

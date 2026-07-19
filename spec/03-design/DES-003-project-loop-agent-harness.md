@@ -105,7 +105,7 @@ Harness 每步有 prepared/running/succeeded/failed/unknown；崩溃后 reconcil
 
 ## 工单拆分
 
-Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试；TASK-016 定义分级验证范围。正式结论等待独立 Heavy 验收。
+Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试；TASK-016 定义分级验证范围；TASK-017 将目标工程模板从内联字符串统一为版本化资产，并修复自托管检查暴露的契约漂移。正式结论等待独立 Heavy 验收。
 
 ## 实际实现
 
@@ -119,3 +119,4 @@ Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Re
 | 2026-07-12 | 融合 Project Loop 与 Provider 执行设计 | 最终 Roadmap | - |
 | 2026-07-12 | 将 Loop 核心角色和阶段演进迁移到总体架构 | 避免专项设计承担系统级权威定义 | TASK-015 |
 | 2026-07-15 | 定义 feedback/candidate/delivery/phase 四级验证 | 避免低风险反馈重复触发完整 Harness | TASK-016 |
+| 2026-07-19 | 增加版本化目标规格模板资产 | 消除独立模板库与 Project 初始化逻辑的双重事实源 | TASK-017 |
