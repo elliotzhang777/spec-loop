@@ -26,6 +26,32 @@ test('versioned target-spec manifest is complete and every bundled asset loads',
   await assert.rejects(loadTargetSpecTemplate(path.join(defaultTargetSpecAssetRoot,'missing')),/manifest is missing/);
 });
 
+test('Spec-Loop own specification library passes the shared checker',async()=>{
+  const root=await tempRoot('target-spec-self-'),control=path.join(root,'.spec-loop'),now=new Date().toISOString();
+  await mkdir(control,{recursive:true});
+  await writeFile(path.join(control,'PROJECT.md'),`---
+schema_version: 1
+project_id: PROJ-SPEC-LOOP-SELF
+name: Spec-Loop Self Check
+repository: ${process.cwd()}
+spec_root: spec
+default_branch: main
+tasks_root: .spec-loop/tasks
+output_root: .spec-loop/output
+risk_level: heavy
+external_issue: null
+created_at: ${now}
+updated_at: ${now}
+---
+
+# Project
+
+Temporary read-only metadata for the self-hosted specification check.
+`);
+  const result=cli(['project','spec-check',root,'--json']);
+  assert.equal(result.code,0,result.stdout+result.stderr);
+});
+
 test('project init and spec-init share assets, fill gaps and never overwrite entries',async()=>{
   const root=await tempRoot('target-spec-preserve-'),repo=path.join(root,'repo'),custom='# Existing specification guide\n\nThis project-owned guide must remain byte-for-byte unchanged.\n';
   await mkdir(path.join(repo,'spec'),{recursive:true});
