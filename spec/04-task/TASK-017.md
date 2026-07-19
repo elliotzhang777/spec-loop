@@ -1,6 +1,6 @@
 # TASK-017：统一目标规格模板事实源
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-19
@@ -34,15 +34,20 @@
 
 ## 验收标准
 
-- [ ] AC-1：建立包含 README、Roadmap、Architecture、四层模板和两个看板的版本化模板资产，并明确唯一事实源。
-- [ ] AC-2：project init 和 spec-init 从模板资产读取，只补缺且不覆盖目标工程已有内容。
-- [ ] AC-3：project spec-check 要求 architecture 并接受由任务 ID 和 kebab-case 名称组成的文件名，同时继续拒绝非法 ID、状态、符号链接和真实占位内容。
-- [ ] AC-4：Spec-Loop 自身规格库通过修正后的 spec-check，不再因普通术语产生占位符误报。
-- [ ] AC-5：新增自动测试覆盖初始化、补建、不覆盖、模板完整性、文件名与占位符边界。
-- [ ] AC-6：spec-template 仅作为只读输入，工作树内容和 Git 状态不被本任务修改。
-- [ ] AC-7：全量、对抗和故障恢复测试通过，Evidence 绑定最终 HEAD。
-- [ ] AC-8：独立 Verifier 复核模板漂移、兼容性和目标规格治理边界，Heavy 人工结论后才能 Delivery。
+- [x] AC-1：建立包含 README、Roadmap、Architecture、四层模板和两个看板的版本化模板资产，并明确唯一事实源。
+- [x] AC-2：project init 和 spec-init 从模板资产读取，只补缺且不覆盖目标工程已有内容。
+- [x] AC-3：project spec-check 要求 architecture 并接受由任务 ID 和 kebab-case 名称组成的文件名，同时继续拒绝非法 ID、状态、符号链接和真实占位内容。
+- [x] AC-4：Spec-Loop 自身规格库通过修正后的 spec-check，不再因普通术语产生占位符误报。
+- [x] AC-5：新增自动测试覆盖初始化、补建、不覆盖、模板完整性、文件名与占位符边界。
+- [x] AC-6：spec-template 仅作为只读输入，工作树内容和 Git 状态不被本任务修改。
+- [x] AC-7：全量、对抗和故障恢复测试通过，Evidence 绑定最终 HEAD。
+- [x] AC-8：独立 Verifier 复核模板漂移、兼容性和目标规格治理边界，Heavy 人工结论后才能 Delivery。
 
 ## 交付记录
 
-任务 Delivery 后回写 Round、Evidence 和 revision。
+- 完成日期：2026-07-19
+- Round：1
+- Revision：`0a108e509fd12b1e44e68a99eadd0cc23c8c9869`
+- Evidence：`EV-1`，Harness Gate PASS，全量测试 40/40 通过，独立 Verifier PASS，Heavy 人工验收通过。
+- 交付物：`assets/target-spec/v1/`、`src/target-spec.ts`、资源驱动的 Project 规格初始化与检查。
+- 源仓库：`spec-template` 保持任务开始时的 HEAD 和未提交现场，继续独立保留。
