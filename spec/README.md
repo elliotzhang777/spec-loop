@@ -26,7 +26,12 @@ spec/
 │   └── TASK-*.md
 └── 05-delivery/
     ├── 阶段一至二交付报告.md
-    └── 阶段三交付报告（已撤回）.md
+    ├── 阶段三交付报告（已撤回）.md
+    ├── phase-1-2/
+    │   ├── evidence/
+    │   └── dogfood/
+    └── phase-3-withdrawn/
+        └── dogfood/
 ```
 
 ## 工程目录存放规范
@@ -42,10 +47,11 @@ spec-loop/
 ├── tsconfig.json          TypeScript 构建配置
 ├── src/                   产品源码
 ├── test/                  自动化、对抗和恢复测试
-├── artifacts/             测试与审查原始证据
-├── dogfood/               真实闭环运行样例及其 Evidence
+├── assets/                运行时随包资产
 └── spec/                  全部项目规格、设计、开发和交付说明
 ```
+
+以下目录由本地构建或 Spec-Loop 运行产生，已由 Git 忽略，不属于权威工程结构：`dist/`、`node_modules/`、`.spec-loop/`、`.spec-loop-tx/`、`.spec-loop-cross-tx/` 和 `.spec-loop-cross-tx-data/`。
 
 | 内容 | 权威位置 |
 |---|---|
@@ -56,8 +62,9 @@ spec-loop/
 | 阶段交付报告和撤回记录 | `spec/05-delivery/` |
 | 当前执行队列 | `spec/pending-board.md` |
 | 当前验证队列 | `spec/verification-board.md` |
-| 原始测试或审查输出 | `artifacts/`，并由对应 Task 引用 |
-| 真实运行目录和 Evidence | `dogfood/`，并由对应 Task或交付报告引用 |
+| 当前运行时模板资产 | `assets/target-spec/` |
+| Phase 1–2 原始证据和 Dogfood | `spec/05-delivery/phase-1-2/` |
+| 已撤回 Phase 3 原型 Dogfood | `spec/05-delivery/phase-3-withdrawn/` |
 
 根目录 `README.md` 只承担项目入口和使用说明，不作为产品设计、开发计划或阶段交付结论的事实源。新增设计或开发说明时，必须先确定所属 Product、Feature、Design 或 Task，再写入对应目录。
 
@@ -65,6 +72,8 @@ spec-loop/
 
 - [阶段一至二交付报告](05-delivery/阶段一至二交付报告.md)
 - [阶段三交付报告（已撤回）](05-delivery/阶段三交付报告（已撤回）.md)
+- [Phase 1–2 证据与 Dogfood](05-delivery/phase-1-2/README.md)
+- [已撤回 Phase 3 原型现场](05-delivery/phase-3-withdrawn/README.md)
 
 ## 追踪链
 

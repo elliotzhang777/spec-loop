@@ -20,7 +20,24 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 
 当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 3 不包含后台 Scheduling、自动多 Round、自动 push/merge 或 Connector 写入。
 
-## Install and build
+## 工程结构
+
+```text
+spec-loop/
+├── src/                   TypeScript 产品源码
+├── test/                  自动化、对抗和恢复测试
+├── assets/                运行时随包资产
+│   └── target-spec/        目标工程规格模板
+├── spec/                  产品、架构、工单和交付事实源
+├── AGENT.md               协作规则
+├── package.json           Node.js 工程配置
+├── package-lock.json      依赖锁文件
+└── tsconfig.json          TypeScript 构建配置
+```
+
+`dist/`、`node_modules/`、`.spec-loop/` 和 `.spec-loop-*-tx/` 是本地生成或运行目录，不是版本化的工程结构。历史测试输出和 Dogfood 按 Phase 归档在 [`spec/05-delivery/`](spec/05-delivery/)，不再占用根目录。
+
+## 安装与构建
 
 ```bash
 npm install
@@ -28,7 +45,7 @@ npm run build
 node dist/cli.js --help
 ```
 
-## Quick start
+## 快速开始
 
 ```bash
 node dist/cli.js project init projects/demo --id PROJ-DEMO --name Demo --repository /path/to/target-repo
@@ -47,16 +64,3 @@ node dist/cli.js deliver tasks/example
 ```
 
 规格库入口见 [spec/README.md](spec/README.md)，阶段路线见 [spec/roadmap.md](spec/roadmap.md)，系统模块和控制链见 [spec/architecture.md](spec/architecture.md)。
-
-## Current capability
-
-The implemented baseline is:
-
-```text
-Light / Standard / Heavy task governance
-+ A0 protocol-driven execution
-+ T0 externally supplied engineering evidence
-+ D0 local Delivery record
-```
-
-Project Loop 和 Codex 受控单步执行原型已经具备，Phase 3 加固实现等待独立 Heavy 验收；自动工程 Toolchain 平台预设（Spring Boot、Xcode、微信小程序）、受控 Scheduling、自动多 Round和 Portfolio 属于 Phase 4–5，尚未实现。

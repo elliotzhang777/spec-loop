@@ -51,8 +51,8 @@
 | 验收标准 | 验证方法/命令 | 预期结果 |
 |---|---|---|
 | AC-1～5 | `npm test` | E2E、对抗和恢复测试全部通过 |
-| AC-1～5 | `node dist/cli.js check dogfood/standard-final --json` | ok=true |
-| AC-1～5 | `node dist/cli.js check dogfood/heavy-final --json` | ok=true |
+| AC-1～5 | `node dist/cli.js check spec/05-delivery/phase-1-2/dogfood/standard-final --json` | ok=true |
+| AC-1～5 | `node dist/cli.js check spec/05-delivery/phase-1-2/dogfood/heavy-final --json` | ok=true |
 
 ## 交付记录
 
@@ -66,9 +66,9 @@
 
 | 日期 | 验证人 | 环境 | 结果 | 证据/输出 |
 |---|---|---|---|---|
-| 2026-07-12 | node:test + 独立检查 | 本地 Node.js | 通过 | [`artifacts/final-phase1-2-test.txt`](../../artifacts/final-phase1-2-test.txt) |
-| 2026-07-12 | spec-loop | Standard Dogfood | delivered | `dogfood/standard-final/DELIVERY.md` |
-| 2026-07-12 | 独立 Verifier + 人工检查 | Heavy Dogfood | delivered | `dogfood/heavy-final/DELIVERY.md` |
+| 2026-07-12 | node:test + 独立检查 | 本地 Node.js | 通过 | [原始测试输出](../05-delivery/phase-1-2/evidence/final-phase1-2-test.txt) |
+| 2026-07-12 | spec-loop | Standard Dogfood | delivered | [Delivery](../05-delivery/phase-1-2/dogfood/standard-final/DELIVERY.md) |
+| 2026-07-12 | 独立 Verifier + 人工检查 | Heavy Dogfood | delivered | [Delivery](../05-delivery/phase-1-2/dogfood/heavy-final/DELIVERY.md) |
 
 ## 关闭检查
 

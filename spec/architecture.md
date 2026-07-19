@@ -135,6 +135,20 @@ projects/<project>/
 
 `repo/spec/` 保存系统长期为什么这样设计；`.spec-loop/` 保存某次任务具体如何执行。两者可以位于同一个项目容器，但不进入同一个 Git 工作树。
 
+## Spec-Loop 工程物理布局
+
+```text
+spec-loop/
+├── src/            当前产品源码
+├── test/           当前自动化与对抗测试
+├── assets/         运行时必须随 npm 包交付的非代码资产
+├── spec/           产品、架构、工单和交付事实源
+│   └── 05-delivery/ 按 Phase 保存不可改写的历史报告、Evidence 和 Dogfood
+└── 根配置        README、AGENT、npm 与 TypeScript 配置
+```
+
+根目录不再并列展示历史 `artifacts/` 和 `dogfood/`。它们属于已交付或已撤回阶段的只读证据，按 Phase 归档到 `spec/05-delivery/`。`dist/`、`node_modules/`、`.spec-loop/` 和事务目录是可重建或运行时状态，不进入 Git 事实源。
+
 ## 阶段职责演进
 
 | 模块 | Phase 3 | Phase 4 | Phase 5 |
@@ -196,3 +210,4 @@ README
 |---|---|---|---|
 | 2026-07-12 | 建立系统总体架构文档 | 将跨模块职责和阶段演进提升到技术最高层 | TASK-015 |
 | 2026-07-15 | 增加分级验证范围与运行时机 | 避免低风险反馈重复触发完整 Harness 和全量回归 | TASK-016 |
+| 2026-07-19 | 明确工程物理布局与按 Phase 交付归档 | 将当前工程与历史证据分层 | TASK-018 |

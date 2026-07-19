@@ -63,8 +63,8 @@
 
 | 日期 | 验证人 | 环境 | 结果 | 证据/输出 |
 |---|---|---|---|---|
-| 2026-07-12 | node:test | 本地 Node.js | 21/21 通过 | [`artifacts/final-phase1-2-test.txt`](../../artifacts/final-phase1-2-test.txt) |
-| 2026-07-12 | independent-final-test-and-human-review | Heavy Round 2 | delivered | `dogfood/heavy-final/VERIFY.md`、`DELIVERY.md` |
+| 2026-07-12 | node:test | 本地 Node.js | 21/21 通过 | [原始测试输出](../05-delivery/phase-1-2/evidence/final-phase1-2-test.txt) |
+| 2026-07-12 | independent-final-test-and-human-review | Heavy Round 2 | delivered | [Verify](../05-delivery/phase-1-2/dogfood/heavy-final/VERIFY.md)、[Delivery](../05-delivery/phase-1-2/dogfood/heavy-final/DELIVERY.md) |
 | 2026-07-12 | npm audit | 官方 registry | 0 vulnerabilities | [阶段一至二交付报告](../05-delivery/阶段一至二交付报告.md) |
 
 ## 关闭检查

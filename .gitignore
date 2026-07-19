@@ -4,4 +4,5 @@ dist/
 .DS_Store
 .spec-loop-tx/
 .spec-loop/
-dogfood/**/.spec-loop/worktrees/
+.spec-loop-cross-tx/
+.spec-loop-cross-tx-data/
