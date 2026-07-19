@@ -3,4 +3,5 @@ dist/
 *.tgz
 .DS_Store
 .spec-loop-tx/
+.spec-loop/
 dogfood/**/.spec-loop/worktrees/
