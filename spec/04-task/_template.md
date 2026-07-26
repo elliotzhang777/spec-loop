@@ -38,6 +38,27 @@
 |---|---|---|
 | AC-1 | 待填写 | 待填写 |
 
+## 验证范围
+
+- 普通工单：`coverage: targeted`，只验证自身 AC、改动模块和直接依赖。
+- 最终 Heavy 工单：`coverage: full`，在整轮功能合入后统一运行一次。
+- 数据库：默认 `persistent` 并使用事务/Fixture/schema reset；迁移或初始化类 Heavy 验证才可声明 `disposable` 和原因。
+
+## 人工效果验收
+
+- 是否需要：否。若任务包含 UI、视觉、图标、布局或交互效果，改为“是”并在控制 Task 的 `ACCEPTANCE.md` 声明 `REVIEW-1`。
+- 验收范围：列出由人判断的布局、密度、层级、颜色、动效或整体观感。
+- 功能边界：人工效果验收不能替代 Playwright、构建、可访问性或其他确定性 Gate。
+- 证据要求：使用当前候选 revision 生成且可完整解码的 PNG；修改代码或图片后必须重新请求。
+- 控制要求：Review 与 AC 覆盖必须在 `plan` 前声明，执行中不能删除或降级。
+
+## Web 功能验证
+
+- 是否需要：否。若任务包含 Web 页面或浏览器交互，改为“是”，并在 `ACCEPTANCE.md.web_gates` 与 `GATES.md` 用相同 Gate ID 和 AC 覆盖声明 Playwright。
+- 功能路径：列出必须在真实浏览器中完成的导航、输入、提交、状态变化和失败路径。
+- 证据要求：至少一项通过、零 unexpected/flaky/skipped，必须生成 JSON、HTML 和有效截图。
+- 控制要求：Gate 期间 HEAD 或工作树变化、报告或附件篡改均失败。
+
 ## 交付记录
 
 - 完成日期：待填写
@@ -65,4 +86,3 @@
 | 日期 | 变更 | 原因 |
 |---|---|---|
 | YYYY-MM-DD | 创建工单 | 初始化 |
-

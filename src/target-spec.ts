@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 export type TargetSpecAssetKind = 'document' | 'template';
+export type TargetSpecProfile = 'standard' | 'backend' | 'frontend' | 'fullstack';
 
 export interface TargetSpecAsset {
   path: string;
@@ -18,9 +19,32 @@ export interface TargetSpecTemplate {
   assets: TargetSpecAsset[];
 }
 
+export interface TargetSpecBundleAsset extends TargetSpecAsset {
+  install_path: string;
+  base: 'repository' | 'spec-root';
+}
+
+export interface TargetSpecBundle {
+  profile: TargetSpecProfile;
+  template_version: string;
+  primary_spec_root: string;
+  backend_task_root: string | null;
+  frontend_task_root: string | null;
+  assets: TargetSpecBundleAsset[];
+}
+
 interface TargetSpecManifest {
   schema_version: number;
   template_version: string;
+  files: Array<{path:string;role:string;kind:string;check_placeholders:boolean}>;
+}
+
+interface ProfileManifest {
+  schema_version: 2;
+  template_version: string;
+  profile: 'backend' | 'frontend';
+  spec_root: string;
+  task_root: string;
   files: Array<{path:string;role:string;kind:string;check_placeholders:boolean}>;
 }
 
@@ -36,7 +60,8 @@ const rolePaths = new Map([
   ['task-template','04-task/_template.md'],
 ]);
 
-export const defaultTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v1/', import.meta.url));
+export const defaultTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v2/', import.meta.url));
+export const profileTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v3/', import.meta.url));
 
 function assertManifest(value:unknown): asserts value is TargetSpecManifest {
   if(!value||typeof value!=='object')throw new Error('invalid target spec manifest');
@@ -76,6 +101,80 @@ export async function loadTargetSpecTemplate(assetRoot=defaultTargetSpecAssetRoo
     assets.push({...item,kind:item.kind as TargetSpecAssetKind,content});
   }
   return {schema_version:1,template_version:parsed.template_version,assets};
+}
+
+function safeAssetPath(value:string,label:string):void {
+  if(path.isAbsolute(value)||value!==path.posix.normalize(value)||value.startsWith('../')||value.includes('\\'))throw new Error(`unsafe ${label}: ${value}`);
+}
+
+function assertProfileManifest(value:unknown,expected:'backend'|'frontend'): asserts value is ProfileManifest {
+  if(!value||typeof value!=='object')throw new Error(`invalid ${expected} target spec manifest`);
+  const manifest=value as Partial<ProfileManifest>;
+  if(manifest.schema_version!==2||manifest.profile!==expected||typeof manifest.template_version!=='string'||!/^\d+\.\d+\.\d+$/.test(manifest.template_version)
+    ||typeof manifest.spec_root!=='string'||typeof manifest.task_root!=='string'||!Array.isArray(manifest.files))throw new Error(`invalid ${expected} target spec manifest`);
+  safeAssetPath(manifest.spec_root,'profile spec root');safeAssetPath(manifest.task_root,'profile task root');
+  if(!manifest.task_root.startsWith(`${manifest.spec_root}/`))throw new Error(`${expected} task root must be inside its spec root`);
+  const paths=new Set<string>(),roles=new Set<string>();
+  for(const item of manifest.files){
+    if(!item||typeof item.path!=='string'||typeof item.role!=='string'||!['document','template'].includes(item.kind)||typeof item.check_placeholders!=='boolean')throw new Error(`invalid ${expected} target spec manifest entry`);
+    safeAssetPath(item.path,'profile target spec asset path');
+    if(paths.has(item.path)||roles.has(item.role))throw new Error(`duplicate ${expected} target spec asset path or role`);
+    paths.add(item.path);roles.add(item.role);
+    if(item.kind==='template'&&item.check_placeholders)throw new Error(`target spec template may not enable placeholder checks: ${item.path}`);
+  }
+  const required=expected==='backend'
+    ?['AGENT.md','spec/README.md','spec/00-conventions/development-guidelines.md','spec/roadmap.md','spec/architecture.md','spec/pending-board.md','spec/verification-board.md','spec/01-product/_template.md','spec/02-feature/_template.md','spec/03-decisions/README.md','spec/03-decisions/_template.md','spec/04-design/_template.md','spec/05-task/_template.md']
+    :['AGENT.md','spec/README.md','spec/00-conventions/development-guidelines.md','spec/05-task/_template.md'];
+  if(paths.size!==required.length||required.some(file=>!paths.has(file)))throw new Error(`${expected} target spec manifest is incomplete`);
+}
+
+async function loadProfile(profile:'backend'|'frontend'):Promise<{manifest:ProfileManifest;assets:TargetSpecAsset[]}> {
+  const root=path.join(profileTargetSpecAssetRoot,profile),manifestFile=path.join(root,'manifest.json');
+  const info=await lstat(manifestFile).catch(()=>null);
+  if(!info||!info.isFile()||info.isSymbolicLink())throw new Error(`target spec profile manifest is missing or invalid: ${manifestFile}`);
+  let parsed:unknown;
+  try{parsed=JSON.parse(await readFile(manifestFile,'utf8'))}catch(cause){throw new Error(`cannot read target spec profile manifest: ${manifestFile}`,{cause})}
+  assertProfileManifest(parsed,profile);
+  const assets:TargetSpecAsset[]=[];
+  for(const item of parsed.files){
+    const file=path.resolve(root,item.path);
+    if(!file.startsWith(path.resolve(root)+path.sep))throw new Error(`target spec profile asset escapes resource root: ${item.path}`);
+    const assetInfo=await lstat(file).catch(()=>null);
+    if(!assetInfo||!assetInfo.isFile()||assetInfo.isSymbolicLink())throw new Error(`target spec profile asset is missing or invalid: ${item.path}`);
+    const content=await readFile(file,'utf8');
+    if(content.trim().length<20)throw new Error(`target spec profile asset is empty: ${item.path}`);
+    assets.push({...item,kind:item.kind as TargetSpecAssetKind,content});
+  }
+  return {manifest:parsed,assets};
+}
+
+export async function loadTargetSpecBundle(profile:TargetSpecProfile):Promise<TargetSpecBundle> {
+  if(profile==='standard'){
+    const legacy=await loadTargetSpecTemplate();
+    return {
+      profile,template_version:legacy.template_version,primary_spec_root:'spec',
+      backend_task_root:'spec/04-task',frontend_task_root:null,
+      assets:legacy.assets.map(item=>({...item,install_path:item.path,base:'spec-root'})),
+    };
+  }
+  const wanted=profile==='fullstack'?['backend','frontend'] as const:[profile] as Array<'backend'|'frontend'>;
+  const loaded=await Promise.all(wanted.map(item=>loadProfile(item)));
+  if(loaded.some(item=>item.manifest.template_version!==loaded[0].manifest.template_version))throw new Error('target spec profile versions do not match');
+  const prefix=(kind:'backend'|'frontend')=>profile==='fullstack'?`${kind}/`:'';
+  const assets:TargetSpecBundleAsset[]=[];
+  for(const item of loaded){
+    for(const asset of item.assets)assets.push({
+      ...asset,role:`${item.manifest.profile}-${asset.role}`,
+      install_path:`${prefix(item.manifest.profile)}${asset.path}`,base:'repository',
+    });
+  }
+  const primary=profile==='fullstack'?'backend/spec':'spec';
+  return {
+    profile,template_version:loaded[0].manifest.template_version,primary_spec_root:primary,
+    backend_task_root:profile==='frontend'?null:`${profile==='fullstack'?'backend/':''}spec/05-task`,
+    frontend_task_root:profile==='backend'?null:`${profile==='fullstack'?'frontend/':''}spec/05-task`,
+    assets,
+  };
 }
 
 const placeholderToken=/^(?:tbd|todo|unknown|placeholder|fill me|lorem ipsum|待填写|待补充|未知)(?:\s*[([（].*?[\])）])?[。.;；]?$/i;

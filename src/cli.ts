@@ -9,6 +9,7 @@ import { appendAttempt, checkTask, deliverTask, initTask, planTask, readState, r
 import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
 import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
+import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -107,8 +108,23 @@ program.command('summary').argument('<task-dir>').action((dir) => action(async (
   console.log(content.trimEnd());
 }));
 
+const review = program.command('review').description('Revision-bound human visual review');
+review.command('request').argument('<task-dir>').requiredOption('--id <review-id>').requiredOption('--revision <revision>')
+  .requiredOption('--evidence <file...>').option('--json').action((dir, options) => action(async () => {
+    print(await requestVisualReview(root(dir), options.id, options.revision, options.evidence), options.json);
+  }));
+review.command('decide').argument('<task-dir>').requiredOption('--id <review-id>')
+  .addOption(new Option('--result <result>').choices(['approved', 'rejected']).makeOptionMandatory())
+  .requiredOption('--by <identity>').requiredOption('--note <text>').option('--json').action((dir, options) => action(async () => {
+    print(await decideVisualReview(root(dir), options.id, options.result, options.by, options.note), options.json);
+  }));
+review.command('status').argument('<task-dir>').option('--json').action((dir, options) => action(async () => {
+  const result = await readVisualReviews(root(dir));
+  print(options.json ? result : result.map((item) => `${item.review_id}\t${item.status}\tround=${item.round}\trevision=${item.code_revision}`).join('\n'), options.json);
+}));
+
 const projectCmd=program.command('project').description('Project Loop control plane');
-projectCmd.command('init').argument('<project-dir>').requiredOption('--id <id>').requiredOption('--name <name>').requiredOption('--repository <path>').option('--branch <branch>','default Git branch','main').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).action((dir,o)=>action(async()=>{await initProject(root(dir),{id:o.id,name:o.name,repository:path.resolve(o.repository),branch:o.branch,risk:o.risk});console.log(`initialized project ${o.id}`)}));
+projectCmd.command('init').argument('<project-dir>').requiredOption('--id <id>').requiredOption('--name <name>').requiredOption('--repository <path>').option('--branch <branch>','default Git branch','main').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).addOption(new Option('--spec-profile <profile>').choices(['standard','backend','frontend','fullstack']).default('standard')).action((dir,o)=>action(async()=>{await initProject(root(dir),{id:o.id,name:o.name,repository:path.resolve(o.repository),branch:o.branch,risk:o.risk,specProfile:o.specProfile});console.log(`initialized project ${o.id}`)}));
 projectCmd.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const p=await readProject(root(dir));const s=await readProjectState(root(dir));const tasks=await scanTasks(root(dir));print(o.json?{project:p,state:s,derived:{active:tasks.filter(t=>t.status!=='delivered'),recent_delivery:tasks.filter(t=>t.status==='delivered')}}:`${p.project_id} ${p.name}: ${tasks.length} tasks, ${tasks.filter(t=>t.resumable).length} resumable`,o.json)}));
 projectCmd.command('spec-init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await initTargetSpecLibrary(root(dir)),o.json)));
 projectCmd.command('spec-check').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const result=await checkTargetSpecLibrary(root(dir));print(result,o.json);if(!result.ok)process.exitCode=1}));

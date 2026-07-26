@@ -14,11 +14,47 @@ export interface TaskState {
   state_version: number;
   repository: string;
   code_revision: string;
+  acceptance_hash?: string;
   updated_at: string;
   last_command: string;
 }
 
 export interface Criterion { id: string; text: string }
+export interface HumanReviewRequirement {
+  id: string;
+  kind: 'visual';
+  required: true;
+  ac: string[];
+}
+export interface WebGateRequirement {
+  id: string;
+  kind: 'playwright';
+  required: true;
+  ac: string[];
+}
+export interface ReviewArtifact {
+  file: string;
+  sha256: string;
+  media_type: 'image/png';
+}
+export interface HumanReviewRecord {
+  schema_version: 1;
+  task_id: string;
+  review_id: string;
+  kind: 'visual';
+  status: 'pending' | 'approved' | 'rejected';
+  round: number;
+  code_revision: string;
+  request_hash: string;
+  acceptance_hash: string;
+  history_tail_hash: string;
+  decision_hash: string | null;
+  artifacts: ReviewArtifact[];
+  requested_at: string;
+  reviewer: string | null;
+  reviewed_at: string | null;
+  note: string;
+}
 export interface Budget {
   schema_version: 1;
   max_attempts: number;
@@ -62,6 +98,10 @@ export interface EvidenceRecord {
   sha256: string;
   exit_code: number;
   created_at: string;
+  controls?: {
+    visual_reviews: string[];
+    web_gates: string[];
+  };
 }
 
 export interface DeliveryMapping { ac: string; evidence: string[] }
@@ -73,4 +113,3 @@ export const LEGAL_TRANSITIONS: Record<string, [TaskStatus[], TaskStatus]> = {
   'verify-fail': [['working', 'verifying'], 'iterating'],
   deliver: [['verifying'], 'delivered'],
 };
-

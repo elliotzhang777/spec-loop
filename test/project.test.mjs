@@ -39,3 +39,23 @@ test('approved proposal explicitly adopts a matching draft target task', async()
   const adopted=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-1','--title','Adopt draft','--adopt-existing']);assert.equal(adopted.code,0,adopted.stderr);
   const content=await readFile(target,'utf8');assert.match(content,/- 状态：已批准/);assert.match(content,/- Proposal：PROP-1/);assert.match(content,/- Spec-Loop Task：/);assert.match(content,/所属设计/);
 });
+
+test('fullstack proposals route backend TASK and frontend WEB-TASK into their source specification libraries',async()=>{
+  const root=await tempRoot('project-fullstack-route-'),repo=path.join(root,'repo');await mkdir(repo);
+  let result=cli(['project','init',root,'--id','PROJ-ROUTE','--name','Route','--repository',repo,'--spec-profile','fullstack']);
+  assert.equal(result.code,0,result.stderr);
+  for(const [source,goal,id] of [
+    ['backend delivery','Implement backend health','TASK-API-1'],
+    ['frontend delivery','Implement browser health','WEB-TASK-SHELL-1'],
+  ]){
+    const proposal=cli(['triage','propose',root,'--source',source,'--goal',goal,'--reason','Need an independently traceable delivery','--ac','health path passes']);
+    assert.equal(proposal.code,0,proposal.stderr);
+    assert.equal(cli(['triage','approve',root,proposal.stdout.trim(),'--by','zhangbo']).code,0);
+    result=cli(['triage','create-task',root,proposal.stdout.trim(),'--id',id,'--title',goal]);
+    assert.equal(result.code,0,result.stderr);
+  }
+  assert.match(await readFile(path.join(repo,'backend','spec','05-task','TASK-API-1.md'),'utf8'),/Proposal：PROP-1/);
+  assert.match(await readFile(path.join(repo,'frontend','spec','05-task','WEB-TASK-SHELL-1.md'),'utf8'),/Proposal：PROP-2/);
+  const tasks=JSON.parse(cli(['tasks','list',root,'--json']).stdout);
+  assert.deepEqual(tasks.map(item=>item.task_id),['TASK-API-1','WEB-TASK-SHELL-1']);
+});

@@ -100,6 +100,7 @@ roadmap.md
 - 当前任务治理：Light、Standard、Heavy。
 - 当前自动化：A1，可通过 Provider Harness 在独立 worktree 单步执行，默认 Codex；不包含后台调度。
 - 当前 Toolchain：T1，支持受控通用命令 Gate 和绑定 Git HEAD 的 Evidence。
+- Web 验证：支持显式 Playwright Gate 与 revision-bound 人工视觉 Review；自动识别和 Gate Planner 仍未实现。
 - 当前 Delivery 权限：D0，只生成本地 Delivery。
 - Phase 3：原正式 Delivery 结论已撤回，TASK-013 正在等待独立 Heavy 验收；Phase 4–5 仍为草案。
 

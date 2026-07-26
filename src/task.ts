@@ -1,12 +1,13 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicWriteMany, assertSubstantive, exists, readMarkdown, recoverTransactions, sha256, stringifyMarkdown } from './files.js';
-import type { Attempt, Criterion, DeliveryMapping, EvidenceRecord, TaskLevel, TaskState } from './model.js';
+import type { Attempt, Criterion, DeliveryMapping, EvidenceRecord, HumanReviewRequirement, TaskLevel, TaskState, WebGateRequirement } from './model.js';
 import { LEGAL_TRANSITIONS } from './model.js';
 import { acceptanceSchema, deliverySchema, evidenceSchema, planSchema, roundSchema, specSchema, stateSchema, verifySchema } from './schemas.js';
 import { budgetTemplate, initialFiles, roundTemplate } from './templates.js';
 import { guard, readBudget, readLedger, renderRunLog, renderSummary, validateAttemptSequence } from './runtime.js';
 import { attemptSchema } from './schemas.js';
+import { validateRequiredHumanReviews } from './review.js';
 
 async function runtimeProjectionWrites(root: string, state: TaskState): Promise<Array<{ file: string; content: string }>> {
   if (!(await exists(path.join(root, 'BUDGET.md')))) return [];
@@ -24,7 +25,13 @@ async function stateHistoryWrite(root: string, state: TaskState): Promise<{ file
 
 export async function readState(root: string): Promise<TaskState> {
   await recoverTransactions(root);
-  return stateSchema.parse((await readMarkdown(path.join(root, 'TASK_STATE.md'))).data);
+  const state=stateSchema.parse((await readMarkdown(path.join(root, 'TASK_STATE.md'))).data);
+  const history=(await readFile(path.join(root,'STATE_HISTORY.jsonl'),'utf8')).trim().split(/\r?\n/).filter(Boolean);
+  if(!history.length)throw new Error('STATE_HISTORY.jsonl is empty');
+  let tail:{state_version?:number;status?:string;round?:number;state_hash?:string};
+  try{tail=JSON.parse(history.at(-1) as string) as typeof tail}catch{throw new Error('STATE_HISTORY.jsonl tail is malformed')}
+  if(tail.state_version!==state.state_version||tail.status!==state.status||tail.round!==state.current_round||tail.state_hash!==sha256(JSON.stringify(state)))throw new Error('TASK_STATE.md does not match CLI state history');
+  return state;
 }
 
 function nextState(state: TaskState, command: keyof typeof LEGAL_TRANSITIONS): TaskState {
@@ -42,7 +49,15 @@ export async function initTask(root: string, input: { id: string; title: string;
   await atomicWriteMany(root, initialFiles(input).map((item) => ({ file: path.join(root, item.file), content: item.content })));
 }
 
-async function contracts(root: string): Promise<{ state: TaskState; criteria: Criterion[] }> {
+type AcceptanceContract = {
+  state: TaskState;
+  criteria: Criterion[];
+  humanReviews: HumanReviewRequirement[];
+  webGates: WebGateRequirement[];
+  acceptanceHash: string;
+};
+
+async function contracts(root: string): Promise<AcceptanceContract> {
   const state = await readState(root);
   const spec = await readMarkdown(path.join(root, 'SPEC.md'));
   const specData = specSchema.parse(spec.data);
@@ -54,28 +69,52 @@ async function contracts(root: string): Promise<{ state: TaskState; criteria: Cr
   if (new Set(ids).size !== ids.length) throw new Error('Acceptance criterion IDs must be unique');
   for (let i = 0; i < ids.length; i++) if (ids[i] !== `AC-${i + 1}`) throw new Error('Acceptance criterion IDs must be continuous from AC-1');
   acc.criteria.forEach((c) => assertSubstantive(c.text, c.id));
+  const reviewIds = acc.human_reviews.map((item) => item.id);
+  if (new Set(reviewIds).size !== reviewIds.length) throw new Error('Human review IDs must be unique');
+  for (let i = 0; i < reviewIds.length; i++) if (reviewIds[i] !== `REVIEW-${i + 1}`) throw new Error('Human review IDs must be continuous from REVIEW-1');
+  const criterionIds = new Set(ids);
+  for (const review of acc.human_reviews) {
+    if (new Set(review.ac).size !== review.ac.length || review.ac.some((id) => !criterionIds.has(id))) throw new Error(`${review.id}: human review AC coverage is invalid`);
+  }
+  const webGateIds = acc.web_gates.map((item) => item.id);
+  if (new Set(webGateIds).size !== webGateIds.length) throw new Error('Web Gate IDs must be unique');
+  for (const gate of acc.web_gates) {
+    if (new Set(gate.ac).size !== gate.ac.length || gate.ac.some((id) => !criterionIds.has(id))) throw new Error(`${gate.id}: Web Gate AC coverage is invalid`);
+  }
+  const acceptanceHash = sha256(JSON.stringify(acc));
+  if (state.status !== 'draft') {
+    const plan = planSchema.parse((await readMarkdown(path.join(root, 'PLAN.md'))).data);
+    if (state.acceptance_hash && state.acceptance_hash !== acceptanceHash) throw new Error('ACCEPTANCE.md changed after plan; re-plan in a new authorized task');
+    if (plan.acceptance_hash && plan.acceptance_hash !== acceptanceHash) throw new Error('PLAN.md Acceptance binding differs from the current contract');
+    if ((acc.human_reviews.length || acc.web_gates.length) && (!plan.acceptance_hash||!state.acceptance_hash)) throw new Error('required control declarations are not bound to CLI-managed Task State');
+  }
   if (state.level === 'heavy') {
     const context = await readMarkdown(path.join(root, 'CONTEXT.md'));
     assertSubstantive(context.body, 'CONTEXT.md body');
   }
-  return { state, criteria: acc.criteria };
+  return { state, criteria: acc.criteria, humanReviews: acc.human_reviews, webGates: acc.web_gates, acceptanceHash };
 }
 
 export async function planTask(root: string): Promise<TaskState> {
-  const { state, criteria } = await contracts(root);
+  const { state, criteria, acceptanceHash } = await contracts(root);
   const plan = await readMarkdown(path.join(root, 'PLAN.md'));
   const data = planSchema.parse(plan.data);
   assertSubstantive(plan.body, 'PLAN.md body');
   const expected = new Set(criteria.map((c) => c.id));
   const coverage = new Set(data.ac_coverage);
   if (coverage.size !== data.ac_coverage.length || expected.size !== coverage.size || [...expected].some((id) => !coverage.has(id))) throw new Error('PLAN.md must cover every AC exactly once');
-  const updated = nextState(state, 'plan');
-  await atomicWriteMany(root, [{ file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') }, await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated)]);
+  const updated = stateSchema.parse({ ...nextState(state, 'plan'), acceptance_hash: acceptanceHash }) as TaskState;
+  const boundPlan = { ...data, acceptance_hash: acceptanceHash };
+  await atomicWriteMany(root, [
+    { file: path.join(root, 'PLAN.md'), content: stringifyMarkdown(boundPlan, plan.body) },
+    { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') },
+    await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated),
+  ]);
   return updated;
 }
 
 export async function startRound(root: string): Promise<TaskState> {
-  const state = await readState(root);
+  const { state } = await contracts(root);
   if (state.status === 'iterating' && await exists(path.join(root, 'BUDGET.md'))) {
     const decision = guard(await readBudget(root), await readLedger(root, state));
     if (decision.decision !== 'continue') throw new Error(`Guard ${decision.decision}: ${decision.reason}`);
@@ -102,7 +141,8 @@ async function currentRound(root: string, state: TaskState) {
 }
 
 export async function verifyTask(root: string, options: { result: 'pass' | 'fail'; artifact: string; verifier: string; independent: boolean; human: boolean; revision?: string }): Promise<TaskState> {
-  let state = await readState(root);
+  const contract = await contracts(root);
+  let state = contract.state;
   const round = await currentRound(root, state);
   assertSubstantive(options.verifier, 'verifier');
   const artifactSource = path.resolve(options.artifact);
@@ -112,10 +152,30 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
   const evidenceId = `EV-${existing.length + 1}`;
   const artifactRel = `evidence/${evidenceId}.artifact`;
   const metadataRel = `evidence/${evidenceId}.json`;
-  const revision = options.revision ?? state.code_revision;
+  let revision = options.revision ?? state.code_revision;
   if (!revision || revision === 'UNSET') throw new Error('verification requires --revision');
-  const record: EvidenceRecord = { schema_version: 1, id: evidenceId, task_id: state.task_id, round: state.current_round, code_revision: revision, type: 'test', artifact: artifactRel, sha256: sha256(artifact), exit_code: options.result === 'pass' ? 0 : 1, created_at: new Date().toISOString() };
+  if (contract.humanReviews.length || contract.webGates.length) {
+    const { canonicalGitRevision } = await import('./review.js');
+    revision = await canonicalGitRevision(state.repository, revision);
+  }
+  const controls = { visual_reviews: [] as string[], web_gates: [] as string[] };
   if (state.level === 'heavy' && options.result === 'pass' && (!options.independent || !options.human)) throw new Error('Heavy pass requires independent verifier and human check');
+  if (options.result === 'pass') {
+    controls.visual_reviews = await validateRequiredHumanReviews(root, state, revision);
+    if (contract.webGates.length) {
+      const tasksDir = path.dirname(root), controlDir = path.dirname(tasksDir);
+      if (path.basename(tasksDir) !== 'tasks' || path.basename(controlDir) !== '.spec-loop') throw new Error('required Web Gate needs a managed Project task directory');
+      const projectRoot = path.dirname(controlDir);
+      const { validateRequiredWebGates } = await import('./execution.js');
+      controls.web_gates = await validateRequiredWebGates(projectRoot, state.task_id, revision);
+    }
+  }
+  const record: EvidenceRecord = {
+    schema_version: 1, id: evidenceId, task_id: state.task_id, round: state.current_round, code_revision: revision,
+    type: 'test', artifact: artifactRel, sha256: sha256(artifact), exit_code: options.result === 'pass' ? 0 : 1,
+    created_at: new Date().toISOString(),
+    ...(controls.visual_reviews.length || controls.web_gates.length ? { controls } : {}),
+  };
   const command = options.result === 'pass' ? 'verify-pass' : 'verify-fail';
   state = { ...nextState({ ...state, code_revision: revision }, command), code_revision: revision };
   const verify = { schema_version: 1 as const, task_id: state.task_id, round: state.current_round, result: options.result, verifier: options.verifier, independent: options.independent, human_checked: options.human, signed_round: state.current_round, evidence: [...existing.map((e) => e.id), evidenceId] };
@@ -150,10 +210,17 @@ export async function evidenceRecords(root: string): Promise<EvidenceRecord[]> {
   return records;
 }
 
-async function validateDelivery(root: string, state: TaskState, criteria: Criterion[]): Promise<void> {
+async function validateDelivery(root: string, state: TaskState, criteria: Criterion[], humanReviews: HumanReviewRequirement[], webGates: WebGateRequirement[]): Promise<void> {
   const verification = verifySchema.parse((await readMarkdown(path.join(root, 'VERIFY.md'))).data);
   if (verification.result !== 'pass' || verification.round !== state.current_round || verification.signed_round !== state.current_round) throw new Error('current Round is not signed with a passing verification');
   if (state.level === 'heavy' && (!verification.independent || !verification.human_checked)) throw new Error('Heavy delivery requires independent verifier and human check');
+  await validateRequiredHumanReviews(root, state, state.code_revision);
+  if(webGates.length){
+    const tasksDir=path.dirname(root),controlDir=path.dirname(tasksDir);
+    if(path.basename(tasksDir)!=='tasks'||path.basename(controlDir)!=='.spec-loop')throw new Error('required Web Gate needs a managed Project task directory');
+    const {validateRequiredWebGates}=await import('./execution.js');
+    await validateRequiredWebGates(path.dirname(controlDir),state.task_id,state.code_revision);
+  }
   const deliveryDoc = await readMarkdown(path.join(root, 'DELIVERY.md'));
   const delivery = deliverySchema.parse(deliveryDoc.data);
   assertSubstantive(deliveryDoc.body, 'DELIVERY.md body');
@@ -168,11 +235,19 @@ async function validateDelivery(root: string, state: TaskState, criteria: Criter
   }
   for (const criterion of criteria) if (!mapping.has(criterion.id)) throw new Error(`${criterion.id}: missing Delivery mapping`);
   if (mapping.size !== criteria.length) throw new Error('Delivery contains unknown AC mapping');
+  for (const review of humanReviews) for (const ac of review.ac) {
+    const mapped = (mapping.get(ac) ?? []).map((id) => valid.get(id));
+    if (!mapped.some((item) => item?.controls?.visual_reviews.includes(review.id))) throw new Error(`${ac}: Delivery Evidence is not bound to ${review.id}`);
+  }
+  for (const gate of webGates) for (const ac of gate.ac) {
+    const mapped = (mapping.get(ac) ?? []).map((id) => valid.get(id));
+    if (!mapped.some((item) => item?.controls?.web_gates.includes(gate.id))) throw new Error(`${ac}: Delivery Evidence is not bound to Playwright Gate ${gate.id}`);
+  }
 }
 
 export async function deliverTask(root: string): Promise<TaskState> {
-  const { state, criteria } = await contracts(root);
-  await validateDelivery(root, state, criteria);
+  const { state, criteria, humanReviews, webGates } = await contracts(root);
+  await validateDelivery(root, state, criteria, humanReviews, webGates);
   const updated = nextState(state, 'deliver');
   await atomicWriteMany(root, [{ file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') }, await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated)]);
   return updated;
@@ -239,7 +314,10 @@ export async function checkTask(root: string): Promise<string[]> {
       }
     }
     await evidenceRecords(root);
-    if (state.status === 'delivered') await validateDelivery(root, state, criteria);
+    if (state.status === 'delivered') {
+      const contract = await contracts(root);
+      await validateDelivery(root, state, criteria, contract.humanReviews, contract.webGates);
+    }
     if (await exists(path.join(root, 'BUDGET.md'))) {
       const budget = await readBudget(root);
       const attempts = await readLedger(root, state);

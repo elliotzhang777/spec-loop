@@ -41,7 +41,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 ### 产品控制面
 
 - 严格 Project metadata：项目 ID、名称、Git 路径、默认分支/版本、输出位置、风险、可选 Issue 引用。
-- 目标工程规格库：在业务仓库内维护 Roadmap、Product、Feature、Design、Task 和验证看板，并提供补建与完整性校验。
+- 目标工程规格库：在源码仓内维护 Roadmap、Product、Feature、Decision、Design、Task 和验证看板；支持后端主规格库、前端卫星规格库和同仓全栈组合，并提供补建与完整性校验。
 - 可重建 Task Registry：按项目、状态和 resumable 查询；Registry 不成为 Task State。
 - Project State：原生保存项目目标、候选项、忽略原因和下一步；活跃/阻塞任务与最近 Delivery 从 Task 派生。
 - 手动 Triage：只生成 Proposal，不自动创建 Task。
@@ -55,6 +55,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 - Harness：`prepare → execute → collect → verify → report`。
 - 每个真实代码任务使用独立 worktree/branch，记录 base commit、HEAD 和 touched files。
 - T1 通用命令 Gate：argv、cwd、环境 allowlist、timeout、stdout/stderr、exit code、artifact hash 和 Git HEAD。
+- Web 任务可使用目标工程本地 Playwright Gate，归档真实浏览器测试统计、HTML 报告、截图和逐文件哈希；视觉 AC 额外进入绑定 revision 的人工效果验收。
 - 生命周期仍由用户显式命令推进；不做后台 Scheduling 和自动多 Round Controller。
 - 多任务可管理、可查询，但默认串行执行，不实现并发 Worker/Lease。
 
@@ -77,6 +78,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 6. Delivery 生成可审计 Project 回写摘要。
 7. 至少两个真实项目完成 Dogfood。
 8. Phase 1–2 全量回归和独立 Verifier 最终 PASS。
+9. Web 功能不能以编译或 Agent 自述替代 Playwright；声明视觉 Review 的任务未获用户批准不得交付。
 
 关联：[FEAT-003 Project Loop 与 Agent 执行](02-feature/FEAT-003-project-loop-agent-execution.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)。
 
@@ -186,7 +188,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 |---|---|---|---|---|
 | 任务治理 | Light/Standard/Heavy | 保持 | 保持 | 保持 |
 | 自动化 | A0 协议控制 | A1 单步执行 | A2 自动单任务 + A3 受控多任务 | A3 Portfolio 治理；A4 仍需单独授权 |
-| Toolchain | T0 外部 Evidence | T1 通用命令 | T2/T3 平台预设和原生证据 | 适配器资产治理 |
+| Toolchain | T0 外部 Evidence | T1 通用命令 + Playwright Web Gate | T2/T3 平台预设、自动发现与原生证据 | 适配器资产治理 |
 | Delivery | D0 本地记录 | D0/D1 本地 commit 可选 | D2 draft PR 需批准 | D3 不因 Portfolio 自动获得 |
 
 ## 路线图变更规则
