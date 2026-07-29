@@ -26,7 +26,7 @@ async function action(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-program.command('init').argument('<task-dir>').requiredOption('--level <level>').requiredOption('--id <id>').requiredOption('--title <title>').option('--repository <path>', '.', 'target business repository').action((dir, options) => action(async () => {
+program.command('init').argument('<task-dir>').requiredOption('--level <level>').requiredOption('--id <id>').requiredOption('--title <title>').option('--repository <path>', 'target business repository', '.').action((dir, options) => action(async () => {
   if (!LEVELS.includes(options.level)) throw new Error(`invalid level: ${options.level}`);
   await initTask(root(dir), { id: options.id, title: options.title, level: options.level, repository: path.resolve(options.repository) });
   console.log(`initialized ${options.id} (${options.level}) at ${root(dir)}`);
