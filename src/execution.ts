@@ -24,7 +24,7 @@ const playwrightGateSchema=z.object({
   ac:gateAcSchema,
   config:safeRelativePathSchema.optional(),tests:z.array(safeRelativePathSchema).default([]),
   projects:z.array(z.string().min(1).regex(/^[A-Za-z0-9._-]+$/)).default([]),
-  grep:z.string().min(1).max(500).optional(),require_screenshots:z.literal(true).default(true),
+  grep:z.string().min(1).max(500).optional(),require_screenshots:z.boolean().default(true),
 }).strict();
 const gateDefinitionSchema=z.union([commandGateSchema,playwrightGateSchema]);
 const databasePolicySchema=z.object({
@@ -364,7 +364,7 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
     htmlReport=path.relative(root,htmlFile).split(path.sep).join('/');
   }catch(error){validationErrors.push(`invalid or missing Playwright HTML report: ${(error as Error).message}`)}
   const attachments=await collectWebAttachments(root,webRoot),screenshots=await screenshotCount(root,attachments,path.relative(root,resultsDir));
-  if(screenshots<1)validationErrors.push('Playwright Gate requires at least one valid screenshot');
+  if(gate.require_screenshots&&screenshots<1)validationErrors.push('Playwright Gate requires at least one valid screenshot');
   const manifestValue=webManifestSchema.parse({
     schema_version:1,task_id:taskId,gate_id:gate.id,base_commit:m.base_commit,head,ac:gate.ac,
     runner:{package:runner.package,version:runner.version,cli_sha256:runner.cliSha256},stats,screenshots,
@@ -453,7 +453,9 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
       const html=await readFile(path.join(root,web.html_report),'utf8');
       if(!/<html[\s>]/i.test(html)||!/<\/html>/i.test(html))throw new Error(`${g.id}: invalid Playwright HTML report`);
       const resultsRoot=path.relative(root,path.join(control(root),'output',`${taskId}-web-${g.id}`,'test-results'));
-      if(await screenshotCount(root,web.files,resultsRoot)!==web.screenshots||web.screenshots<1)throw new Error(`${g.id}: invalid or missing Playwright screenshots`);
+      const observedScreenshots=await screenshotCount(root,web.files,resultsRoot);
+      if(observedScreenshots!==web.screenshots||(playwrightDefinition.require_screenshots&&web.screenshots<1))
+        throw new Error(`${g.id}: invalid or missing Playwright screenshots`);
     }
   }
 }
