@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "algorithm": "sha256-path-content-v1",
+  "releases": {
+    "v1": "1942b9d41b23d7c0723a89ea4d802392aeeedf94481ef86ebebc0d658c8fd4f0",
+    "v2": "e9548b4c63874a394d82019bea26ecce3abbff870347d1dcd97d76b63c2bf41a",
+    "v3": "ddbfda21fcfb04c019e12654a36bbb931e350bed1463ac69af258e324a8bbfe2",
+    "v4": "b2b062e34920a732d52d410e1821a6efa47c1df0902269712f7ac896686c0c91"
+  }
+}

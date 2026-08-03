@@ -25,6 +25,7 @@ test('proposal requires approval before task creation and registry rebuilds from
   assert.equal(cli(['triage','approve',root,'PROP-1','--by','zhangbo']).code,0);
   create=cli(['triage','create-task',root,'PROP-1','--id','TASK-PROJECT-1','--title','Add health check']);assert.equal(create.code,0,create.stderr);
   const targetTask=await readFile(path.join(repo,'spec','04-task','TASK-PROJECT-1.md'),'utf8');assert.match(targetTask,/AC-1：health command exits zero/);assert.match(targetTask,/Spec-Loop Task/);
+  const checked=cli(['project','spec-check',root,'--json']);assert.equal(checked.code,0,checked.stdout+checked.stderr);
   const tasks=JSON.parse(cli(['tasks','list',root,'--json']).stdout);assert.equal(tasks.length,1);assert.equal(tasks[0].task_id,'TASK-PROJECT-1');assert.equal(tasks[0].status,'draft');
 });
 

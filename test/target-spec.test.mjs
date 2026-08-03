@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { cli, tempRoot } from './helpers.mjs';
 import { containsRealPlaceholder, defaultTargetSpecAssetRoot, loadTargetSpecBundle, loadTargetSpecTemplate } from '../dist/target-spec.js';
 
@@ -11,6 +12,21 @@ async function projectFixture(name='TARGET'){
   const result=cli(['project','init',root,'--id',`PROJ-${name}`,'--name',name,'--repository',repo]);
   assert.equal(result.code,0,result.stderr);
   return {root,repo};
+}
+
+async function digestRelease(root){
+  const files=[];
+  async function walk(dir){
+    for(const entry of await readdir(dir,{withFileTypes:true})){
+      const file=path.join(dir,entry.name);
+      if(entry.isDirectory())await walk(file);
+      else files.push(path.relative(root,file).split(path.sep).join('/'));
+    }
+  }
+  await walk(root);files.sort();
+  const digest=createHash('sha256');
+  for(const file of files){digest.update(file);digest.update('\0');digest.update(await readFile(path.join(root,file)));digest.update('\0')}
+  return digest.digest('hex');
 }
 
 test('versioned target-spec manifest is complete and every bundled asset loads',async()=>{
@@ -27,6 +43,15 @@ test('versioned target-spec manifest is complete and every bundled asset loads',
   assert.equal(legacy.template_version,'1.0.0');
   assert.doesNotMatch(legacy.assets.find(x=>x.path==='04-task/_template.md').content,/人工效果验收/);
   await assert.rejects(loadTargetSpecTemplate(path.join(defaultTargetSpecAssetRoot,'missing')),/manifest is missing/);
+});
+
+test('published target-spec releases remain byte-for-byte immutable',async()=>{
+  const root=path.resolve(defaultTargetSpecAssetRoot,'..');
+  const lock=JSON.parse(await readFile(path.join(root,'releases.json'),'utf8'));
+  assert.equal(lock.schema_version,1);
+  assert.equal(lock.algorithm,'sha256-path-content-v1');
+  assert.deepEqual(Object.keys(lock.releases),['v1','v2','v3','v4']);
+  for(const [version,expected] of Object.entries(lock.releases))assert.equal(await digestRelease(path.join(root,version)),expected,`${version} was modified after release`);
 });
 
 test('current backend, frontend and fullstack profiles load the split source specification libraries',async()=>{
