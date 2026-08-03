@@ -1,11 +1,11 @@
 # TASK-020：同步分工程规格模板并写入源码仓
 
-- 状态：待验证
+- 状态：已完成
 - 风险等级：standard
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-24
-- 最后更新：2026-07-24
+- 最后更新：2026-08-03
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -50,4 +50,9 @@
 
 ## 交付记录
 
-已新增目标规格资产 v3，并保持 `spec-template/backend`、`spec-template/frontend` 的内容一致；新增四种规格配置、源码仓安全补建、正式规格检查和 Task 路由。`npm run build` 与 Project/Target-Spec 定向测试 15/15 通过。正式全量回归留到稳定候选 Delivery，不在本次模板反馈中重复运行。
+已新增并演进目标规格资产至 v4，支持四种规格配置、源码仓安全补建、正式规格检查和 Task 路由。正式候选 `23d9d25` 修复了 Proposal Task 生成后立即触发占位检查的问题，恢复 v1 原始发布内容，并使用 `releases.json` 锁定 v1～v4 的路径与内容摘要。
+
+- 独立 Verifier：PASS，P0/P1 为 0；记录 1 项非阻断的 fullstack Web Task 回归覆盖建议。
+- 定向验证：Target-Spec 与 Project 路由测试 16/16 通过，TypeScript 编译通过。
+- Evidence：`.spec-loop/tasks/task-020/evidence/EV-1.*`，绑定 revision `23d9d254df943de3a44940ba650b48402f5bc8aa`。
+- 验证范围：仅 TASK-020 targeted Gate；Phase 3 全量回归仍由 TASK-013 唯一 Heavy 执行。

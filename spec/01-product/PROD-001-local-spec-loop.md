@@ -66,7 +66,7 @@
 
 ## 实际结果
 
-- 当前结果：Phase 1–2 已交付；Phase 3 核心原型与安全加固实现已具备，但正式验收尚未完成。
+- 当前结果：Phase 1–2 已交付；Phase 3 核心原型、安全加固、Web Gate/人工效果门禁和分工程规格模板均已完成普通工单交付，正在执行唯一 TASK-013 最终 Heavy，阶段正式验收尚未签署。
 - 指标结果：30 项自动化、对抗和恢复测试通过；既有两个 Project Dogfood 仅证明原型，需以加固后的独立 Heavy 验收重新签署。
 - 遗留事项：Scheduling、自动多 Round、受控并发、Spring/Xcode/小程序平台预设和 Portfolio 尚未实现；Web 已增加显式 Playwright Gate，但自动发现与 Gate Planner 仍留在 Phase 4。
 

@@ -56,14 +56,14 @@ Project metadata 和 Project State 提供项目上下文；Task Registry 从任�
 | 类型 | 文档 | 状态 |
 |---|---|---|
 | Design | [DES-003 Project Control Plane 与 Agent Harness](../03-design/DES-003-project-loop-agent-harness.md) | 待验证 |
-| Task | [TASK-003 Phase 3 Heavy 主工单](../04-task/TASK-003-phase3-project-loop.md)、TASK-004～TASK-012、[TASK-013](../04-task/TASK-013-phase3-hardening-acceptance.md)、[TASK-016](../04-task/TASK-016-define-verification-scope.md)、[TASK-017](../04-task/TASK-017.md)、[TASK-018](../04-task/TASK-018.md)、[TASK-019](../04-task/TASK-019.md)、[TASK-020](../04-task/TASK-020.md) | 进行中 |
+| Task | [TASK-003 Phase 3 Heavy 主工单](../04-task/TASK-003-phase3-project-loop.md)、TASK-004～TASK-012、[TASK-013](../04-task/TASK-013-phase3-hardening-acceptance.md)、[TASK-016](../04-task/TASK-016-define-verification-scope.md)、[TASK-017](../04-task/TASK-017.md)、[TASK-018](../04-task/TASK-018.md)、[TASK-019](../04-task/TASK-019.md)、[TASK-020](../04-task/TASK-020.md) | TASK-019、TASK-020 已完成；等待 TASK-013 最终 Heavy |
 
 ## 实际交付
 
 - 已实现行为：Project/Registry/Triage/Approval、由随包版本清单驱动的目标工程规格库、Provider config、worktree、T1 Gate、Codex Harness 和 write-back。
 - 未实现/调整项：多任务仍串行；Claude Code/Qoder 未做真实 Dogfood；Phase 3 由 Controller 人工选择反馈检查范围，自动影响分析和 Gate Planner 留给 Phase 4 Toolchain。
 - 新增能力：Task Acceptance 可声明 `REVIEW-*` 视觉卡点；CLI 保存截图副本、哈希、Round、revision 和人工决定，当前批准失效时 Verification 与 Delivery fail closed。
-- 新增能力：目标规格模板 v3 支持 `backend`、`frontend`、`fullstack`，规格和 Task 随对应源码进入同一个 Git 候选；旧 `standard` 项目保持兼容。
+- 新增能力：目标规格模板 v4 支持 `backend`、`frontend`、`fullstack`，规格和 Task 随对应源码进入同一个 Git 候选；旧 `standard` 项目保持兼容；已发布 v1～v4 使用摘要锁定，禁止原地漂移。
 - 新增能力：Gate Plan 显式绑定 `targeted/full` 与 `persistent/disposable`，普通 Task 无法再误跑整轮回归或反复重建数据库容器。
 - 验证结论：原型 Dogfood 已完成；加固版本等待独立 Verifier、Heavy 人工检查和重新签署正式 Delivery。
 
