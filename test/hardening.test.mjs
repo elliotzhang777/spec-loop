@@ -38,6 +38,16 @@ test('Harness reconcile rolls stale collected evidence back to a rerunnable stag
 
 test('Gate rejects shell dispatchers and records hard timeout',async()=>{
   const shell=await throughCollect('SHELL');await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'bad',command:['sh','-c','git push'],timeout_seconds:10}]},'# Gates\n\nShell bypass attempt.');let result=cli(['gate','run',shell.root,shell.taskId]);assert.notEqual(result.code,0);assert.match(result.stderr,/dispatcher is forbidden/);
+  for(const [id,command] of [
+    ['node-e',[process.execPath,"-erequire('node:child_process').execSync('git push')"]],
+    ['node-require',[process.execPath,'--require','./unsafe-preload.cjs','safe-test.mjs']],
+    ['python-c',['python3',"-c__import__('subprocess').run(['git','push'])"]],
+    ['npm-exec',['npm','exec','--','sh','-c','git push']],
+    ['npx',['npx','sh','-c','git push']],
+  ]){
+    await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id,command,timeout_seconds:10}]},'# Gates\n\nInterpreter or dispatcher bypass attempt.');
+    result=cli(['gate','run',shell.root,shell.taskId]);assert.notEqual(result.code,0);assert.match(result.stderr,/(dispatcher|inline interpreter)/);
+  }
   const timeout=await throughCollect('TIME');await writeMd(path.join(timeout.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'timeout',command:[process.execPath,'sleep.mjs'],timeout_seconds:1}]},'# Gates\n\nTimeout fixture.');result=cli(['gate','run',timeout.root,timeout.taskId,'--json']);assert.notEqual(result.code,0);const gates=JSON.parse(result.stdout);assert.equal(gates[0].timed_out,true);assert.equal(gates[0].exit_code,124);
 });
 
