@@ -4,7 +4,7 @@
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-08-03
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 - 任务等级：Heavy
@@ -39,5 +39,6 @@
 ## 交付记录
 
 - 实现：Workspace/Gate/Harness/Approval/跨根事务/规格库检查已加固。
-- 自动验证：`npm test` 通过 30/30，包含超时、篡改、过期审批、状态顺序、符号链接和事务恢复。
+- 最终加固：Gate 已拒绝常见 shell/dispatcher、解释器 inline/preload，以及包管理器前置参数后的 `exec/dlx/x` 绕过；正常项目脚本 Gate 保持可用。
+- 自动验证：当前候选的 `npm test` 已通过 67/67，包含超时、篡改、过期审批、状态顺序、符号链接、事务恢复、Web Gate、视觉 Review 和目标规格检查；正式 Harness Evidence 等待按最终单 Gate 计划重新绑定。
 - 待完成：独立 Verifier、Heavy 人工检查、加固版真实 Dogfood 和正式 Delivery。
