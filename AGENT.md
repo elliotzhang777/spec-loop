@@ -8,7 +8,7 @@
 2. 阅读工单引用的 Product、Feature 和 Design。
 3. 检查 `spec/pending-board.md` 与 `spec/verification-board.md`。
 4. 如果需求还没有形成可执行工单，先完善上游规格，不直接实现模糊需求。
-5. Phase 3–5 目前均为规划，必须依序授权和验收，不得跳阶段或提前实现。
+5. Phase 1–3 已完成；Phase 4–5 仍需依序获得实施授权和阶段验收，不得跳阶段或提前实现。
 
 ## 执行与交付授权
 

@@ -6,9 +6,9 @@
 
 | 工单 | 验证范围 | 验证方式 | 验证人 | 状态 | 环境/入口 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-013](04-task/TASK-013-phase3-hardening-acceptance.md) | Phase 3 安全、恢复、Evidence 闭环 | 全量测试、加固版 Dogfood、独立 Heavy 验收 | 待指定 | 待验证 | `npm test` / Project Dogfood | 2026-07-12 |
+当前没有等待验证的工单。
 
-Phase 1–2 的验证已写入已完成工单和 Dogfood 目录。
+Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 
 ## 使用规则
 

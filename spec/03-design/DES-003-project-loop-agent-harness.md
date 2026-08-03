@@ -1,9 +1,9 @@
 # DES-003：Project Control Plane 与 Agent Harness
 
-- 状态：待验证
+- 状态：已完成
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-26
+- 最后更新：2026-08-03
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 
 ## 设计目标
@@ -131,11 +131,12 @@ Harness 每步有 prepared/running/succeeded/failed/unknown；崩溃后 reconcil
 
 ## 工单拆分
 
-Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试；TASK-016 定义分级验证范围；TASK-017 将目标工程模板从内联字符串统一为版本化资产，并修复自托管检查暴露的契约漂移；TASK-018 将历史 Evidence/Dogfood 按 Phase 归档并收敛工程根目录；TASK-019 增加人工视觉 Review 和 Playwright Web Gate。正式结论等待独立 Heavy 验收。
+Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Report 安全门禁、Harness 状态机与 reconcile、Approval 有效期、跨根事务、规格检查和对抗测试；TASK-016 定义分级验证范围；TASK-017 将目标工程模板从内联字符串统一为版本化资产，并修复自托管检查暴露的契约漂移；TASK-018 将历史 Evidence/Dogfood 按 Phase 归档并收敛工程根目录；TASK-019 增加人工视觉 Review 和 Playwright Web Gate；TASK-020 补齐分工程规格模板路由与版本锁定。上述范围已通过 TASK-013 最终 Heavy 验收。
 
 ## 实际实现
 
 - 最终实现：`src/project.ts`、`src/target-spec.ts`、`assets/target-spec/`、`src/execution.ts`、`src/review.ts` 及 CLI Project/Task/Triage/Provider/Workspace/Gate/Harness/Review/Writeback 命令；目标规格初始化、补建和检查共享版本清单，v1～v4 发布内容由 `releases.json` 摘要锁定。
+- 安全收口：Gate 对 shell/dispatcher、解释器 inline/preload 和包管理器前置参数绕过采取 fail-closed；Harness Report 绑定 Task、worktree、base、HEAD、Gate artifact 与哈希，并支持持久状态恢复。
 - 与设计差异：Phase 3 未引入持久 Registry 缓存，而是每次扫描重建；符合不形成第二状态源的要求。
 
 ## 变更记录
@@ -151,3 +152,4 @@ Phase 3 原型由 TASK-004～TASK-012 实现；TASK-013 补充 Workspace/Gate/Re
 | 2026-07-19 | 将历史 Evidence/Dogfood 按 Phase 归档并收敛根目录 | 区分当前工程结构与历史验证现场 | TASK-018 |
 | 2026-07-23 | 增加 revision-bound 人工视觉 Review | 效果验收必须由用户对当前截图明确签署 | TASK-019 |
 | 2026-07-25 | 正式验证改为显式、候选单次授权 | 防止视觉反馈循环频繁触发完整 Harness | TASK-016 |
+| 2026-08-03 | 完成加固版独立 Heavy 验收 | 证明状态机、安全边界、恢复和 Evidence 闭环满足 Phase 3 完成标准 | TASK-013 |

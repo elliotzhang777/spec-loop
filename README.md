@@ -16,7 +16,7 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 
 - Phase 1：Light/Standard/Heavy、文件契约、状态机、Round、AC、Evidence 和 Delivery。
 - Phase 2：Attempt、Ledger、Budget、Guard、事实 Summary 和失败恢复。
-- Phase 3：Project Loop 核心原型已完成；安全加固、故障恢复和完整 Harness Evidence 闭环已进入待验证，正式验收尚未完成。
+- Phase 3：Project Loop、受控 worktree 执行、安全加固、故障恢复和完整 Harness Evidence 闭环已完成正式 Heavy 验收。
 - Web/UI：支持目标工程本地 Playwright 功能 Gate，以及绑定 Round、revision 与截图哈希的人工视觉 Review。
 
 当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 3 不包含后台 Scheduling、自动多 Round、自动 push/merge 或 Connector 写入。

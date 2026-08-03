@@ -1,10 +1,10 @@
 # TASK-003：Phase 3 Project Loop（Heavy 主工单）
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-08-03
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -31,10 +31,10 @@
 
 - [x] AC-1：项目和任务可严格注册、查询、恢复和重建。
 - [x] AC-2：Proposal 未批准不能成为正式 Task。
-- [ ] AC-3：Codex 在受控 worktree 完成真实任务，Harness Evidence 经状态机、哈希、任务与 HEAD 一致性校验。
+- [x] AC-3：Codex 在受控 worktree 完成真实任务，Harness Evidence 经状态机、哈希、任务与 HEAD 一致性校验。
 - [x] AC-4：Delivery 生成 Project 回写摘要。
 - [x] AC-5：两个真实项目 Dogfood delivered。
-- [ ] AC-6：Phase 1–3 全量测试、对抗/故障恢复测试和独立 Verifier PASS。
+- [x] AC-6：Phase 1–3 全量测试、对抗/故障恢复测试和独立 Verifier PASS。
 - [x] AC-7：每个目标工程具备可补建、可校验且不覆盖已有内容的分层规格库。
 
 ## 验证计划
@@ -52,15 +52,15 @@
 ## 当前结论
 
 - Project Loop 核心原型：已完成。
-- 安全加固与故障恢复：进行中。
-- 完整 Harness Evidence 闭环：进行中。
-- Phase 3 正式验收：待完成。
-- 原 2026-07-12 Delivery 结论撤回，待 TASK-013 验证后重新签署。
+- 安全加固与故障恢复：已完成。
+- 完整 Harness Evidence 闭环：已完成。
+- Phase 3 正式验收：2026-08-03 通过。
+- 原 2026-07-12 Delivery 结论继续保留为撤回历史；加固版本已经由 TASK-013 重新签署正式交付。
 
 ## 关闭检查
 
-- [ ] 子工单全部完成
-- [ ] 全部 AC 有当前 Evidence
+- [x] 子工单全部完成
+- [x] 全部 AC 有当前 Evidence
 - [x] 两个 Dogfood delivered
-- [ ] 独立 Verifier 和人工检查通过
-- [ ] 上游规格和看板已同步
+- [x] 独立 Verifier 和人工检查通过
+- [x] 上游规格和看板已同步

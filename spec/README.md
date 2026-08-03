@@ -26,10 +26,13 @@ spec/
 │   └── TASK-*.md
 └── 05-delivery/
     ├── 阶段一至二交付报告.md
+    ├── 阶段三交付报告.md
     ├── 阶段三交付报告（已撤回）.md
     ├── phase-1-2/
     │   ├── evidence/
     │   └── dogfood/
+    ├── phase-3/
+    │   └── evidence/
     └── phase-3-withdrawn/
         └── dogfood/
 ```
@@ -64,6 +67,7 @@ spec-loop/
 | 当前验证队列 | `spec/verification-board.md` |
 | 当前运行时模板资产 | `assets/target-spec/` |
 | Phase 1–2 原始证据和 Dogfood | `spec/05-delivery/phase-1-2/` |
+| Phase 3 正式 Evidence 摘要 | `spec/05-delivery/phase-3/` |
 | 已撤回 Phase 3 原型 Dogfood | `spec/05-delivery/phase-3-withdrawn/` |
 
 根目录 `README.md` 只承担项目入口和使用说明，不作为产品设计、开发计划或阶段交付结论的事实源。新增设计或开发说明时，必须先确定所属 Product、Feature、Design 或 Task，再写入对应目录。
@@ -71,8 +75,10 @@ spec-loop/
 ## 交付归档
 
 - [阶段一至二交付报告](05-delivery/阶段一至二交付报告.md)
+- [阶段三交付报告](05-delivery/阶段三交付报告.md)
 - [阶段三交付报告（已撤回）](05-delivery/阶段三交付报告（已撤回）.md)
 - [Phase 1–2 证据与 Dogfood](05-delivery/phase-1-2/README.md)
+- [Phase 3 正式 Evidence 摘要](05-delivery/phase-3/README.md)
 - [已撤回 Phase 3 原型现场](05-delivery/phase-3-withdrawn/README.md)
 
 ## 追踪链
@@ -96,20 +102,20 @@ roadmap.md
 
 ## 当前事实
 
-- Phase 1–2：已完成。Phase 3 核心原型和加固实现已具备，正式独立验收待完成。
+- Phase 1–3：已完成。Phase 3 正式 Heavy 验收于 2026-08-03 通过。
 - 当前任务治理：Light、Standard、Heavy。
 - 当前自动化：A1，可通过 Provider Harness 在独立 worktree 单步执行，默认 Codex；不包含后台调度。
 - 当前 Toolchain：T1，支持受控通用命令 Gate 和绑定 Git HEAD 的 Evidence。
 - Web 验证：支持显式 Playwright Gate 与 revision-bound 人工视觉 Review；自动识别和 Gate Planner 仍未实现。
 - 当前 Delivery 权限：D0，只生成本地 Delivery。
-- Phase 3：原正式 Delivery 结论已撤回，TASK-013 正在等待独立 Heavy 验收；Phase 4–5 仍为草案。
+- Phase 3：加固版本已由独立 Verifier 和用户 Heavy 验收通过，正式 Delivery 已重新签署；Phase 4–5 仍为草案。
 
 ## 两个看板
 
 - [待完成任务看板](pending-board.md)：只放已批准、尚未完成的工单。
 - [验证看板](verification-board.md)：只放实现完成、等待独立验证的工单。
 
-看板是临时视图。Phase 1–2 已关闭；Phase 3 加固实现位于 TASK-013，当前进入验证队列。
+看板是临时视图。Phase 1–3 已关闭，当前没有待实现或待验证工单；Phase 4 尚未获得实施授权。
 
 ## 使用流程
 

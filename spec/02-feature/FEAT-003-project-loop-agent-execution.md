@@ -1,9 +1,9 @@
 # FEAT-003：Project Loop 与 Agent 受控执行
 
-- 状态：待验证
+- 状态：已完成
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-23
+- 最后更新：2026-08-03
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 3
 
@@ -55,8 +55,8 @@ Project metadata 和 Project State 提供项目上下文；Task Registry 从任�
 
 | 类型 | 文档 | 状态 |
 |---|---|---|
-| Design | [DES-003 Project Control Plane 与 Agent Harness](../03-design/DES-003-project-loop-agent-harness.md) | 待验证 |
-| Task | [TASK-003 Phase 3 Heavy 主工单](../04-task/TASK-003-phase3-project-loop.md)、TASK-004～TASK-012、[TASK-013](../04-task/TASK-013-phase3-hardening-acceptance.md)、[TASK-016](../04-task/TASK-016-define-verification-scope.md)、[TASK-017](../04-task/TASK-017.md)、[TASK-018](../04-task/TASK-018.md)、[TASK-019](../04-task/TASK-019.md)、[TASK-020](../04-task/TASK-020.md) | TASK-019、TASK-020 已完成；等待 TASK-013 最终 Heavy |
+| Design | [DES-003 Project Control Plane 与 Agent Harness](../03-design/DES-003-project-loop-agent-harness.md) | 已完成 |
+| Task | [TASK-003 Phase 3 Heavy 主工单](../04-task/TASK-003-phase3-project-loop.md)、TASK-004～TASK-012、[TASK-013](../04-task/TASK-013-phase3-hardening-acceptance.md)、[TASK-016](../04-task/TASK-016-define-verification-scope.md)、[TASK-017](../04-task/TASK-017.md)、[TASK-018](../04-task/TASK-018.md)、[TASK-019](../04-task/TASK-019.md)、[TASK-020](../04-task/TASK-020.md) | 全部完成 |
 
 ## 实际交付
 
@@ -65,7 +65,7 @@ Project metadata 和 Project State 提供项目上下文；Task Registry 从任�
 - 新增能力：Task Acceptance 可声明 `REVIEW-*` 视觉卡点；CLI 保存截图副本、哈希、Round、revision 和人工决定，当前批准失效时 Verification 与 Delivery fail closed。
 - 新增能力：目标规格模板 v4 支持 `backend`、`frontend`、`fullstack`，规格和 Task 随对应源码进入同一个 Git 候选；旧 `standard` 项目保持兼容；已发布 v1～v4 使用摘要锁定，禁止原地漂移。
 - 新增能力：Gate Plan 显式绑定 `targeted/full` 与 `persistent/disposable`，普通 Task 无法再误跑整轮回归或反复重建数据库容器。
-- 验证结论：原型 Dogfood 已完成；加固版本等待独立 Verifier、Heavy 人工检查和重新签署正式 Delivery。
+- 验证结论：最终候选 `3b05ac59a5d14b21486362ab4179f053eedc6ffb` 的 WPHASE3 全量 Harness Gate 与 67 项测试全部通过；独立 Verifier 结论为 PASS，用户已完成 Heavy 人工确认并重新签署正式 Delivery。
 
 ## 变更记录
 
@@ -79,3 +79,4 @@ Project metadata 和 Project State 提供项目上下文；Task Registry 从任�
 | 2026-07-24 | 吸收分工程规格模板并增加源码仓配置 | 让后端主规格和前端 Web 工单与各自实现共同版本化 | TASK-020 |
 | 2026-07-25 | 增加正式验证显式授权边界 | 避免把 Loop 启动或视觉迭代误判为正式交付 | TASK-016 |
 | 2026-07-26 | 强制定向 Gate 与长期数据库复用 | 降低普通 Task 验证耗时和环境反复创建成本 | TASK-016 |
+| 2026-08-03 | 完成 Phase 3 正式 Heavy 验收 | 加固版本的完整 Gate、独立 Verifier 和人工确认全部通过 | TASK-013 |

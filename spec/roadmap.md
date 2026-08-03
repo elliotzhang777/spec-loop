@@ -18,7 +18,7 @@
 | Phase 0 | 建立产品规格和验收基线 | [PROD-001](01-product/PROD-001-local-spec-loop.md) | 已完成 |
 | Phase 1 | 单任务文件生命周期、Round、Evidence 和 Delivery | [FEAT-001](02-feature/FEAT-001-file-task-lifecycle.md) | 已完成 |
 | Phase 2 | Attempt、Ledger、Budget、Guard、Summary 和失败恢复 | [FEAT-002](02-feature/FEAT-002-runtime-ledger-guard.md) | 已完成 |
-| Phase 3 | Project Loop、Codex worktree 单步执行和 T1 Gate | [FEAT-003](02-feature/FEAT-003-project-loop-agent-execution.md) | 待验证 |
+| Phase 3 | Project Loop、Codex worktree 单步执行和 T1 Gate | [FEAT-003](02-feature/FEAT-003-project-loop-agent-execution.md) | 已完成 |
 
 ## 最终 Phase 3–5
 
@@ -32,7 +32,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 不得跳阶段。后一阶段必须保持前一阶段的全量回归、Heavy Dogfood 和独立验证。
 
-## Phase 3：Project Loop 与受控单步执行（待正式验收）
+## Phase 3：Project Loop 与受控单步执行（已完成）
 
 ### 目标
 
@@ -77,10 +77,12 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 5. Codex 在独立 worktree 完成真实工程任务，Evidence 自动绑定实际 HEAD。
 6. Delivery 生成可审计 Project 回写摘要。
 7. 至少两个真实项目完成 Dogfood。
-8. Phase 1–2 全量回归和独立 Verifier 最终 PASS。
+8. Phase 1–3 全量回归和独立 Verifier 最终 PASS。
 9. Web 功能不能以编译或 Agent 自述替代 Playwright；声明视觉 Review 的任务未获用户批准不得交付。
 
 关联：[FEAT-003 Project Loop 与 Agent 执行](02-feature/FEAT-003-project-loop-agent-execution.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)。
+
+正式结论：2026-08-03，TASK-013 在候选 `3b05ac59a5d14b21486362ab4179f053eedc6ffb` 上完成 WPHASE3 全量 Gate、独立 Verifier 和用户 Heavy 验收，Phase 3 正式关闭。证据见[阶段三交付报告](05-delivery/阶段三交付报告.md)。
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
@@ -193,7 +195,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## 路线图变更规则
 
-- Phase 3 核心原型已完成，加固实现等待独立 Heavy 验收；通过前不得启动 Phase 4。
+- Phase 3 已于 2026-08-03 正式完成；Phase 4 仍必须获得单独实施授权，不因 Phase 3 完成而自动启动。
 - Phase 4 必须长期 report-only 和真实低风险运行稳定后才能开始 Phase 5。
 - 每个 Phase 建立独立 Heavy Task，包含 SPEC、AC、风险、自动测试、真实 Dogfood、独立 Verifier 和正式 Delivery。
 - 后续能力不得削弱已有 Task State、Ledger、Guard、Evidence、Heavy 门禁和恢复要求。

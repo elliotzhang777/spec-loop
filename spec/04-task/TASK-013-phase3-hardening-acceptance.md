@@ -1,6 +1,6 @@
 # TASK-013：Phase 3 安全加固与正式验收
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-12
@@ -34,11 +34,13 @@
 - [x] AC-5：Approval 过期、内容变化、scope/risk 不匹配时失效。
 - [x] AC-6：创建 Task 的控制文件和目标规格使用可恢复跨根事务，不留下半创建状态。
 - [x] AC-7：目标规格库检查拒绝越界、符号链接、占位内容、非法 ID/状态和断裂追踪。
-- [ ] AC-8：全量、对抗和故障恢复测试通过；独立 Heavy 验收后才恢复 Phase 3 完成状态。
+- [x] AC-8：全量、对抗和故障恢复测试通过；独立 Heavy 验收后才恢复 Phase 3 完成状态。
 
 ## 交付记录
 
 - 实现：Workspace/Gate/Harness/Approval/跨根事务/规格库检查已加固。
 - 最终加固：Gate 已拒绝常见 shell/dispatcher、解释器 inline/preload，以及包管理器前置参数后的 `exec/dlx/x` 绕过；正常项目脚本 Gate 保持可用。
-- 自动验证：当前候选的 `npm test` 已通过 67/67，包含超时、篡改、过期审批、状态顺序、符号链接、事务恢复、Web Gate、视觉 Review 和目标规格检查；正式 Harness Evidence 等待按最终单 Gate 计划重新绑定。
-- 待完成：独立 Verifier、Heavy 人工检查、加固版真实 Dogfood 和正式 Delivery。
+- 自动验证：候选 `3b05ac59a5d14b21486362ab4179f053eedc6ffb` 的 `npm test` 通过 67/67，包含超时、篡改、过期审批、状态顺序、符号链接、事务恢复、Web Gate、视觉 Review 和目标规格检查；WPHASE3 全量 Harness Gate 退出码为 0、未超时。
+- 独立验证：独立只读 Verifier 结论为 PASS，P0/P1/P2 均为 0；Evidence 已绑定 Task、最终 HEAD 和 artifact 哈希。
+- 人工验收：2026-08-03，用户确认“Phase 3 Heavy 验收通过”，接受本机单用户及受信任 Gate 配置/仓库脚本边界。
+- 交付结论：TASK-013 已 delivered 并快进合入 `main`；正式归档见[阶段三交付报告](../05-delivery/阶段三交付报告.md)。
