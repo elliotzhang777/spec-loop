@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { artifact, cli, fillContracts, fillRound, readMd, tempRoot, writeMd } from './helpers.mjs';
@@ -89,6 +89,17 @@ test('visual review rejects a symbolic parent directory',async()=>{
   const result=cli(['review','request',f.root,'--id','REVIEW-1','--revision',f.revision,'--evidence',f.screenshot]);
   assert.notEqual(result.code,0);
   assert.match(result.stderr,/parent is symbolic/);
+});
+
+test('visual review rejects a symbolic transaction directory before writing temporary data',async()=>{
+  const f=await visualTask('SYMLINKTX'),outside=path.join(path.dirname(f.root),'outside-tx');
+  await mkdir(outside);
+  await rm(path.join(f.root,'.spec-loop-tx'),{recursive:true,force:true});
+  await symlink(outside,path.join(f.root,'.spec-loop-tx'));
+  const result=cli(['review','request',f.root,'--id','REVIEW-1','--revision',f.revision,'--evidence',f.screenshot]);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/transaction directory is symbolic/);
+  assert.deepEqual(await readdir(outside),[]);
 });
 
 test('visual contract downgrade and decision projection forgery are rejected',async()=>{

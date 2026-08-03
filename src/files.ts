@@ -48,6 +48,15 @@ interface TxWrite { target: string; temp: string; hash: string }
 interface Journal { id: string; status: 'prepared'; writes: TxWrite[] }
 interface CrossRootJournal extends Journal { allowed_roots: string[] }
 
+async function safeTransactionDirectory(root:string,name:string):Promise<string> {
+  const dir=path.join(root,name),existing=await lstat(dir).catch(()=>null);
+  if(existing&&(existing.isSymbolicLink()||!existing.isDirectory()))throw new Error(`transaction directory is symbolic or not a directory: ${dir}`);
+  if(!existing)await mkdir(dir,{recursive:false});
+  const info=await lstat(dir),rootReal=await realpath(root),actual=await realpath(dir);
+  if(info.isSymbolicLink()||!info.isDirectory()||!actual.startsWith(rootReal+path.sep))throw new Error(`transaction directory escapes root: ${dir}`);
+  return dir;
+}
+
 async function safeTarget(root: string, target: string): Promise<string> {
   const resolved = path.resolve(target);
   const normalizedRoot = path.resolve(root);
@@ -73,6 +82,7 @@ async function safeTarget(root: string, target: string): Promise<string> {
 export async function recoverTransactions(root: string): Promise<void> {
   const dir = path.join(root, '.spec-loop-tx');
   if (!(await exists(dir))) return;
+  await safeTransactionDirectory(root,'.spec-loop-tx');
   for (const name of (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()) {
     const journalPath = path.join(dir, name);
     const journal = JSON.parse(await readFile(journalPath, 'utf8')) as Journal;
@@ -97,17 +107,16 @@ export async function recoverTransactions(root: string): Promise<void> {
 
 export async function atomicWriteMany(root: string, values: Array<{ file: string; content: string | Buffer }>): Promise<void> {
   await recoverTransactions(root);
-  const txDir = path.join(root, '.spec-loop-tx');
-  await mkdir(txDir, { recursive: true });
+  const txDir = await safeTransactionDirectory(root,'.spec-loop-tx');
   const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
   const writes: TxWrite[] = [];
   for (let i = 0; i < values.length; i++) {
     const target = await safeTarget(root, values[i].file);
-    const temp = path.join(txDir, `${id}-${i}.tmp`);
+    const temp = await safeTarget(root,path.join(txDir, `${id}-${i}.tmp`));
     await writeFile(temp, values[i].content);
     writes.push({ target, temp, hash: sha256(values[i].content) });
   }
-  const journalPath = path.join(txDir, `${id}.json`);
+  const journalPath = await safeTarget(root,path.join(txDir, `${id}.json`));
   await writeFile(journalPath, JSON.stringify({ id, status: 'prepared', writes } satisfies Journal, null, 2));
   await recoverTransactions(root);
 }

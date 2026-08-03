@@ -8,7 +8,7 @@ import { artifact, cli, fillDelivery, fillRound, readMd, tempRoot, writeMd } fro
 
 function git(cwd,args){const result=spawnSync('git',args,{cwd,encoding:'utf8'});if(result.status!==0)throw new Error(result.stderr);return result.stdout.trim()}
 
-async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true,includeLock=true){
+async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true,includeLock=true,lockKind='npm'){
   const root=await tempRoot(`playwright-${name.toLowerCase()}-`),repo=path.join(root,'repo');
   await mkdir(path.join(repo,packageRoot,'node_modules','@playwright','test'),{recursive:true});
   await mkdir(path.join(repo,'tests'),{recursive:true});
@@ -28,9 +28,11 @@ console.log(zero?'zero tests':'one browser test passed');`;
   const fakeCliClosed=`${fakeCli}\n}`;
   await writeFile(path.join(repo,packageRoot,'node_modules','@playwright','test','cli.js'),fakeCliClosed);
   await writeFile(path.join(repo,packageRoot,'node_modules','@playwright','test','package.json'),JSON.stringify({name:'@playwright/test',version:'1.50.0'}));
-  if(includeLock)await writeFile(path.join(repo,packageRoot,'package-lock.json'),JSON.stringify({
-    name:'web-fixture',lockfileVersion:3,packages:{'':{name:'web-fixture'},'node_modules/@playwright/test':{version:'1.50.0'}},
-  }));
+  if(includeLock&&lockKind==='npm')await writeFile(path.join(repo,packageRoot,'package-lock.json'),JSON.stringify({
+      name:'web-fixture',lockfileVersion:3,packages:{'':{name:'web-fixture'},'node_modules/@playwright/test':{version:'1.50.0'}},
+    }));
+  if(includeLock&&lockKind==='pnpm-helper')await writeFile(path.join(repo,packageRoot,'pnpm-lock.yaml'),"lockfileVersion: '9.0'\npackages:\n  '@playwright/test-helper@1.50.0': {}\n");
+  if(includeLock&&lockKind==='pnpm')await writeFile(path.join(repo,packageRoot,'pnpm-lock.yaml'),"lockfileVersion: '9.0'\npackages:\n  '@playwright/test@1.50.0': {}\n");
   await writeFile(path.join(repo,'delete-me.txt'),'tracked candidate file\n');
   for(const testPath of tests){
     await mkdir(path.dirname(path.join(repo,testPath)),{recursive:true});
@@ -86,6 +88,12 @@ test('Playwright Gate runs target-local CLI, proves tests ran, and hashes browse
   result=cli(['harness','report',f.root,f.taskId]);
   assert.notEqual(result.code,0);assert.match(result.stderr,/Gate Plan/);
   gateDoc.data.gates[0].timeout_seconds=30;
+  await writeMd(gateFile,gateDoc.data,gateDoc.body);
+  gateDoc.data.database={lifecycle:'persistent',reset:'transaction'};
+  await writeMd(gateFile,gateDoc.data,gateDoc.body);
+  result=cli(['harness','report',f.root,f.taskId]);
+  assert.notEqual(result.code,0);assert.match(result.stderr,/Gate Plan/);
+  delete gateDoc.data.database;
   await writeMd(gateFile,gateDoc.data,gateDoc.body);
 
   const original=await readFile(path.join(f.root,screenshot.file));
@@ -176,6 +184,19 @@ test('Playwright Gate rejects an installed CLI that is not pinned by a tracked l
   const result=cli(['harness','verify',f.root,f.taskId,'--json']);
   assert.notEqual(result.code,0);
   assert.match(result.stderr,/requires a tracked .*lock/i);
+});
+
+test('Playwright Gate does not accept a similar pnpm package name as the runner lock',async()=>{
+  const f=await webFixture('WEBWRONGPNPM',['tests/e2e.spec.ts'],30,false,'.',true,true,'pnpm-helper');
+  const result=cli(['harness','verify',f.root,f.taskId,'--json']);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/@playwright\/test 1\.50\.0 is not pinned/);
+});
+
+test('Playwright Gate accepts the exact runner version from a tracked pnpm lockfile',async()=>{
+  const f=await webFixture('WEBPNPM',['tests/e2e.spec.ts'],30,false,'.',true,true,'pnpm');
+  const result=cli(['harness','verify',f.root,f.taskId,'--json']);
+  assert.equal(result.code,0,result.stderr);
 });
 
 test('Playwright Gate fingerprints tracked deletions and rejects legacy Collect Evidence without a content fingerprint',async()=>{

@@ -117,7 +117,7 @@ Harness 会把数据库生命周期和重置方式写入 Gate Evidence 与 Repor
 
 快速反馈阶段允许工作树尚未提交，但不得生成声称绑定当前提交的正式 Release Evidence。进入候选版本检查前必须先形成稳定提交；任何后续代码或资源提交都会使旧 HEAD Evidence 失效。用户确认体验且明确授权进入正式验证后，Controller 应合并同一反馈批次，只运行一次正式交付 Gate。
 
-Web 系统的功能验证使用 Playwright 专用 Gate，而不是把任意 `npm test` 输出称为浏览器证据。Gate 只执行目标 worktree 本地安装的 Playwright CLI，强制生成 JSON、HTML 与至少一张可完整解码的 PNG 截图；零测试、unexpected、flaky、skipped、超时、缺报告、缺截图、附件哈希变化或候选内容指纹变化均为失败。Playwright 负责可重复的真实浏览器功能路径，人工视觉 Review 负责布局、密度、层级、观感等主观效果，两者缺一不可。
+Web 系统的功能验证使用 Playwright 专用 Gate，而不是把任意 `npm test` 输出称为浏览器证据。Gate 只执行目标 worktree 中由 Git 跟踪锁文件约束的 Playwright CLI，强制生成 JSON、HTML 和适用附件；视觉路径必须生成至少一张可完整解码的 PNG，纯功能路径可显式关闭截图要求。零测试、unexpected、flaky、skipped、超时、缺报告、缺少声明为必需的截图、附件哈希变化、完整 Gate Plan 变化或候选内容指纹变化均为失败。Playwright 负责可重复的真实浏览器功能路径，人工视觉 Review 负责布局、密度、层级、观感等主观效果；包含视觉 AC 时两者缺一不可。
 
 ## Worktree 与 Harness
 

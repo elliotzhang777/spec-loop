@@ -42,11 +42,11 @@ Runner 强制使用：
 - 独立 `test-results` 输出目录；
 - JSON report，用于证明 `expected >= 1`，并包含实际 passed 的 suite/spec/test/result 结构；
 - HTML report，用于复核步骤和失败；
-- 至少一张通过 CRC、压缩流、尺寸和扫描行完整校验的 PNG 截图；
+- 当 `require_screenshots: true` 时，至少一张通过 CRC、压缩流、尺寸和扫描行完整校验的 PNG 截图；纯功能路径可以显式关闭该要求，但不能替代视觉 Review；
 - 当前 Base/HEAD、stdout/stderr、timeout 和退出码；
 - 包含所有报告、trace、video 和截图的逐文件 SHA-256 Manifest。
 
-以下结果 fail closed：目标工程未安装本地 Playwright、Web Gate 未绑定 AC、零通过测试、unexpected、flaky、skipped、超时、JSON/HTML 缺失或非法、有效 PNG 截图缺失、Manifest/附件被替换、测试路径越界、Gate 期间或 Report 之后 HEAD/候选内容指纹变化。内容指纹覆盖 tracked 与未忽略的 untracked 文件，并用 tombstone 表示删除；旧 Collect Evidence 缺少指纹时必须重新执行 Collect。Harness Report、最终 Verification 和 reconcile 都会重新读取当前现场与 Evidence，而不是只相信 Gate Result 自报；PASS 后 Gate ID 会进入本轮原生 Evidence，Delivery 的 Web AC 必须映射到该 Evidence。
+以下结果 fail closed：目标工程未安装由 Git 跟踪锁文件约束的本地 Playwright、Web Gate 未绑定 AC、零通过测试、unexpected、flaky、skipped、超时、JSON/HTML 缺失或非法、声明为必需的有效 PNG 截图缺失、完整 Gate Plan 或数据库策略变化、Manifest/附件被替换、测试路径越界、Gate 期间或 Report 之后 HEAD/候选内容指纹变化。内容指纹覆盖 tracked 与未忽略的 untracked 文件，并用 tombstone 表示删除；旧 Collect Evidence 缺少指纹时必须重新执行 Collect。Harness Report、最终 Verification 和 reconcile 都会重新读取当前现场与 Evidence，而不是只相信 Gate Result 自报；PASS 后 Gate ID 会进入本轮原生 Evidence，Delivery 的 Web AC 必须映射到该 Evidence。
 
 ### 影响分析与 Gate Plan
 
@@ -71,7 +71,7 @@ T2/T3 `planGates` 读取 base/HEAD diff、touched files、模块依赖、Task AC
 
 业务波次拆成多个 Task 时，Planner 为每个 Task 只生成 `task_scope`：Task AC、touched modules、direct dependents 和必要相邻集成测试。已交付的兄弟 Task 不进入当前 Gate Plan，除非依赖图证明本次改动影响它们。波次最终阶段工单使用 `wave_scope`，在所有 Task 合入后只生成一次跨模块、端到端、对抗与回归 Gate。Gate Plan 必须记录 `scope_kind: task | wave`，禁止把 `task` Evidence 提升为 `wave` Evidence。
 
-当前 T1 已支持显式范围契约：`GATES.md.scope_kind` 可取 `task` 或 `wave`，`wave_id` 绑定业务波次，每个命令或 Playwright Gate 用 `ac` 声明覆盖。`coverage` 可取 `targeted` 或 `full`；Light/Standard Task 使用 `full` 会 fail closed，`wave` 必须绑定 `wave_id`、使用 `full` 且当前 Task 必须为 Heavy。Gate Result 固化 scope/wave/coverage/AC，Report 阶段重新与当前 Gate Plan 比较，防止执行后把局部 Evidence 改写成整轮 Evidence。
+当前 T1 已支持显式范围契约：`GATES.md.scope_kind` 可取 `task` 或 `wave`，`wave_id` 绑定业务波次，每个命令或 Playwright Gate 用 `ac` 声明覆盖。`coverage` 可取 `targeted` 或 `full`；Light/Standard Task 使用 `full` 会 fail closed，`wave` 必须绑定 `wave_id`、使用 `full` 且当前 Task 必须为 Heavy。Gate Result 哈希绑定完整有序 Gate Plan，包括 scope、wave、coverage、数据库 lifecycle/reset/reason 和各 Gate 的命令、测试选择、项目、grep、超时、截图策略与 AC；Report 阶段重新比较，防止执行后复用或升级旧 Evidence。
 
 Gate Plan 还声明数据库生命周期。默认
 `database: { lifecycle: persistent, reset: fixtures }`，复用工程长期验证数据库；
