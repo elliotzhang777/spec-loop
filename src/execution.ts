@@ -161,11 +161,16 @@ function sameStrings(left:string[],right:string[]):boolean {
 
 async function validatePlaywrightDeclarations(root:string,taskId:string,gates:z.infer<typeof gateDefinitionSchema>[]):Promise<WebGateRequirement[]> {
   const required=await webRequirements(root,taskId);
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);
+  if(!task)throw new Error('task not found');
+  const acceptance=acceptanceSchema.parse((await readMarkdown(path.join(task.path,'ACCEPTANCE.md'))).data);
+  const visualAc=new Set(acceptance.human_reviews.flatMap((review)=>review.ac));
   const configured=gates.filter((gate):gate is z.infer<typeof playwrightGateSchema>=>gate.kind==='playwright');
   for(const requirement of required){
     const gate=configured.find((entry)=>entry.id===requirement.id);
     if(!gate)throw new Error(`${requirement.id}: required Playwright Gate is missing from GATES.md`);
     if(!sameStrings(gate.ac,requirement.ac))throw new Error(`${requirement.id}: Playwright Gate AC coverage differs from ACCEPTANCE.md`);
+    if(gate.ac.some((ac)=>visualAc.has(ac))&&!gate.require_screenshots)throw new Error(`${requirement.id}: a Playwright Gate covering a visual Review AC must require screenshots`);
   }
   for(const gate of configured)if(!required.some((item)=>item.id===gate.id))throw new Error(`${gate.id}: Playwright Gate is not declared as required in ACCEPTANCE.md`);
   return required;
@@ -274,21 +279,27 @@ async function lockedPlaywrightDependency(worktree:string,packageRoot:string,nam
         locked=lock.packages?.[`node_modules/${name}`]?.version===version||lock.dependencies?.[name]?.version===version;
       }else if(filename==='pnpm-lock.yaml'){
         let value:unknown;try{value=YAML.parse(text)}catch{throw new Error('Playwright pnpm-lock.yaml is malformed')}
-        const visit=(node:unknown,key=''):boolean=>{
-          if(!node||typeof node!=='object')return false;
-          if((key===name||key===`/${name}`)&&typeof (node as {version?:unknown}).version==='string'&&String((node as {version:string}).version).split('(')[0]===version)return true;
-          for(const [childKey,child] of Object.entries(node as Record<string,unknown>)){
-            const normalized=childKey.startsWith('/')?childKey.slice(1):childKey;
-            if(normalized.startsWith(`${name}@`)&&normalized.slice(name.length+1).split('(')[0]===version)return true;
-            if(visit(child,childKey))return true;
-          }
-          return false;
+        const lock=value as {packages?:Record<string,unknown>;snapshots?:Record<string,unknown>;importers?:Record<string,unknown>};
+        const keyMatches=(key:string):boolean=>{
+          const normalized=key.startsWith('/')?key.slice(1):key;
+          return normalized.startsWith(`${name}@`)&&normalized.slice(name.length+1).split('(')[0]===version;
         };
-        locked=visit(value);
+        locked=[...Object.keys(lock.packages??{}),...Object.keys(lock.snapshots??{})].some(keyMatches);
+        if(!locked)for(const importer of Object.values(lock.importers??{})){
+          if(!importer||typeof importer!=='object')continue;
+          for(const section of ['dependencies','devDependencies','optionalDependencies']){
+            const entry=(importer as Record<string,unknown>)[section];
+            if(!entry||typeof entry!=='object')continue;
+            const dependency=(entry as Record<string,unknown>)[name];
+            const pinned=typeof dependency==='string'?dependency:(dependency&&typeof dependency==='object'?(dependency as {version?:unknown}).version:null);
+            if(typeof pinned==='string'&&pinned.split('(')[0]===version){locked=true;break}
+          }
+          if(locked)break;
+        }
       }else{
         const escapedName=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),escapedVersion=version.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-        const block=new RegExp(`^(?:"?${escapedName}@[^\\n]+):\\r?\\n((?:[ \\t].*(?:\\r?\\n|$))*)`,'gm');let match:RegExpExecArray|null;
-        while((match=block.exec(text))!==null)if(new RegExp(`^[ \\t]+version[ \\t]+["']${escapedVersion}["']`,'m').test(match[1])){locked=true;break}
+        const block=new RegExp(`^(?:["']?${escapedName}@[^\\n]+["']?):\\r?\\n((?:[ \\t].*(?:\\r?\\n|$))*)`,'gm');let match:RegExpExecArray|null;
+        while((match=block.exec(text))!==null)if(new RegExp(`^[ \\t]+version:?[ \\t]+["']?${escapedVersion}["']?[ \\t]*$`,'m').test(match[1])){locked=true;break}
       }
       if(!locked)throw new Error(`${name} ${version} is not pinned by ${relative}`);
       return{file:relative,sha256:sha256(content)};

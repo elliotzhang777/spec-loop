@@ -129,6 +129,7 @@ function withinAnyRoot(file: string, roots: string[]): boolean {
 export async function recoverCrossRootTransactions(coordinatorRoot: string, allowedRoots: string[]): Promise<void> {
   const dir = path.join(coordinatorRoot, '.spec-loop-cross-tx');
   if (!(await exists(dir))) return;
+  await safeTransactionDirectory(coordinatorRoot,'.spec-loop-cross-tx');
   const normalized = allowedRoots.map((root) => path.resolve(root));
   for (const name of (await readdir(dir)).filter((n) => n.endsWith('.json')).sort()) {
     const journalPath = path.join(dir, name);
@@ -136,12 +137,16 @@ export async function recoverCrossRootTransactions(coordinatorRoot: string, allo
     if (journal.allowed_roots.length !== normalized.length || journal.allowed_roots.some((root) => !normalized.includes(root))) throw new Error(`cross-root transaction ${journal.id}: allowed roots changed`);
     for (const write of journal.writes) {
       if (!withinAnyRoot(write.target, normalized) || !withinAnyRoot(write.temp, normalized)) throw new Error(`cross-root transaction ${journal.id}: path escapes allowed roots`);
-      if (await exists(write.temp)) {
-        const content = await readFile(write.temp);
+      const targetOwner=normalized.find((root)=>path.resolve(write.target).startsWith(root+path.sep));
+      const tempOwner=normalized.find((root)=>path.resolve(write.temp).startsWith(root+path.sep));
+      if(!targetOwner||!tempOwner)throw new Error(`cross-root transaction ${journal.id}: path has no allowed owner`);
+      const target=await safeTarget(targetOwner,write.target),temp=await safeTarget(tempOwner,write.temp);
+      if (await exists(temp)) {
+        const content = await readFile(temp);
         if (sha256(content) !== write.hash) throw new Error(`cross-root transaction ${journal.id}: corrupt temp file`);
-        await mkdir(path.dirname(write.target), { recursive: true });
-        await rename(write.temp, write.target);
-      } else if (!(await exists(write.target)) || sha256(await readFile(write.target)) !== write.hash) {
+        await mkdir(path.dirname(target), { recursive: true });
+        await rename(temp, target);
+      } else if (!(await exists(target)) || sha256(await readFile(target)) !== write.hash) {
         throw new Error(`cross-root transaction ${journal.id}: target diverged or is missing`);
       }
     }
@@ -152,8 +157,7 @@ export async function recoverCrossRootTransactions(coordinatorRoot: string, allo
 export async function atomicWriteAcrossRoots(coordinatorRoot: string, allowedRoots: string[], values: Array<{ file: string; content: string | Buffer }>): Promise<void> {
   const roots = allowedRoots.map((root) => path.resolve(root));
   await recoverCrossRootTransactions(coordinatorRoot, roots);
-  const txDir = path.join(coordinatorRoot, '.spec-loop-cross-tx');
-  await mkdir(txDir, { recursive: true });
+  const txDir = await safeTransactionDirectory(coordinatorRoot,'.spec-loop-cross-tx');
   const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
   const writes: TxWrite[] = [];
   for (let i = 0; i < values.length; i++) {
@@ -161,14 +165,13 @@ export async function atomicWriteAcrossRoots(coordinatorRoot: string, allowedRoo
     if (!withinAnyRoot(target, roots)) throw new Error(`cross-root transaction target escapes allowed roots: ${target}`);
     const owner = roots.find((root) => target === root || target.startsWith(root + path.sep));
     if (!owner) throw new Error(`no owner root for ${target}`);
-    const tempDir = path.join(owner, '.spec-loop-cross-tx-data');
-    await mkdir(tempDir, { recursive: true });
-    const temp = path.join(tempDir, `${id}-${i}.tmp`);
+    const tempDir = await safeTransactionDirectory(owner,'.spec-loop-cross-tx-data');
+    const temp = await safeTarget(owner,path.join(tempDir, `${id}-${i}.tmp`));
     await writeFile(temp, values[i].content);
     writes.push({ target, temp, hash: sha256(values[i].content) });
   }
   const journal: CrossRootJournal = { id, status: 'prepared', allowed_roots: roots, writes };
-  await writeFile(path.join(txDir, `${id}.json`), JSON.stringify(journal, null, 2));
+  await writeFile(await safeTarget(coordinatorRoot,path.join(txDir, `${id}.json`)), JSON.stringify(journal, null, 2));
   await recoverCrossRootTransactions(coordinatorRoot, roots);
 }
 

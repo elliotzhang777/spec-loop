@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cli, tempRoot, writeMd } from './helpers.mjs';
@@ -53,4 +53,28 @@ test('cross-root transaction writes both roots and recovers a prepared journal',
   const parent=await tempRoot('cross-root-'),control=path.join(parent,'control'),repo=path.join(parent,'repo');await mkdir(control);await mkdir(repo);await atomicWriteAcrossRoots(control,[control,repo],[{file:path.join(control,'task.md'),content:'task\n'},{file:path.join(repo,'spec.md'),content:'spec\n'}]);assert.equal(await readFile(path.join(control,'task.md'),'utf8'),'task\n');assert.equal(await readFile(path.join(repo,'spec.md'),'utf8'),'spec\n');
   const txDir=path.join(control,'.spec-loop-cross-tx'),dataDir=path.join(repo,'.spec-loop-cross-tx-data');await mkdir(txDir,{recursive:true});await mkdir(dataDir,{recursive:true});const content='recovered\n',temp=path.join(dataDir,'manual-0.tmp'),target=path.join(repo,'recovered.md');await writeFile(temp,content);const hash=createHash('sha256').update(content).digest('hex');await writeFile(path.join(txDir,'manual.json'),JSON.stringify({id:'manual',status:'prepared',allowed_roots:[path.resolve(control),path.resolve(repo)],writes:[{target,temp,hash}]},null,2));await recoverCrossRootTransactions(control,[control,repo]);assert.equal(await readFile(target,'utf8'),content);
   await assert.rejects(()=>atomicWriteAcrossRoots(control,[control,repo],[{file:path.join(parent,'escape.md'),content:'escape'}]),/escapes allowed roots/);
+});
+
+test('cross-root transaction rejects symbolic journal and temp directories before writing',async()=>{
+  const parent=await tempRoot('cross-root-symlink-'),outside=path.join(parent,'outside');await mkdir(outside);
+  const control=path.join(parent,'control'),repo=path.join(parent,'repo');await mkdir(control);await mkdir(repo);
+  await symlink(outside,path.join(control,'.spec-loop-cross-tx'));
+  await assert.rejects(()=>atomicWriteAcrossRoots(control,[control,repo],[{file:path.join(repo,'spec.md'),content:'spec\n'}]),/transaction directory is symbolic/);
+  assert.deepEqual(await readdir(outside),[]);
+
+  const control2=path.join(parent,'control-2'),repo2=path.join(parent,'repo-2'),outside2=path.join(parent,'outside-2');await mkdir(control2);await mkdir(repo2);await mkdir(outside2);
+  await symlink(outside2,path.join(repo2,'.spec-loop-cross-tx-data'));
+  await assert.rejects(()=>atomicWriteAcrossRoots(control2,[control2,repo2],[{file:path.join(repo2,'spec.md'),content:'spec\n'}]),/transaction directory is symbolic/);
+  assert.deepEqual(await readdir(outside2),[]);
+});
+
+test('Harness report rejects Gate order changes after execution',async()=>{
+  const f=await throughCollect('ORDER'),gateFile=path.join(f.root,'.spec-loop','GATES.md');
+  const plan={schema_version:1,gates:[
+    {id:'first',command:[process.execPath,'check.mjs'],timeout_seconds:30},
+    {id:'second',command:[process.execPath,'check.mjs'],timeout_seconds:30},
+  ]};
+  await writeMd(gateFile,plan,'# Gates\n\nOrder-bound fixture.');assert.equal(cli(['gate','run',f.root,f.taskId]).code,0);
+  plan.gates.reverse();await writeMd(gateFile,plan,'# Gates\n\nOrder-bound fixture.');
+  const report=cli(['harness','report',f.root,f.taskId]);assert.notEqual(report.code,0);assert.match(report.stderr,/Gate Plan/);
 });

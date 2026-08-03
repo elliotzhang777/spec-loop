@@ -8,7 +8,7 @@ import { artifact, cli, fillDelivery, fillRound, readMd, tempRoot, writeMd } fro
 
 function git(cwd,args){const result=spawnSync('git',args,{cwd,encoding:'utf8'});if(result.status!==0)throw new Error(result.stderr);return result.stdout.trim()}
 
-async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true,includeLock=true,lockKind='npm'){
+async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true,includeLock=true,lockKind='npm',visualAc=false){
   const root=await tempRoot(`playwright-${name.toLowerCase()}-`),repo=path.join(root,'repo');
   await mkdir(path.join(repo,packageRoot,'node_modules','@playwright','test'),{recursive:true});
   await mkdir(path.join(repo,'tests'),{recursive:true});
@@ -33,6 +33,8 @@ console.log(zero?'zero tests':'one browser test passed');`;
     }));
   if(includeLock&&lockKind==='pnpm-helper')await writeFile(path.join(repo,packageRoot,'pnpm-lock.yaml'),"lockfileVersion: '9.0'\npackages:\n  '@playwright/test-helper@1.50.0': {}\n");
   if(includeLock&&lockKind==='pnpm')await writeFile(path.join(repo,packageRoot,'pnpm-lock.yaml'),"lockfileVersion: '9.0'\npackages:\n  '@playwright/test@1.50.0': {}\n");
+  if(includeLock&&lockKind==='yarn-helper')await writeFile(path.join(repo,packageRoot,'yarn.lock'),"'@playwright/test-helper@^1.50.0':\n  version: 1.50.0\n");
+  if(includeLock&&lockKind==='yarn')await writeFile(path.join(repo,packageRoot,'yarn.lock'),"'@playwright/test@npm:^1.50.0':\n  version: 1.50.0\n  resolution: '@playwright/test@npm:1.50.0'\n");
   await writeFile(path.join(repo,'delete-me.txt'),'tracked candidate file\n');
   for(const testPath of tests){
     await mkdir(path.dirname(path.join(repo,testPath)),{recursive:true});
@@ -46,7 +48,10 @@ console.log(zero?'zero tests':'one browser test passed');`;
   assert.equal(cli(['triage','create-task',root,proposal,'--id',`TASK-${name}`,'--title','Verify web flow']).code,0);
   const task=path.join(root,'.spec-loop','tasks',`task-${name.toLowerCase()}`);
   const acceptance=await readMd(path.join(task,'ACCEPTANCE.md'));
-  await writeMd(path.join(task,'ACCEPTANCE.md'),{...acceptance.data,web_gates:[{id:'web-e2e',kind:'playwright',required:true,ac:['AC-1']}]},acceptance.body);
+  await writeMd(path.join(task,'ACCEPTANCE.md'),{
+    ...acceptance.data,web_gates:[{id:'web-e2e',kind:'playwright',required:true,ac:['AC-1']}],
+    human_reviews:visualAc?[{id:'REVIEW-1',kind:'visual',required:true,ac:['AC-1']}]:[],
+  },acceptance.body);
   await writeMd(path.join(task,'PLAN.md'),{schema_version:1,task_id:`TASK-${name}`,version:1,ac_coverage:['AC-1']},'# Plan\n\nRun the target-local Playwright suite and collect browser evidence.');
   const planned=cli(['plan',task]);assert.equal(planned.code,0,planned.stderr);assert.equal(cli(['round',task]).code,0);
   await fillRound(task,1);
@@ -196,6 +201,22 @@ test('Playwright Gate does not accept a similar pnpm package name as the runner 
 test('Playwright Gate accepts the exact runner version from a tracked pnpm lockfile',async()=>{
   const f=await webFixture('WEBPNPM',['tests/e2e.spec.ts'],30,false,'.',true,true,'pnpm');
   const result=cli(['harness','verify',f.root,f.taskId,'--json']);
+  assert.equal(result.code,0,result.stderr);
+});
+
+test('Playwright Gate requires screenshots when it covers a visual Review AC',async()=>{
+  const f=await webFixture('WEBVISUALNOSCREEN',['tests/noscreenshot.spec.ts'],30,false,'.',false,true,'npm',true);
+  const result=cli(['harness','verify',f.root,f.taskId,'--json']);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/visual Review AC must require screenshots/);
+});
+
+test('Playwright Gate accepts exact Yarn Berry locks and rejects similar package names',async()=>{
+  const wrong=await webFixture('WEBWRONGYARN',['tests/e2e.spec.ts'],30,false,'.',true,true,'yarn-helper');
+  let result=cli(['harness','verify',wrong.root,wrong.taskId,'--json']);
+  assert.notEqual(result.code,0);assert.match(result.stderr,/@playwright\/test 1\.50\.0 is not pinned/);
+  const exact=await webFixture('WEBYARN',['tests/e2e.spec.ts'],30,false,'.',true,true,'yarn');
+  result=cli(['harness','verify',exact.root,exact.taskId,'--json']);
   assert.equal(result.code,0,result.stderr);
 });
 
