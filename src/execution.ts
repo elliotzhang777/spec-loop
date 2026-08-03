@@ -208,7 +208,7 @@ const INLINE_INTERPRETER_FLAGS:Record<string,Set<string>>={
   bun:new Set(['-e','--eval','-p','--print','-r','--preload']),deno:new Set(['eval']),
   python:new Set(['-c','-m']),python2:new Set(['-c','-m']),python3:new Set(['-c','-m']),'python3.exe':new Set(['-c','-m']),
   ruby:new Set(['-e','--eval','-r','--require']),perl:new Set(['-e','-m']),
-  php:new Set(['-r','--run','-b','--process-begin','-r','--process-code','-f','--process-file','-e','--process-end']),osascript:new Set(['-e']),
+  php:new Set(['-r','--run','-b','--process-begin','-r','--process-code','-f','--process-file','-e','--process-end','-d','--define','-c','--php-ini']),osascript:new Set(['-e']),
 };
 function interpreterFamily(bin:string):string{
   if(/^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(bin))return bin.endsWith('.exe')?'python3.exe':'python3';

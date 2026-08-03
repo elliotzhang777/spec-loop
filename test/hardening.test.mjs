@@ -40,8 +40,10 @@ test('Gate rejects shell dispatchers and records hard timeout',async()=>{
   const shell=await throughCollect('SHELL');await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'bad',command:['sh','-c','git push'],timeout_seconds:10}]},'# Gates\n\nShell bypass attempt.');let result=cli(['gate','run',shell.root,shell.taskId]);assert.notEqual(result.code,0);assert.match(result.stderr,/dispatcher is forbidden/);
   for(const [id,command] of [
     ['ksh',['ksh','-c','git push']],
+    ['ash',['ash','-c','git push']],
     ['busybox',['busybox','sh','-c','git push']],
     ['nu',['nu','-c','git push']],
+    ['xonsh',['xonsh','-c','git push']],
     ['node-e',[process.execPath,"-erequire('node:child_process').execSync('git push')"]],
     ['node-require',[process.execPath,'--require','./unsafe-preload.cjs','safe-test.mjs']],
     ['python-c',['python3',"-c__import__('subprocess').run(['git','push'])"]],
@@ -50,6 +52,9 @@ test('Gate rejects shell dispatchers and records hard timeout',async()=>{
     ['ruby-require',['ruby','--require','./unsafe.rb','safe.rb']],
     ['perl-module',['perl','-MUnsafe','safe.pl']],
     ['php-begin',['php','-Bsystem("git push");','safe.php']],
+    ['php-define',['php','-d','auto_prepend_file=unsafe.php','safe.php']],
+    ['php-define-joined',['php','-dauto_prepend_file=unsafe.php','safe.php']],
+    ['php-define-long',['php','--define=auto_prepend_file=unsafe.php','safe.php']],
     ['osascript-e',['osascript','-e','do shell script "git push"']],
     ['npm-exec',['npm','exec','--','sh','-c','git push']],
     ['npm-option-exec',['npm','--silent','exec','--','sh','-c','git push']],
