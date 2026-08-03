@@ -200,14 +200,15 @@ export async function createWorkspace(root:string,taskId:string):Promise<Workspa
 }
 export async function readWorkspace(root:string,taskId:string){const m=manifestSchema.parse(JSON.parse(await readFile(path.join(control(root),'output',`${taskId}-workspace.json`),'utf8')));await validateWorkspace(root,taskId,m);return m}
 
-const SHELLS=new Set(['sh','bash','zsh','fish','dash','csh','tcsh','cmd','cmd.exe','powershell','pwsh','env']);
-const COMMAND_DISPATCHERS=new Set(['npx','bunx','xargs']);
+const SHELLS=new Set(['sh','bash','zsh','fish','dash','ash','ksh','ksh93','mksh','csh','tcsh','cmd','cmd.exe','powershell','pwsh','nu','nushell','xonsh','elvish','osh','oil','rc','busybox','toybox','env']);
+const COMMAND_DISPATCHERS=new Set(['npx','bunx','xargs','parallel','find','expect','script','timeout','watch','nohup','nice','stdbuf']);
 const INLINE_INTERPRETER_FLAGS:Record<string,Set<string>>={
   node:new Set(['-e','--eval','-p','--print','-r','--require','--import','--loader','--experimental-loader']),
   'node.exe':new Set(['-e','--eval','-p','--print','-r','--require','--import','--loader','--experimental-loader']),
-  bun:new Set(['-e','--eval','-p','--print']),deno:new Set(['eval']),
+  bun:new Set(['-e','--eval','-p','--print','-r','--preload']),deno:new Set(['eval']),
   python:new Set(['-c','-m']),python2:new Set(['-c','-m']),python3:new Set(['-c','-m']),'python3.exe':new Set(['-c','-m']),
-  ruby:new Set(['-e']),perl:new Set(['-e']),php:new Set(['-r']),osascript:new Set(['-e']),
+  ruby:new Set(['-e','--eval','-r','--require']),perl:new Set(['-e','-m']),
+  php:new Set(['-r','--run','-b','--process-begin','-r','--process-code','-f','--process-file','-e','--process-end']),osascript:new Set(['-e']),
 };
 function interpreterFamily(bin:string):string{
   if(/^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(bin))return bin.endsWith('.exe')?'python3.exe':'python3';
@@ -221,7 +222,7 @@ function assertGateCommand(command:string[]){
     const value=arg.toLowerCase();return value===flag||(flag.startsWith('--')?value.startsWith(`${flag}=`):flag.length===2&&value.startsWith(flag));
   })))
     throw new Error(`inline interpreter or preload dispatch is forbidden in gate: ${command[0]}`);
-  if(['npm','pnpm','yarn','bun'].includes(bin)&&['exec','dlx','x'].includes((command[1]??'').toLowerCase()))throw new Error(`shell or command dispatcher is forbidden in gate: ${command.slice(0,2).join(' ')}`);
+  if(['npm','pnpm','yarn','bun'].includes(bin)&&command.slice(1).some((arg)=>['exec','dlx','x'].includes(arg.toLowerCase())))throw new Error(`shell or command dispatcher is forbidden in gate: ${command.join(' ')}`);
   if(bin==='sudo'||bin==='su')throw new Error(`privilege escalation is forbidden in gate: ${command[0]}`);
   if(bin==='git'&&['push','merge','rebase','reset','clean','checkout','switch','branch','tag','commit'].includes((command[1]??'').toLowerCase()))throw new Error(`mutating git command is forbidden in gate: ${command.join(' ')}`);
   const joined=command.join(' ').toLowerCase();if(/\b(deploy|publish|release)\b/.test(joined))throw new Error(`release command is forbidden in gate: ${command.join(' ')}`);

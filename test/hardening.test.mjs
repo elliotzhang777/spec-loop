@@ -10,7 +10,7 @@ import { atomicWriteAcrossRoots, recoverCrossRootTransactions } from '../dist/fi
 function git(cwd,args){const r=spawnSync('git',args,{cwd,encoding:'utf8'});if(r.status!==0)throw new Error(r.stderr);return r.stdout.trim()}
 
 async function fixture(name='HARD'){
-  const root=await tempRoot(`phase3-${name.toLowerCase()}-`),repo=path.join(root,'repo');await mkdir(repo);git(repo,['init','-b','main']);git(repo,['config','user.email','test@example.com']);git(repo,['config','user.name','Test']);await writeFile(path.join(repo,'check.mjs'),"console.log('pass')\n");await writeFile(path.join(repo,'sleep.mjs'),"setTimeout(()=>{},10_000)\n");git(repo,['add','.']);git(repo,['commit','-m','initial']);
+  const root=await tempRoot(`phase3-${name.toLowerCase()}-`),repo=path.join(root,'repo');await mkdir(repo);git(repo,['init','-b','main']);git(repo,['config','user.email','test@example.com']);git(repo,['config','user.name','Test']);await writeFile(path.join(repo,'check.mjs'),"console.log('pass')\n");await writeFile(path.join(repo,'sleep.mjs'),"setTimeout(()=>{},10_000)\n");await writeFile(path.join(repo,'package.json'),'{"private":true,"scripts":{"test":"node check.mjs"}}\n');git(repo,['add','.']);git(repo,['commit','-m','initial']);
   assert.equal(cli(['project','init',root,'--id',`PROJ-${name}`,'--name',name,'--repository',repo]).code,0);const proposal=cli(['triage','propose',root,'--source','security review','--goal','Exercise hardened harness','--reason','Need adversarial evidence','--ac','security gate passes']).stdout.trim();assert.equal(cli(['triage','approve',root,proposal,'--by','reviewer']).code,0);assert.equal(cli(['triage','create-task',root,proposal,'--id',`TASK-${name}-1`,'--title','Harden harness']).code,0);
   const task=path.join(root,'.spec-loop','tasks',`task-${name.toLowerCase()}-1`);await writeMd(path.join(task,'PLAN.md'),{schema_version:1,task_id:`TASK-${name}-1`,version:1,ac_coverage:['AC-1']},'# Plan\n\nRun the hardened execution sequence.');assert.equal(cli(['plan',task]).code,0);assert.equal(cli(['round',task]).code,0);git(repo,['add','.']);git(repo,['commit','-m','specs']);
   const providers=path.join(root,'.spec-loop','PROVIDERS.md'),doc=(await readFile(providers,'utf8')).replace('executable: codex','executable: /usr/bin/true');await writeFile(providers,doc);return{root,repo,task,taskId:`TASK-${name}-1`,proposal};
@@ -39,15 +39,32 @@ test('Harness reconcile rolls stale collected evidence back to a rerunnable stag
 test('Gate rejects shell dispatchers and records hard timeout',async()=>{
   const shell=await throughCollect('SHELL');await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'bad',command:['sh','-c','git push'],timeout_seconds:10}]},'# Gates\n\nShell bypass attempt.');let result=cli(['gate','run',shell.root,shell.taskId]);assert.notEqual(result.code,0);assert.match(result.stderr,/dispatcher is forbidden/);
   for(const [id,command] of [
+    ['ksh',['ksh','-c','git push']],
+    ['busybox',['busybox','sh','-c','git push']],
+    ['nu',['nu','-c','git push']],
     ['node-e',[process.execPath,"-erequire('node:child_process').execSync('git push')"]],
     ['node-require',[process.execPath,'--require','./unsafe-preload.cjs','safe-test.mjs']],
     ['python-c',['python3',"-c__import__('subprocess').run(['git','push'])"]],
+    ['bun-preload',['bun','--preload','./unsafe.ts','test']],
+    ['deno-eval',['deno','eval','new Deno.Command("git",{args:["push"]}).output()']],
+    ['ruby-require',['ruby','--require','./unsafe.rb','safe.rb']],
+    ['perl-module',['perl','-MUnsafe','safe.pl']],
+    ['php-begin',['php','-Bsystem("git push");','safe.php']],
+    ['osascript-e',['osascript','-e','do shell script "git push"']],
     ['npm-exec',['npm','exec','--','sh','-c','git push']],
+    ['npm-option-exec',['npm','--silent','exec','--','sh','-c','git push']],
+    ['pnpm-option-dlx',['pnpm','--dir','.','dlx','sh','-c','git push']],
+    ['yarn-option-dlx',['yarn','--cwd','.','dlx','sh','-c','git push']],
+    ['bun-option-x',['bun','--silent','x','sh','-c','git push']],
     ['npx',['npx','sh','-c','git push']],
+    ['bunx',['bunx','sh','-c','git push']],
+    ['xargs',['xargs','sh','-c','git push']],
   ]){
     await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id,command,timeout_seconds:10}]},'# Gates\n\nInterpreter or dispatcher bypass attempt.');
     result=cli(['gate','run',shell.root,shell.taskId]);assert.notEqual(result.code,0);assert.match(result.stderr,/(dispatcher|inline interpreter)/);
   }
+  await writeMd(path.join(shell.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'npm-test',command:['npm','test'],timeout_seconds:30}]},'# Gates\n\nA pinned project test script remains allowed.');
+  result=cli(['gate','run',shell.root,shell.taskId,'--json']);assert.equal(result.code,0,result.stderr);assert.equal(JSON.parse(result.stdout)[0].exit_code,0);
   const timeout=await throughCollect('TIME');await writeMd(path.join(timeout.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'timeout',command:[process.execPath,'sleep.mjs'],timeout_seconds:1}]},'# Gates\n\nTimeout fixture.');result=cli(['gate','run',timeout.root,timeout.taskId,'--json']);assert.notEqual(result.code,0);const gates=JSON.parse(result.stdout);assert.equal(gates[0].timed_out,true);assert.equal(gates[0].exit_code,124);
 });
 
