@@ -98,7 +98,7 @@ Harness Report 必须注明实际运行的验证层级和 Gate 集合。未运�
 - Acceptance、请求 hash、决定历史、截图文件、媒体内容或截图 hash 不一致；
 - 必需 Review 没有绑定已有 AC。
 
-批准后的 Review ID 会写入本轮原生 Evidence；Delivery 中视觉 AC 必须映射到包含该 Review ID 的 Evidence。视觉 Review 判断布局、密度、层级和整体效果；确定性 Gate 与独立 Verifier 继续判断功能和工程质量，二者不能互相代替。
+批准后的 Review ID 会写入本轮原生 Evidence；Delivery 中视觉 AC 必须映射到包含该 Review ID 的 Evidence。视觉 Review 判断布局、密度、层级和整体效果；确定性 Gate 与独立 Verifier 继续判断功能和工程质量，二者不能互相代替。Phase 3 通过受控 Worktree 与主控制目录隔离 Maker，Reviewer 字段用于审计而非本机身份认证；具备同一 OS 用户控制目录写权限的进程属于可信边界，Phase 4 Connector 再提供远程身份与交互卡片签名。
 
 ### 恢复
 

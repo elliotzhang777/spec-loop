@@ -34,7 +34,7 @@ Spec-Loop 不是新的编码模型，也不替代目标工程的代码和规格�
 | Spec/AC | 定义目标、范围、非目标和可验证验收标准 | 不随实现结果任意降低标准 |
 | Evidence | 保存绑定 Task、Round、revision 和 artifact 哈希的验证事实 | 不接受 Agent 自述作为完成证明 |
 
-人工视觉 Review 是横跨 Spec/AC、Gate 与 Delivery 的显式卡点，不由 Maker、Gate 或 Verifier 代签。UI 或视觉 AC 声明 Review 后，用户必须查看当前候选截图并作出批准或拒绝；决定绑定 Round、revision、截图文件和 SHA-256。代码或截图变化后旧批准自动失效。
+人工视觉 Review 是横跨 Spec/AC、Gate 与 Delivery 的显式卡点，不由受控 Worktree 中的 Maker、Gate 或 Verifier 代签。UI 或视觉 AC 声明 Review 后，用户必须通过可信 Controller 查看当前候选截图并作出批准或拒绝；决定绑定 Round、revision、截图文件和 SHA-256。代码或截图变化后旧批准自动失效。Phase 3 是本机单用户工具，CLI 的 `--by` 只做审计归属，不承担操作系统身份认证；可信边界是主控制目录及其外层会话/文件权限，获得同一用户主控制目录写权限的恶意进程不在本阶段威胁模型内，远程身份认证留给 Phase 4 Connector。
 
 ## 主控制链
 

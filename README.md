@@ -128,7 +128,7 @@ web_gates:
     ac: [AC-1]
 ```
 
-Harness 会调用目标 worktree 本地 Playwright，至少要求一项测试实际通过，并归档 JSON、HTML、可完整解码的 PNG 截图、trace/video 和逐文件哈希。服务启动、`baseURL`、认证 fixture 等写在目标工程自己的 Playwright config 中。Web Gate 与 AC 的声明会在 `plan` 时冻结到 CLI 管理的 Task State 和状态历史；Gate PASS 会写入本轮原生 Evidence，未绑定该 Gate 的普通 Evidence 不能交付对应 AC。
+Harness 会调用目标 worktree 中由 Git 跟踪锁文件约束的本地 Playwright，至少要求一项测试实际通过，并归档 JSON、HTML、适用的 PNG/trace/video 和逐文件哈希。`require_screenshots: true` 用于页面效果或截图契约；纯功能路径可显式设为 `false`，但不能借此跳过单独声明的人工视觉 Review。服务启动、`baseURL`、认证 fixture 等写在目标工程自己的 Playwright config 中。完整 Gate Plan（测试路径、配置、项目、grep、超时和截图策略）会被哈希绑定到 Evidence，执行后变化即失效。
 
 视觉任务还应在控制 Task 的 `ACCEPTANCE.md` 声明：
 

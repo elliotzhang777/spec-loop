@@ -8,7 +8,7 @@ import { artifact, cli, fillDelivery, fillRound, readMd, tempRoot, writeMd } fro
 
 function git(cwd,args){const result=spawnSync('git',args,{cwd,encoding:'utf8'});if(result.status!==0)throw new Error(result.stderr);return result.stdout.trim()}
 
-async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true){
+async function webFixture(name='WEB',tests=['tests/e2e.spec.ts'],timeoutSeconds=30,deleteTrackedCandidate=false,packageRoot='.',requireScreenshots=true,includeLock=true){
   const root=await tempRoot(`playwright-${name.toLowerCase()}-`),repo=path.join(root,'repo');
   await mkdir(path.join(repo,packageRoot,'node_modules','@playwright','test'),{recursive:true});
   await mkdir(path.join(repo,'tests'),{recursive:true});
@@ -28,6 +28,9 @@ console.log(zero?'zero tests':'one browser test passed');`;
   const fakeCliClosed=`${fakeCli}\n}`;
   await writeFile(path.join(repo,packageRoot,'node_modules','@playwright','test','cli.js'),fakeCliClosed);
   await writeFile(path.join(repo,packageRoot,'node_modules','@playwright','test','package.json'),JSON.stringify({name:'@playwright/test',version:'1.50.0'}));
+  if(includeLock)await writeFile(path.join(repo,packageRoot,'package-lock.json'),JSON.stringify({
+    name:'web-fixture',lockfileVersion:3,packages:{'':{name:'web-fixture'},'node_modules/@playwright/test':{version:'1.50.0'}},
+  }));
   await writeFile(path.join(repo,'delete-me.txt'),'tracked candidate file\n');
   for(const testPath of tests){
     await mkdir(path.dirname(path.join(repo,testPath)),{recursive:true});
@@ -71,9 +74,19 @@ test('Playwright Gate runs target-local CLI, proves tests ran, and hashes browse
   assert.equal(gate.exit_code,0);
   assert.equal(gate.web_evidence.stats.expected,1);
   assert.equal(gate.web_evidence.screenshots,1);
+  assert.match(gate.plan_sha256,/^[a-f0-9]{64}$/);
   const manifest=JSON.parse(await readFile(path.join(f.root,gate.web_evidence.manifest),'utf8'));
+  assert.equal(manifest.runner.lockfile,'package-lock.json');
   const screenshot=manifest.files.find(item=>item.file.endsWith('/home.png'));
   assert.ok(screenshot);
+
+  const gateFile=path.join(f.root,'.spec-loop','GATES.md'),gateDoc=await readMd(gateFile);
+  gateDoc.data.gates[0].timeout_seconds=31;
+  await writeMd(gateFile,gateDoc.data,gateDoc.body);
+  result=cli(['harness','report',f.root,f.taskId]);
+  assert.notEqual(result.code,0);assert.match(result.stderr,/Gate Plan/);
+  gateDoc.data.gates[0].timeout_seconds=30;
+  await writeMd(gateFile,gateDoc.data,gateDoc.body);
 
   const original=await readFile(path.join(f.root,screenshot.file));
   await writeFile(path.join(f.root,screenshot.file),'tampered');
@@ -156,6 +169,13 @@ test('Playwright Gate allows screenshot-free functional evidence when the Gate e
   result=cli(['harness','report',f.root,f.taskId,'--json']);
   assert.equal(result.code,0,result.stderr);
   assert.equal(JSON.parse(result.stdout).passed,true);
+});
+
+test('Playwright Gate rejects an installed CLI that is not pinned by a tracked lockfile',async()=>{
+  const f=await webFixture('WEBUNLOCKED',['tests/e2e.spec.ts'],30,false,'.',true,false);
+  const result=cli(['harness','verify',f.root,f.taskId,'--json']);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/requires a tracked .*lock/i);
 });
 
 test('Playwright Gate fingerprints tracked deletions and rejects legacy Collect Evidence without a content fingerprint',async()=>{

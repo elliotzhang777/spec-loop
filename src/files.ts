@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
 
@@ -50,8 +50,23 @@ interface CrossRootJournal extends Journal { allowed_roots: string[] }
 
 async function safeTarget(root: string, target: string): Promise<string> {
   const resolved = path.resolve(target);
-  const prefix = path.resolve(root) + path.sep;
+  const normalizedRoot = path.resolve(root);
+  const prefix = normalizedRoot + path.sep;
   if (!resolved.startsWith(prefix)) throw new Error(`transaction target escapes task directory: ${target}`);
+  const rootInfo = await lstat(normalizedRoot).catch(() => null);
+  if (!rootInfo || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error(`transaction root is missing, symbolic, or not a directory: ${root}`);
+  const rootReal = await realpath(normalizedRoot);
+  let current = normalizedRoot;
+  for (const segment of path.relative(normalizedRoot, path.dirname(resolved)).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    const info = await lstat(current).catch(() => null);
+    if (!info) break;
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`transaction target parent is symbolic or not a directory: ${current}`);
+    const actual = await realpath(current);
+    if (actual !== rootReal && !actual.startsWith(rootReal + path.sep)) throw new Error(`transaction target parent escapes task directory: ${current}`);
+  }
+  const targetInfo = await lstat(resolved).catch(() => null);
+  if (targetInfo?.isSymbolicLink()) throw new Error(`transaction target may not be a symbolic link: ${target}`);
   return resolved;
 }
 

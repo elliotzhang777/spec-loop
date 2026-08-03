@@ -59,7 +59,10 @@ const webAttachmentSchema=z.object({file:z.string().min(1),sha256:z.string().reg
 const webManifestSchema=z.object({
   schema_version:z.literal(1),task_id:z.string(),gate_id:z.string(),base_commit:z.string(),head:z.string(),
   ac:z.array(z.string().regex(/^AC-[1-9]\d*$/)).min(1),
-  runner:z.object({package:z.enum(['@playwright/test','playwright']),version:z.string().regex(/^\d+\.\d+\.\d+(?:[-+].*)?$/),cli_sha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict(),
+  runner:z.object({
+    package:z.enum(['@playwright/test','playwright']),version:z.string().regex(/^\d+\.\d+\.\d+(?:[-+].*)?$/),
+    cli_sha256:z.string().regex(/^[a-f0-9]{64}$/),lockfile:z.string().min(1),lockfile_sha256:z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
   stats:playwrightStatsSchema.nullable(),screenshots:z.number().int().nonnegative(),files:z.array(webAttachmentSchema),
   html_report:z.string().nullable(),validation_errors:z.array(z.string()),created_at:z.iso.datetime(),
 }).strict();
@@ -72,6 +75,7 @@ const gateResultSchema = z.object({
   scope_kind:z.enum(['task','wave']).optional(),wave_id:z.string().regex(/^W[A-Z0-9-]*$/).optional(),
   coverage:z.enum(['targeted','full']).default('targeted'),
   database_lifecycle:z.enum(['persistent','disposable']).default('persistent'),
+  plan_sha256:z.string().regex(/^[a-f0-9]{64}$/),
   ac:z.array(z.string().regex(/^AC-[1-9]\d*$/)).optional(),
   command:z.array(z.string()),cwd:z.string(),exit_code:z.number().int(),timed_out:z.boolean(),duration_ms:z.number().int().nonnegative(),
   base_commit:z.string(),head:z.string(),artifact:z.string(),sha256:z.string().regex(/^[a-f0-9]{64}$/),
@@ -81,6 +85,8 @@ const gateResultsSchema = z.array(gateResultSchema).min(1);
 export type WorkspaceManifest = z.infer<typeof manifestSchema>;
 export type GateResult = z.infer<typeof gateResultSchema>;
 type HarnessState = z.infer<typeof harnessStateSchema>;
+
+function gatePlanHash(gate:z.infer<typeof gateDefinitionSchema>):string { return sha256(JSON.stringify(gate)); }
 
 async function git(cwd:string,args:string[]){return (await exec('git',args,{cwd,maxBuffer:10_000_000})).stdout.trim()}
 async function worktreeStatus(cwd:string){return git(cwd,['status','--porcelain=v1','--untracked-files=all'])}
@@ -249,7 +255,35 @@ function playwrightPackageRoots(worktree:string,gate:z.infer<typeof playwrightGa
   return [...roots];
 }
 
-async function resolvePlaywrightCli(worktree:string,packageRoots:string[]=[worktree]):Promise<{cli:string;package:'@playwright/test'|'playwright';version:string;cliSha256:string}>{
+async function lockedPlaywrightDependency(worktree:string,packageRoot:string,name:'@playwright/test'|'playwright',version:string):Promise<{file:string;sha256:string}> {
+  const worktreeReal=await realpath(worktree);let current=await realpath(packageRoot);
+  while(current===worktreeReal||current.startsWith(worktreeReal+path.sep)){
+    for(const filename of ['package-lock.json','pnpm-lock.yaml','yarn.lock']){
+      const file=path.join(current,filename),info=await lstat(file).catch(()=>null);
+      if(!info)continue;
+      if(!info.isFile()||info.isSymbolicLink())throw new Error(`Playwright lockfile is invalid: ${file}`);
+      const actual=await realpath(file);
+      if(actual!==worktreeReal&&!actual.startsWith(worktreeReal+path.sep))throw new Error('Playwright lockfile resolves outside the managed worktree');
+      const relative=path.relative(worktreeReal,actual).split(path.sep).join('/');
+      try{await git(worktreeReal,['ls-files','--error-unmatch',relative])}catch{throw new Error(`Playwright lockfile must be tracked by Git: ${relative}`)}
+      const content=await readFile(actual),text=content.toString('utf8');let locked=false;
+      if(filename==='package-lock.json'){
+        let value:unknown;try{value=JSON.parse(text)}catch{throw new Error('Playwright package-lock.json is malformed')}
+        const lock=value as {packages?:Record<string,{version?:string}>;dependencies?:Record<string,{version?:string}>};
+        locked=lock.packages?.[`node_modules/${name}`]?.version===version||lock.dependencies?.[name]?.version===version;
+      }else{
+        const escapedName=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),escapedVersion=version.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        locked=new RegExp(`${escapedName}(?:@|[^\\n]*\\n(?:[ \\t].*\\n){0,4}[ \\t]+version:?[ \\t]+["']?)${escapedVersion}(?:["']|\\b)`).test(text);
+      }
+      if(!locked)throw new Error(`${name} ${version} is not pinned by ${relative}`);
+      return{file:relative,sha256:sha256(content)};
+    }
+    const parent=path.dirname(current);if(parent===current)break;current=parent;
+  }
+  throw new Error(`Playwright Gate requires a tracked package-lock.json, pnpm-lock.yaml, or yarn.lock pinning ${name} ${version}`);
+}
+
+async function resolvePlaywrightCli(worktree:string,packageRoots:string[]=[worktree]):Promise<{cli:string;package:'@playwright/test'|'playwright';version:string;cliSha256:string;lockfile:string;lockfileSha256:string}>{
   const worktreeReal=await realpath(worktree),prefix=worktreeReal+path.sep;
   const candidates=packageRoots.flatMap(packageRoot=>[
     {cli:path.join(packageRoot,'node_modules','@playwright','test','cli.js'),pkg:path.join(packageRoot,'node_modules','@playwright','test','package.json'),name:'@playwright/test' as const},
@@ -263,9 +297,16 @@ async function resolvePlaywrightCli(worktree:string,packageRoots:string[]=[workt
     if(!actualPkg.startsWith(prefix))throw new Error('Playwright package metadata resolves outside the managed worktree');
     const metadata=JSON.parse(await readFile(actualPkg,'utf8')) as {name?:string;version?:string};
     if(metadata.name!==candidate.name||!metadata.version||!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(metadata.version))throw new Error('invalid target-local Playwright package metadata');
-    return {cli:actual,package:candidate.name,version:metadata.version,cliSha256:sha256(await readFile(actual))};
+    const lock=await lockedPlaywrightDependency(worktree,packageRootFor(candidate.cli),candidate.name,metadata.version);
+    return {cli:actual,package:candidate.name,version:metadata.version,cliSha256:sha256(await readFile(actual)),lockfile:lock.file,lockfileSha256:lock.sha256};
   }
   throw new Error('Playwright Gate requires target-local @playwright/test or playwright in node_modules');
+}
+
+function packageRootFor(cli:string):string {
+  const marker=`${path.sep}node_modules${path.sep}`,index=cli.lastIndexOf(marker);
+  if(index<0)throw new Error('Playwright CLI is not inside node_modules');
+  return cli.slice(0,index);
 }
 
 async function collectWebAttachments(root:string,dir:string):Promise<Array<{file:string;sha256:string;bytes:number}>>{
@@ -367,7 +408,7 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
   if(gate.require_screenshots&&screenshots<1)validationErrors.push('Playwright Gate requires at least one valid screenshot');
   const manifestValue=webManifestSchema.parse({
     schema_version:1,task_id:taskId,gate_id:gate.id,base_commit:m.base_commit,head,ac:gate.ac,
-    runner:{package:runner.package,version:runner.version,cli_sha256:runner.cliSha256},stats,screenshots,
+    runner:{package:runner.package,version:runner.version,cli_sha256:runner.cliSha256,lockfile:runner.lockfile,lockfile_sha256:runner.lockfileSha256},stats,screenshots,
     files:attachments,html_report:htmlReport,validation_errors:validationErrors,created_at:createdAt,
   });
   const manifestContent=JSON.stringify(manifestValue,null,2)+'\n',manifestRel=path.relative(root,path.join(webRoot,'manifest.json')).split(path.sep).join('/');
@@ -380,7 +421,7 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
   ]);
   return gateResultSchema.parse({
     schema_version:1,task_id:taskId,id:gate.id,kind:'playwright',command:[process.execPath,...args],cwd:m.worktree,
-    coverage:config.coverage,database_lifecycle:config.database.lifecycle,
+    coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(gate),
     exit_code:finalCode,timed_out:result.timedOut,duration_ms:Date.now()-started,base_commit:m.base_commit,head,
     artifact:artifactRel,sha256:sha256(content),
     web_evidence:stats?{manifest:manifestRel,sha256:sha256(manifestContent),stats,ac:gate.ac,screenshots,files:attachments.length}:null,
@@ -401,10 +442,10 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
   for(const gate of gates){
     if(gate.kind==='playwright'){
       const result=await runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint);
-      results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,ac:gate.ac}));
+      results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(gate),ac:gate.ac}));
       continue;
     }
-    assertGateCommand(gate.command);assertDatabaseLifecycle(gate.command,config);const started=Date.now(),createdAt=new Date().toISOString(),result=await runProcess(gate.command[0],gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnvironment(config)),head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);results.push(gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt}))
+    assertGateCommand(gate.command);assertDatabaseLifecycle(gate.command,config);const started=Date.now(),createdAt=new Date().toISOString(),result=await runProcess(gate.command[0],gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnvironment(config)),head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);results.push(gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(gate),ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt}))
   }
   const serialized=JSON.stringify(results,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-gates.json`),content:serialized}]);await advance(root,taskId,'collected','verified',m,startHead,results.every(x=>x.exit_code===0)?null:'one or more gates failed',{gates:sha256(serialized)});return results;
 }
@@ -424,8 +465,8 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
     if(g.task_id!==taskId||g.cwd!==m.worktree||g.base_commit!==m.base_commit||g.head!==head)throw new Error(`${g.id}: stale or mismatched gate evidence`);
     const definition=definitions.find((item)=>item.id===g.id);
     if(!definition)throw new Error(`${g.id}: Gate definition is missing`);
-    if(g.scope_kind!==config.scope_kind||g.wave_id!==config.wave_id||g.coverage!==config.coverage||g.database_lifecycle!==config.database.lifecycle||!sameStrings(g.ac??[],definition.ac??[]))
-      throw new Error(`${g.id}: Gate scope or AC coverage changed after execution`);
+    if(g.scope_kind!==config.scope_kind||g.wave_id!==config.wave_id||g.coverage!==config.coverage||g.database_lifecycle!==config.database.lifecycle||!sameStrings(g.ac??[],definition.ac??[])||g.plan_sha256!==gatePlanHash(definition))
+      throw new Error(`${g.id}: Gate Plan, scope or AC coverage changed after execution`);
     const artifactPath=path.resolve(root,g.artifact);
     if(!artifactPath.startsWith(path.resolve(root)+path.sep))throw new Error(`${g.id}: gate artifact escapes project root`);
     const artifact=await readFile(artifactPath);if(sha256(artifact)!==g.sha256)throw new Error(`${g.id}: gate artifact hash mismatch`);
@@ -439,7 +480,7 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
       const manifestRaw=await readFile(manifestPath);if(sha256(manifestRaw)!==g.web_evidence.sha256)throw new Error(`${g.id}: Playwright manifest hash mismatch`);
       const web=webManifestSchema.parse(JSON.parse(manifestRaw.toString('utf8')));
       if(web.task_id!==taskId||web.gate_id!==g.id||web.base_commit!==m.base_commit||web.head!==head||!sameStrings(web.ac,g.web_evidence.ac))throw new Error(`${g.id}: stale or mismatched Playwright manifest`);
-      if(!runner||web.runner.package!==runner.package||web.runner.version!==runner.version||web.runner.cli_sha256!==runner.cliSha256)throw new Error(`${g.id}: target-local Playwright runner changed after Gate`);
+      if(!runner||web.runner.package!==runner.package||web.runner.version!==runner.version||web.runner.cli_sha256!==runner.cliSha256||web.runner.lockfile!==runner.lockfile||web.runner.lockfile_sha256!==runner.lockfileSha256)throw new Error(`${g.id}: target-local Playwright runner or dependency lock changed after Gate`);
       if(!web.stats||web.stats.expected<1||web.stats.unexpected>0||web.stats.flaky>0||web.stats.skipped>0||web.validation_errors.length)throw new Error(`${g.id}: invalid Playwright result summary`);
       if(web.screenshots!==g.web_evidence.screenshots||web.files.length!==g.web_evidence.files)throw new Error(`${g.id}: Playwright evidence summary mismatch`);
       for(const item of web.files){

@@ -29,9 +29,9 @@ test('versioned target-spec manifest is complete and every bundled asset loads',
   await assert.rejects(loadTargetSpecTemplate(path.join(defaultTargetSpecAssetRoot,'missing')),/manifest is missing/);
 });
 
-test('v3 backend, frontend and fullstack profiles load the split source specification libraries',async()=>{
+test('current backend, frontend and fullstack profiles load the split source specification libraries',async()=>{
   const backend=await loadTargetSpecBundle('backend'),frontend=await loadTargetSpecBundle('frontend'),fullstack=await loadTargetSpecBundle('fullstack');
-  assert.equal(backend.template_version,'2.0.2');
+  assert.equal(backend.template_version,'2.0.3');
   assert.equal(backend.primary_spec_root,'spec');
   assert.equal(backend.backend_task_root,'spec/05-task');
   assert.equal(backend.frontend_task_root,null);

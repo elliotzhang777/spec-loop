@@ -37,8 +37,8 @@
 ## 验收标准
 
 - [x] AC-1：视觉任务可声明强制人工效果验收，未批准、被拒绝、revision 漂移或截图篡改均阻断交付
-- [x] AC-2：Playwright Gate 使用目标工程本地 CLI，至少执行一项测试并归档 JSON、HTML、截图及哈希
-- [x] AC-3：Harness Report 验证 Playwright Evidence 完整性，零测试、flaky、无截图、超时或产物篡改不得通过
+- [x] AC-2：Playwright Gate 使用目标工程锁文件约束的本地 CLI，至少执行一项测试并归档 JSON、HTML、适用附件及哈希；视觉路径必须包含截图
+- [x] AC-3：Harness Report 验证完整 Gate Plan 与 Playwright Evidence，零测试、flaky、缺少声明为必需的截图、超时或产物篡改不得通过
 - [x] AC-4：目标规格模板、总体架构、Feature、Design、README 和测试同步更新
 
 ## 验证计划
@@ -47,12 +47,12 @@
 |---|---|---|
 | AC-1 | `test/review.test.mjs` | 未请求、revision 漂移、图片篡改与非图片证据被阻断，批准后可验证 |
 | AC-2 | `test/playwright-gate.test.mjs` | 目标本地 CLI 运行，至少一项测试、HTML/JSON/截图和 Manifest 被归档 |
-| AC-3 | Playwright 零测试与附件篡改对抗 | Gate/Report 明确失败，恢复原文件后可复验 |
+| AC-3 | Gate Plan 漂移、Playwright 零测试与附件篡改对抗 | Gate/Report 明确失败，恢复原文件后可复验 |
 | AC-4 | `npm test`、`project spec-check`、`git diff --check` | 全量回归与规格一致性通过 |
 
 ## 交付记录
 
-实现与规格已完成。专项验证 16/16、全量回归 50/50、规格检查与差异检查均通过。首轮独立审查发现的伪图片、旧 Collect 缺指纹、tracked 删除和模板版本兼容四项 P1 已全部修复并补充对抗测试；当前等待形成稳定 Git revision 后重新执行正式独立 Verifier 与 Delivery。
+实现与规格已完成。首轮历史审查发现的伪图片、旧 Collect 缺指纹、tracked 删除和模板版本兼容四项 P1 已修复。2026-08-03 正式复核又发现 Gate Plan 未完整绑定、Review 目录父级软链、依赖锁来源和规格边界漂移，已进入 Round 2 加固并新增不可变目标规格资产 v4；功能型 Gate 可显式不要求截图，但 UI/视觉 AC 仍必须独立声明视觉 Review，二者不可互相替代。
 
 ## 验证证据
 

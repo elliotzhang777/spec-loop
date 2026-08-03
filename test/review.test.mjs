@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { artifact, cli, fillContracts, fillRound, readMd, tempRoot, writeMd } from './helpers.mjs';
@@ -80,6 +80,15 @@ test('visual review request only accepts image evidence',async()=>{
   const forged=cli(['review','request',f.root,'--id','REVIEW-1','--revision',f.revision,'--evidence',fake]);
   assert.notEqual(forged.code,0);
   assert.match(forged.stderr,/not a valid image\/png/);
+});
+
+test('visual review rejects a symbolic parent directory',async()=>{
+  const f=await visualTask('SYMLINKPARENT'),outside=path.join(path.dirname(f.root),'outside-reviews');
+  await mkdir(outside);
+  await symlink(outside,path.join(f.root,'reviews'));
+  const result=cli(['review','request',f.root,'--id','REVIEW-1','--revision',f.revision,'--evidence',f.screenshot]);
+  assert.notEqual(result.code,0);
+  assert.match(result.stderr,/parent is symbolic/);
 });
 
 test('visual contract downgrade and decision projection forgery are rejected',async()=>{

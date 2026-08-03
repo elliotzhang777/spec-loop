@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "template_version": "2.0.3",
+  "profile": "frontend",
+  "spec_root": "spec",
+  "task_root": "spec/05-task",
+  "files": [
+    { "path": "AGENT.md", "role": "agent", "kind": "document", "check_placeholders": false },
+    { "path": "spec/README.md", "role": "guide", "kind": "document", "check_placeholders": false },
+    { "path": "spec/00-conventions/development-guidelines.md", "role": "conventions", "kind": "document", "check_placeholders": true },
+    { "path": "spec/05-task/_template.md", "role": "web-task-template", "kind": "template", "check_placeholders": false }
+  ]
+}
