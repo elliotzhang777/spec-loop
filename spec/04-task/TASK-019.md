@@ -1,13 +1,13 @@
 # TASK-019：人工视觉验收与 Playwright Web Gate
 
-- 状态：待验证
+- 状态：已完成
 - 风险等级：standard
 - Spec-Loop Task：.spec-loop/tasks/task-019
 - Proposal：PROP-3
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-07-23
-- 最后更新：2026-07-23
+- 最后更新：2026-08-03
 - 所属设计：[DES-003](../03-design/DES-003-project-loop-agent-harness.md)、[DES-006](../03-design/DES-006-engineering-toolchain-adapters.md)
 - 所属特性：[FEAT-003](../02-feature/FEAT-003-project-loop-agent-execution.md)、[FEAT-006](../02-feature/FEAT-006-engineering-toolchains.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -52,7 +52,7 @@
 
 ## 交付记录
 
-实现与规格已完成。首轮历史审查发现的伪图片、旧 Collect 缺指纹、tracked 删除和模板版本兼容四项 P1 已修复。2026-08-03 正式复核又发现 Gate Plan 未完整绑定、Review 目录父级软链、依赖锁来源和规格边界漂移，已进入 Round 2 加固并新增不可变目标规格资产 v4；功能型 Gate 可显式不要求截图，但 UI/视觉 AC 仍必须独立声明视觉 Review，二者不可互相替代。
+Round 4 已正式交付。历史审查和前三轮正式复核发现的伪图片、旧 Collect 缺指纹、tracked 删除、Gate Plan 漂移、锁文件来源、视觉截图约束、事务目录软链和模板兼容问题均已修复并补充对抗测试；新增不可变目标规格资产 v4。最终候选 `5c5f6b8` 的独立 Verifier 为 PASS（P0/P1/P2 均为 0），四项 targeted Gate 全部通过。
 
 ## 验证证据
 
@@ -62,3 +62,5 @@
 | 2026-07-23 | 全量自动化回归 | PASS | 50/50 |
 | 2026-07-23 | `project spec-check`、Task check、`git diff --check` | PASS | 本地命令输出 |
 | 2026-07-23 | 首轮独立源码审查 | 修复后待复核 | 4 项 P1 已逐项修复并增加回归 |
+| 2026-08-03 | Round 4 独立只读复核 | PASS | P0/P1/P2 均为 0 |
+| 2026-08-03 | Round 4 targeted Harness | PASS | Review、Playwright、TypeScript、目标模板四项 Gate；revision `5c5f6b8` |
