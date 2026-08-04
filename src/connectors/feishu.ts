@@ -280,14 +280,16 @@ function wrapFeishuDeliveryError(prefix: string, error: unknown, secrets: string
   return wrapped;
 }
 
-type FeishuPreflightRequester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
+type FeishuPreflightRequester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'> & {
+  headers?: Pick<Headers, 'get'>;
+}>;
 
 async function abortableRequest(
   requester: FeishuPreflightRequester,
   url: string,
   init: RequestInit,
   signal?: AbortSignal,
-): Promise<Pick<Response, 'ok' | 'status' | 'json'>> {
+): Promise<Awaited<ReturnType<FeishuPreflightRequester>>> {
   if (signal?.aborted) throw new Error('feishu preflight was cancelled');
   let abortListener: (() => void) | undefined;
   try {
@@ -371,7 +373,18 @@ export class OfficialFeishuTransport implements FeishuTransport {
         headers,
         body: payload.data === undefined ? undefined : JSON.stringify(payload.data),
       }, this.sdkRequestController.signal);
-      if (!response.ok) throw new Error(`Feishu SDK request failed with HTTP ${response.status}`);
+      if (!response.ok) {
+        const retryAfter = response.headers?.get('retry-after');
+        const parsedRetryAfter = retryAfter
+          ? (/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1_000 : Date.parse(retryAfter) - Date.now())
+          : Number.NaN;
+        const retryAfterMs = Number.isFinite(parsedRetryAfter) ? Math.max(0, parsedRetryAfter) : undefined;
+        throw Object.assign(new Error(`Feishu SDK request failed with HTTP ${response.status}`), {
+          status: response.status,
+          code: `HTTP_${response.status}`,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+        });
+      }
       const responseData = await response.json() as { tenant_access_token?: string; expire?: number };
       if (payload.url.includes('/open-apis/auth/v3/tenant_access_token/internal') && responseData.tenant_access_token) {
         this.rememberTenantAccessToken(responseData.tenant_access_token, Number(responseData.expire ?? 300));

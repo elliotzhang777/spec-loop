@@ -7,6 +7,7 @@ import { feishuConnectorRoot, readFeishuConfig, type FeishuTarget, type FeishuTr
 import { readProject, scanTasks } from '../project.js';
 import { readState } from '../task.js';
 import { verifySchema } from '../schemas.js';
+import { readVisualReviews } from '../review.js';
 
 const taskStatusSchema = z.enum(['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered']);
 const interventionSchema = z.enum(['none', 'approve_proposal', 'provide_input', 'review_visual', 'authorize_verification', 'accept_delivery']);
@@ -87,9 +88,14 @@ export function assertSafeFeishuCard(card: object): void {
 }
 
 const outboxStatusSchema = z.enum(['pending', 'sending', 'sent', 'retry_wait', 'dead_letter']);
+const criticalEventSchema = z.enum(['gate_failed', 'verifier_rejected', 'delivery_failed', 'connector_error']);
+const outboxSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('progress'), snapshot: progressSnapshotSchema }).strict(),
+  z.object({ kind: z.literal('critical'), event_type: criticalEventSchema, task_id: z.string().regex(/^(?:WEB-)?TASK-[A-Z0-9-]+$/).nullable() }).strict(),
+]);
 const outboxRecordSchema = z.object({
   id: z.string().uuid(), project_id: z.string(), wave_id: z.string(), kind: z.enum(['progress', 'critical']), target: z.object({ project_id: z.string(), receive_id_type: z.enum(['chat_id', 'open_id', 'user_id', 'union_id', 'email']), receive_id: z.string() }).strict(),
-  idempotency_key: z.string().min(3).max(256), payload_hash: z.string().length(64), payload: z.record(z.string(), z.unknown()), priority: z.number().int().min(0).max(100),
+  idempotency_key: z.string().min(3).max(256), payload_hash: z.string().length(64), payload: z.record(z.string(), z.unknown()), source: outboxSourceSchema, priority: z.number().int().min(0).max(100),
   status: outboxStatusSchema, attempts: z.number().int().nonnegative(), next_attempt_at: z.iso.datetime().nullable(), message_id: z.string().nullable(), platform_request_id: z.string().nullable(),
   delivery_token: z.string().uuid().nullable(),
   last_error: z.enum(['rate_limited', 'server', 'network', 'permission', 'target', 'invalid_payload']).nullable(), created_at: z.iso.datetime(), updated_at: z.iso.datetime(),
@@ -139,7 +145,13 @@ async function readOutboxAt(root: string): Promise<z.infer<typeof outboxSchema>>
   if (!info) return { schema_version: 1, records: [] };
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('feishu outbox is symbolic or not a regular file');
   const outbox = outboxSchema.parse(JSON.parse(await readFile(file, 'utf8')));
-  for (const record of outbox.records) if (sha256(JSON.stringify(record.payload)) !== record.payload_hash) throw new Error('feishu outbox payload hash mismatch');
+  for (const record of outbox.records) {
+    const expected = renderOutboxSource(record.source);
+    if (sha256(JSON.stringify(record.payload)) !== record.payload_hash
+      || JSON.stringify(record.payload) !== JSON.stringify(expected)) {
+      throw new Error('feishu outbox payload is not the deterministic rendering of its persisted source facts');
+    }
+  }
   return outbox;
 }
 
@@ -162,17 +174,17 @@ export async function enqueueProgressCard(projectRoot: string, snapshot: Progres
       if (existing.payload_hash === hash) return outboxRecordSchema.parse(existing);
       existing.payload = card;
       existing.payload_hash = hash;
+      existing.source = { kind: 'progress', snapshot };
       if (existing.status !== 'sending') existing.status = 'pending';
       existing.updated_at = now.toISOString();
       existing.next_attempt_at = new Date(now.getTime() + aggregateWindowMs).toISOString();
       await writeOutbox(projectRoot, root, outbox); return outboxRecordSchema.parse(existing);
     }
-    const record = outboxRecordSchema.parse({ id: randomUUID(), project_id: snapshot.project_id, wave_id: snapshot.wave_id, kind: 'progress', target, idempotency_key: key, payload_hash: hash, payload: card, priority: 20, status: 'pending', attempts: 0, next_attempt_at: new Date(now.getTime() + aggregateWindowMs).toISOString(), message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now.toISOString(), updated_at: now.toISOString() });
+    const record = outboxRecordSchema.parse({ id: randomUUID(), project_id: snapshot.project_id, wave_id: snapshot.wave_id, kind: 'progress', target, idempotency_key: key, payload_hash: hash, payload: card, source: { kind: 'progress', snapshot }, priority: 20, status: 'pending', attempts: 0, next_attempt_at: new Date(now.getTime() + aggregateWindowMs).toISOString(), message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now.toISOString(), updated_at: now.toISOString() });
     outbox.records.push(record); await writeOutbox(projectRoot, root, outbox); return record;
   });
 }
 
-const criticalEventSchema = z.enum(['gate_failed', 'verifier_rejected', 'delivery_failed', 'connector_error']);
 const criticalLabels: Record<z.infer<typeof criticalEventSchema>, { title: string; summary: string }> = {
   gate_failed: { title: 'Gate 未通过', summary: '定向 Gate 未通过，请在本地查看受控 Evidence 摘要。' },
   verifier_rejected: { title: 'Verifier 拒绝候选', summary: '独立 Verifier 拒绝当前候选，请回到本地修复。' },
@@ -180,16 +192,26 @@ const criticalLabels: Record<z.infer<typeof criticalEventSchema>, { title: strin
   connector_error: { title: '飞书连接器异常', summary: '连接器出现异常，本地 Task 状态未受影响。' },
 };
 
-export async function enqueueCriticalCard(projectRoot: string, input: { projectId: string; waveId: string; eventId: string; eventType: z.infer<typeof criticalEventSchema>; taskId?: string; target: FeishuTarget }): Promise<FeishuOutboxRecord> {
-  const eventType = criticalEventSchema.parse(input.eventType), eventId = z.string().regex(/^[A-Za-z0-9:_-]{3,128}$/).parse(input.eventId), label = criticalLabels[eventType];
-  const task = input.taskId ? z.string().regex(/^TASK-[A-Z0-9-]+$/).parse(input.taskId) : null;
+function renderCriticalCard(eventType: z.infer<typeof criticalEventSchema>, task: string | null): Record<string, unknown> {
+  const label = criticalLabels[eventType];
   const card = { schema: '2.0', header: { title: { tag: 'plain_text', content: label.title }, template: 'red' }, body: { elements: [{ tag: 'markdown', content: `${task ? `**${task}**  ` : ''}${label.summary}` }] } };
   generatedSafeCards.add(card);
+  return card;
+}
+
+function renderOutboxSource(source: z.infer<typeof outboxSourceSchema>): Record<string, unknown> {
+  return source.kind === 'progress' ? renderProgressCard(source.snapshot) : renderCriticalCard(source.event_type, source.task_id);
+}
+
+export async function enqueueCriticalCard(projectRoot: string, input: { projectId: string; waveId: string; eventId: string; eventType: z.infer<typeof criticalEventSchema>; taskId?: string; target: FeishuTarget }): Promise<FeishuOutboxRecord> {
+  const eventType = criticalEventSchema.parse(input.eventType), eventId = z.string().regex(/^[A-Za-z0-9:_-]{3,128}$/).parse(input.eventId);
+  const task = input.taskId ? z.string().regex(/^(?:WEB-)?TASK-[A-Z0-9-]+$/).parse(input.taskId) : null;
+  const card = renderCriticalCard(eventType, task);
   assertSafeFeishuCard(card); const root = await outboxRoot(projectRoot);
   return withOutboxLock(root, async () => {
     const outbox = await readOutboxAt(root), key = `critical:${input.projectId}:${eventId}:${targetKey(input.target)}`, existing = outbox.records.find((record) => record.idempotency_key === key);
     if (existing) return existing;
-    const now = new Date().toISOString(), record = outboxRecordSchema.parse({ id: randomUUID(), project_id: input.projectId, wave_id: input.waveId, kind: 'critical', target: input.target, idempotency_key: key, payload_hash: sha256(JSON.stringify(card)), payload: card, priority: 100, status: 'pending', attempts: 0, next_attempt_at: now, message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now, updated_at: now });
+    const now = new Date().toISOString(), record = outboxRecordSchema.parse({ id: randomUUID(), project_id: input.projectId, wave_id: input.waveId, kind: 'critical', target: input.target, idempotency_key: key, payload_hash: sha256(JSON.stringify(card)), payload: card, source: { kind: 'critical', event_type: eventType, task_id: task }, priority: 100, status: 'pending', attempts: 0, next_attempt_at: now, message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now, updated_at: now });
     outbox.records.push(record); await writeOutbox(projectRoot, root, outbox); return record;
   });
 }
@@ -289,9 +311,10 @@ export async function readFeishuOutboxRecords(projectRoot: string): Promise<Feis
 }
 
 const harnessFactSchema = z.object({
-  task_id: z.string(), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']), updated_at: z.iso.datetime(),
+  task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']), updated_at: z.iso.datetime(),
 }).passthrough();
-const gateFactSchema = z.array(z.object({ exit_code: z.number().int(), timed_out: z.boolean(), created_at: z.iso.datetime() }).passthrough());
+const prepareFactSchema = z.object({ task_id: z.string(), round: z.number().int().positive(), head: z.string().regex(/^[a-f0-9]{40,64}$/) }).passthrough();
+const gateFactSchema = z.array(z.object({ task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), exit_code: z.number().int(), timed_out: z.boolean(), created_at: z.iso.datetime() }).passthrough());
 
 async function optionalJson(file: string): Promise<unknown | null> {
   const info = await lstat(file).catch(() => null);
@@ -310,10 +333,15 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
     ?? null;
   const output = path.join(projectRoot, project.output_root);
   const taskId = active?.state.task_id ?? null;
+  const prepareRaw = taskId ? await optionalJson(path.join(output, `${taskId}-prepare.json`)) : null;
+  const prepare = prepareRaw ? prepareFactSchema.parse(prepareRaw) : null;
   const harnessRaw = taskId ? await optionalJson(path.join(output, `${taskId}-harness-state.json`)) : null;
   const harness = harnessRaw ? harnessFactSchema.parse(harnessRaw) : null;
   const gatesRaw = taskId ? await optionalJson(path.join(output, `${taskId}-gates.json`)) : null;
-  const gates = gatesRaw ? gateFactSchema.parse(gatesRaw) : [];
+  const allGates = gatesRaw ? gateFactSchema.parse(gatesRaw) : [];
+  const currentHead = prepare?.task_id === taskId && prepare.round === active?.state.current_round ? prepare.head : null;
+  const currentHarness = currentHead && harness?.task_id === taskId && harness.head === currentHead ? harness : null;
+  const gates = currentHarness ? allGates.filter((item) => item.task_id === taskId && item.head === currentHead) : [];
   let verifier: z.infer<typeof resultSchema> = 'none';
   if (active) {
     const verifyFile = path.join(active.task.path, 'VERIFY.md');
@@ -321,23 +349,34 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
     if (info) {
       if (!info.isFile() || info.isSymbolicLink()) throw new Error('task verifier projection is symbolic or not a regular file');
       const verify = verifySchema.parse((await readMarkdown(verifyFile)).data);
-      verifier = verify.result === 'pass' ? 'pass' : verify.result === 'fail' ? 'reject' : 'none';
+      if (verify.round === active.state.current_round && verify.signed_round === active.state.current_round) {
+        verifier = verify.result === 'pass' ? 'pass' : verify.result === 'fail' ? 'reject' : 'none';
+      }
     }
   }
   const gate: z.infer<typeof resultSchema> = gates.length === 0 ? 'none' : gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'pass' : 'failed';
+  const reviews = active ? await readVisualReviews(active.task.path) : [];
+  const visualReview = reviews.some((item) => item.round === active?.state.current_round && item.status !== 'approved');
+  const summary = active ? await readFile(path.join(active.task.path, 'RUN_SUMMARY.md'), 'utf8').catch(() => '') : '';
+  const needsInput = /^- Guard: needs_user$/m.test(summary);
   const heavyAcceptance = active?.state.status === 'verifying' && active.state.level === 'heavy' && verifier === 'pass';
-  const nextUserIntervention: z.infer<typeof interventionSchema> = heavyAcceptance ? 'accept_delivery' : 'none';
+  const verificationAuthorization = active?.state.status === 'verifying' && !currentHarness && verifier === 'none';
+  const nextUserIntervention: z.infer<typeof interventionSchema> = heavyAcceptance ? 'accept_delivery'
+    : visualReview ? 'review_visual'
+      : needsInput ? 'provide_input'
+        : verificationAuthorization ? 'authorize_verification' : 'none';
   const nextAction: z.infer<typeof nextActionSchema> = !active ? 'no_active_task'
     : active.state.status === 'iterating' ? 'fix_rejection'
       : heavyAcceptance ? 'wait_for_heavy_acceptance'
+        : verificationAuthorization ? 'wait_for_verification_authorization'
         : active.state.status === 'delivered' ? 'task_delivered' : 'continue_execution';
-  const timestamps = [project.updated_at, ...states.map(({ state }) => state.updated_at), harness?.updated_at, ...gates.map((item) => item.created_at)].filter((value): value is string => Boolean(value));
+  const timestamps = [project.updated_at, ...states.map(({ state }) => state.updated_at), currentHarness?.updated_at, ...gates.map((item) => item.created_at)].filter((value): value is string => Boolean(value));
   return buildProgressSnapshot({
     projectId: project.project_id,
     waveId: 'PROJECT',
     tasks: states.map(({ state }) => ({ task_id: state.task_id, status: state.status, round: state.current_round })),
     currentTaskId: taskId,
-    harnessStep: harness?.task_id === taskId ? harness.stage : 'none',
+    harnessStep: currentHarness?.stage ?? 'none',
     gate,
     verifier,
     nextUserIntervention,

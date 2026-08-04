@@ -11,6 +11,7 @@ import {
   dispatchFeishuOutboxOnce,
   enqueueCriticalCard,
   enqueueProgressCard,
+  projectProgressSnapshot,
   readFeishuOutboxRecords,
   readFeishuOutboxSummary,
   reconcileFeishuOutbox,
@@ -199,6 +200,26 @@ test('official delivery errors preserve status and retry metadata for outbox cla
   )
 })
 
+test('official SDK adapter preserves HTTP status and Retry-After metadata', async () => {
+  const requester = async () => ({ ok: false, status: 429, headers: { get: (name) => name.toLowerCase() === 'retry-after' ? '7' : null }, json: async () => ({}) })
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test_app', appSecret: 'cli_test_secret' }, undefined, requester)
+  await assert.rejects(
+    transport.sdkHttpInstance().request({ url: 'https://open.feishu.cn/open-apis/im/v1/messages', method: 'POST' }),
+    (error) => error.status === 429 && error.code === 'HTTP_429' && error.retryAfterMs === 7000,
+  )
+})
+
+test('persisted outbox payload must still match its allowlisted source after restart', async () => {
+  const root = await projectRoot()
+  await enqueueProgressCard(root, snapshot(), target, 0)
+  const outboxFile = path.join(root, '.spec-loop', 'connectors', 'feishu', 'outbox.json')
+  const outbox = JSON.parse(await readFile(outboxFile, 'utf8'))
+  outbox.records[0].payload = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: 'arbitrary persisted message' }] } }
+  outbox.records[0].payload_hash = (await import('node:crypto')).createHash('sha256').update(JSON.stringify(outbox.records[0].payload)).digest('hex')
+  await writeFile(outboxFile, JSON.stringify(outbox, null, 2))
+  await assert.rejects(readFeishuOutboxRecords(root), /deterministic rendering/i)
+})
+
 test('running connector projects local task facts and drains the outbox', async () => {
   const root = await tempRoot('feishu-progress-live-')
   const repository = path.join(root, 'repo')
@@ -221,6 +242,27 @@ test('running connector projects local task facts and drains the outbox', async 
   await runFeishuConnector(root, { transport, signal: controller.signal, leaseTtlMs: 1000, outboxPollMs: 10, progressAggregateWindowMs: 0 })
   assert.equal(transport.sent.length, 1)
   assert.match(JSON.stringify(transport.sent[0].card), /TASK-LIVE/)
+})
+
+test('project projection ignores Harness and Gate facts from another round or revision', async () => {
+  const root = await tempRoot('feishu-progress-stale-')
+  const repository = path.join(root, 'repo')
+  await mkdir(repository)
+  assert.equal(cli(['project', 'init', root, '--id', 'PROJ-STALE', '--name', 'Stale', '--repository', repository]).code, 0)
+  const taskRoot = path.join(root, '.spec-loop', 'tasks', 'task-stale')
+  assert.equal(cli(['init', taskRoot, '--level', 'standard', '--id', 'TASK-STALE', '--title', 'Stale task', '--repository', repository]).code, 0)
+  await fillContracts(taskRoot, { id: 'TASK-STALE', title: 'Stale task', level: 'standard' })
+  assert.equal(cli(['plan', taskRoot]).code, 0)
+  assert.equal(cli(['runtime-init', taskRoot]).code, 0)
+  assert.equal(cli(['round', taskRoot]).code, 0)
+  const output = path.join(root, '.spec-loop', 'output')
+  const oldHead = '1'.repeat(40)
+  await writeFile(path.join(output, 'TASK-STALE-prepare.json'), JSON.stringify({ task_id: 'TASK-STALE', round: 99, head: oldHead }))
+  await writeFile(path.join(output, 'TASK-STALE-harness-state.json'), JSON.stringify({ task_id: 'TASK-STALE', head: oldHead, stage: 'reported', updated_at: '2026-08-04T10:00:00.000Z' }))
+  await writeFile(path.join(output, 'TASK-STALE-gates.json'), JSON.stringify([{ task_id: 'TASK-STALE', head: oldHead, exit_code: 1, timed_out: false, created_at: '2026-08-04T10:00:00.000Z' }]))
+  const projected = await projectProgressSnapshot(root)
+  assert.deepEqual(projected.current, { task_id: 'TASK-STALE', round: 1, harness_step: 'none' })
+  assert.deepEqual(projected.recent, { gate: 'none', verifier: 'none' })
 })
 
 test('unsafe card payloads are rejected and notification failures do not touch task state', async () => {
