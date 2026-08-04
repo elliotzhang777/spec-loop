@@ -1,12 +1,14 @@
 import { lstat, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, readMarkdown, sha256 } from '../files.js';
 import { feishuConnectorRoot, readFeishuConfig, type FeishuTarget, type FeishuTransport } from './feishu.js';
 import { readProject, scanTasks } from '../project.js';
-import { readState } from '../task.js';
-import { verifySchema } from '../schemas.js';
+import { evidenceRecords, readState } from '../task.js';
+import { acceptanceSchema, verifySchema } from '../schemas.js';
 import { readVisualReviews } from '../review.js';
 
 const taskStatusSchema = z.enum(['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered']);
@@ -59,6 +61,7 @@ const nextActionLabels: Record<z.infer<typeof nextActionSchema>, string> = {
   no_active_task: '当前没有活动任务',
 };
 const generatedSafeCards = new WeakSet<object>();
+const exec = promisify(execFile);
 
 export function renderProgressCard(snapshotInput: ProgressSnapshot): Record<string, unknown> {
   const snapshot = progressSnapshotSchema.parse(snapshotInput);
@@ -222,6 +225,7 @@ function classifyDeliveryError(error: unknown): { category: FeishuOutboxRecord['
   if (value.status && value.status >= 500) return { category: 'server', retry: true, retryAfterMs: 2_000 };
   if (value.status === 401 || value.status === 403) return { category: 'permission', retry: false, retryAfterMs: 0 };
   if (value.status === 404 || value.code === 'TARGET_UNAVAILABLE') return { category: 'target', retry: false, retryAfterMs: 0 };
+  if (value.status && value.status >= 400 && value.status < 500) return { category: 'invalid_payload', retry: false, retryAfterMs: 0 };
   if (value.code === 'INVALID_PAYLOAD') return { category: 'invalid_payload', retry: false, retryAfterMs: 0 };
   return { category: 'network', retry: true, retryAfterMs: 1_000 };
 }
@@ -246,10 +250,11 @@ export async function dispatchFeishuOutboxOnce(projectRoot: string, transport: F
     else sentMessageId = (await transport.sendCard(claimed.target, claimed.payload, claimed.platform_request_id ?? undefined)).messageId;
   } catch (error) {
     const value = error as { code?: string };
-    failure = value.code === 'MESSAGE_NOT_FOUND'
+    const missingExistingCard = Boolean(claimed.message_id) && (value.code === 'MESSAGE_NOT_FOUND' || value.code === 'HTTP_404' || (error as { status?: number }).status === 404);
+    failure = missingExistingCard
       ? { category: 'target', retry: true, retryAfterMs: 1_000 }
       : classifyDeliveryError(error);
-    if (value.code === 'MESSAGE_NOT_FOUND') sentMessageId = null;
+    if (missingExistingCard) sentMessageId = null;
   }
 
   return withOutboxLock(root, async () => {
@@ -311,7 +316,8 @@ export async function readFeishuOutboxRecords(projectRoot: string): Promise<Feis
 }
 
 const harnessFactSchema = z.object({
-  task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']), updated_at: z.iso.datetime(),
+  task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']),
+  evidence_hashes: z.object({ prepare: z.string().length(64) }).passthrough(), updated_at: z.iso.datetime(),
 }).passthrough();
 const prepareFactSchema = z.object({ task_id: z.string(), round: z.number().int().positive(), head: z.string().regex(/^[a-f0-9]{40,64}$/) }).passthrough();
 const gateFactSchema = z.array(z.object({ task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), exit_code: z.number().int(), timed_out: z.boolean(), created_at: z.iso.datetime() }).passthrough());
@@ -321,6 +327,22 @@ async function optionalJson(file: string): Promise<unknown | null> {
   if (!info) return null;
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`progress fact is symbolic or not a regular file: ${file}`);
   return JSON.parse(await readFile(file, 'utf8'));
+}
+
+async function candidateRevision(projectRoot: string, taskId: string, previousRevision: string): Promise<string | null> {
+  const raw = await optionalJson(path.join(projectRoot, '.spec-loop', 'output', `${taskId}-workspace.json`));
+  if (!raw) return null;
+  const workspace = z.object({ task_id: z.string(), worktree: z.string(), base_commit: z.string().regex(/^[a-f0-9]{40,64}$/) }).passthrough().parse(raw);
+  const expected = path.resolve(projectRoot, '.spec-loop', 'worktrees', taskId.toLowerCase());
+  if (workspace.task_id !== taskId || path.resolve(workspace.worktree) !== expected) throw new Error('progress workspace fact escapes the managed worktree root');
+  const info = await lstat(expected).catch(() => null);
+  if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('progress workspace is missing, symbolic, or not a directory');
+  const [{ stdout: head }, { stdout: status }] = await Promise.all([
+    exec('git', ['-C', expected, 'rev-parse', 'HEAD']),
+    exec('git', ['-C', expected, 'status', '--porcelain=v1', '--untracked-files=all']),
+  ]);
+  const revision = head.trim().toLowerCase();
+  return status.trim() === '' && revision !== workspace.base_commit.toLowerCase() && revision !== previousRevision.toLowerCase() ? revision : null;
 }
 
 export async function projectProgressSnapshot(projectRoot: string): Promise<ProgressSnapshot> {
@@ -333,15 +355,18 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
     ?? null;
   const output = path.join(projectRoot, project.output_root);
   const taskId = active?.state.task_id ?? null;
-  const prepareRaw = taskId ? await optionalJson(path.join(output, `${taskId}-prepare.json`)) : null;
+  const prepareFile = taskId ? path.join(output, `${taskId}-prepare.json`) : null;
+  const prepareText = prepareFile ? await readFile(prepareFile, 'utf8').catch(() => null) : null;
+  const prepareRaw = prepareText ? JSON.parse(prepareText) : null;
   const prepare = prepareRaw ? prepareFactSchema.parse(prepareRaw) : null;
   const harnessRaw = taskId ? await optionalJson(path.join(output, `${taskId}-harness-state.json`)) : null;
   const harness = harnessRaw ? harnessFactSchema.parse(harnessRaw) : null;
   const gatesRaw = taskId ? await optionalJson(path.join(output, `${taskId}-gates.json`)) : null;
   const allGates = gatesRaw ? gateFactSchema.parse(gatesRaw) : [];
-  const currentHead = prepare?.task_id === taskId && prepare.round === active?.state.current_round ? prepare.head : null;
-  const currentHarness = currentHead && harness?.task_id === taskId && harness.head === currentHead ? harness : null;
-  const gates = currentHarness ? allGates.filter((item) => item.task_id === taskId && item.head === currentHead) : [];
+  const currentPrepare = prepare?.task_id === taskId && prepare.round === active?.state.current_round && prepareText && harness?.evidence_hashes.prepare === sha256(prepareText) ? prepare : null;
+  const currentHarness = currentPrepare && harness?.task_id === taskId ? harness : null;
+  const currentHead = currentHarness?.head ?? null;
+  const gates = currentHead ? allGates.filter((item) => item.task_id === taskId && item.head === currentHead) : [];
   let verifier: z.infer<typeof resultSchema> = 'none';
   if (active) {
     const verifyFile = path.join(active.task.path, 'VERIFY.md');
@@ -349,18 +374,25 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
     if (info) {
       if (!info.isFile() || info.isSymbolicLink()) throw new Error('task verifier projection is symbolic or not a regular file');
       const verify = verifySchema.parse((await readMarkdown(verifyFile)).data);
-      if (verify.round === active.state.current_round && verify.signed_round === active.state.current_round) {
+      const evidence = await evidenceRecords(active.task.path);
+      const signedEvidence = evidence.find((item) => verify.evidence.includes(item.id) && item.task_id === taskId
+        && item.round === active.state.current_round && item.code_revision === currentHead
+        && item.exit_code === (verify.result === 'pass' ? 0 : 1));
+      if (verify.task_id === taskId && verify.round === active.state.current_round && verify.signed_round === active.state.current_round && signedEvidence) {
         verifier = verify.result === 'pass' ? 'pass' : verify.result === 'fail' ? 'reject' : 'none';
       }
     }
   }
   const gate: z.infer<typeof resultSchema> = gates.length === 0 ? 'none' : gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'pass' : 'failed';
   const reviews = active ? await readVisualReviews(active.task.path) : [];
-  const visualReview = reviews.some((item) => item.round === active?.state.current_round && item.status !== 'approved');
+  const acceptance = active ? acceptanceSchema.parse((await readMarkdown(path.join(active.task.path, 'ACCEPTANCE.md'))).data) : null;
+  const candidate = active?.state.status === 'working' && taskId ? await candidateRevision(projectRoot, taskId, active.state.code_revision) : null;
+  const visualReview = Boolean(candidate && acceptance?.human_reviews.some((required) => !reviews.some((item) => item.review_id === required.id
+    && item.round === active?.state.current_round && item.code_revision === candidate && item.status === 'approved')));
   const summary = active ? await readFile(path.join(active.task.path, 'RUN_SUMMARY.md'), 'utf8').catch(() => '') : '';
   const needsInput = /^- Guard: needs_user$/m.test(summary);
   const heavyAcceptance = active?.state.status === 'verifying' && active.state.level === 'heavy' && verifier === 'pass';
-  const verificationAuthorization = active?.state.status === 'verifying' && !currentHarness && verifier === 'none';
+  const verificationAuthorization = Boolean(candidate && !currentHarness && !visualReview);
   const nextUserIntervention: z.infer<typeof interventionSchema> = heavyAcceptance ? 'accept_delivery'
     : visualReview ? 'review_visual'
       : needsInput ? 'provide_input'

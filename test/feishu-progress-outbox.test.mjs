@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -209,15 +210,38 @@ test('official SDK adapter preserves HTTP status and Retry-After metadata', asyn
   )
 })
 
+test('official SDK adapter rejects HTTP 200 Feishu business errors for send and update', async () => {
+  const requester = async (url) => url.includes('tenant_access_token')
+    ? { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ code: 0, tenant_access_token: 'tenant_test_value', expire: 300 }) }
+    : { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ code: 99991400, msg: 'permission denied' }) }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test_app', appSecret: 'cli_test_secret' }, undefined, requester)
+  for (const operation of [
+    () => transport.sendCard(target, {}, 'platform-request'),
+    () => transport.updateCard('om_existing', {}),
+  ]) await assert.rejects(operation(), (error) => error.status === 403 && error.code === 'FEISHU_99991400')
+})
+
 test('persisted outbox payload must still match its allowlisted source after restart', async () => {
   const root = await projectRoot()
   await enqueueProgressCard(root, snapshot(), target, 0)
   const outboxFile = path.join(root, '.spec-loop', 'connectors', 'feishu', 'outbox.json')
   const outbox = JSON.parse(await readFile(outboxFile, 'utf8'))
   outbox.records[0].payload = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: 'arbitrary persisted message' }] } }
-  outbox.records[0].payload_hash = (await import('node:crypto')).createHash('sha256').update(JSON.stringify(outbox.records[0].payload)).digest('hex')
+  outbox.records[0].payload_hash = createHash('sha256').update(JSON.stringify(outbox.records[0].payload)).digest('hex')
   await writeFile(outboxFile, JSON.stringify(outbox, null, 2))
   await assert.rejects(readFeishuOutboxRecords(root), /deterministic rendering/i)
+})
+
+test('official HTTP 404 while updating a card clears the old message and schedules recreation', async () => {
+  const root = await projectRoot()
+  const transport = new FakeFeishuTransport()
+  await enqueueProgressCard(root, snapshot(), target, 0)
+  await dispatchFeishuOutboxOnce(root, transport, new Date(Date.now() + 1000))
+  await enqueueProgressCard(root, snapshot({ harnessStep: 'reported' }), target, 0)
+  const missing = Object.assign(new Error('HTTP 404'), { status: 404, code: 'HTTP_404' })
+  const result = await dispatchFeishuOutboxOnce(root, failingTransport(missing), new Date(Date.now() + 2000))
+  assert.equal(result.status, 'retry_wait')
+  assert.equal(result.message_id, null)
 })
 
 test('running connector projects local task facts and drains the outbox', async () => {
@@ -258,11 +282,33 @@ test('project projection ignores Harness and Gate facts from another round or re
   const output = path.join(root, '.spec-loop', 'output')
   const oldHead = '1'.repeat(40)
   await writeFile(path.join(output, 'TASK-STALE-prepare.json'), JSON.stringify({ task_id: 'TASK-STALE', round: 99, head: oldHead }))
-  await writeFile(path.join(output, 'TASK-STALE-harness-state.json'), JSON.stringify({ task_id: 'TASK-STALE', head: oldHead, stage: 'reported', updated_at: '2026-08-04T10:00:00.000Z' }))
+  await writeFile(path.join(output, 'TASK-STALE-harness-state.json'), JSON.stringify({ task_id: 'TASK-STALE', head: oldHead, stage: 'reported', evidence_hashes: { prepare: '0'.repeat(64) }, updated_at: '2026-08-04T10:00:00.000Z' }))
   await writeFile(path.join(output, 'TASK-STALE-gates.json'), JSON.stringify([{ task_id: 'TASK-STALE', head: oldHead, exit_code: 1, timed_out: false, created_at: '2026-08-04T10:00:00.000Z' }]))
   const projected = await projectProgressSnapshot(root)
   assert.deepEqual(projected.current, { task_id: 'TASK-STALE', round: 1, harness_step: 'none' })
   assert.deepEqual(projected.recent, { gate: 'none', verifier: 'none' })
+})
+
+test('project projection follows the current Prepare hash when Harness head advances', async () => {
+  const root = await tempRoot('feishu-progress-current-')
+  const repository = path.join(root, 'repo')
+  await mkdir(repository)
+  assert.equal(cli(['project', 'init', root, '--id', 'PROJ-CURRENT', '--name', 'Current', '--repository', repository]).code, 0)
+  const taskRoot = path.join(root, '.spec-loop', 'tasks', 'task-current')
+  assert.equal(cli(['init', taskRoot, '--level', 'standard', '--id', 'TASK-CURRENT', '--title', 'Current task', '--repository', repository]).code, 0)
+  await fillContracts(taskRoot, { id: 'TASK-CURRENT', title: 'Current task', level: 'standard' })
+  assert.equal(cli(['plan', taskRoot]).code, 0)
+  assert.equal(cli(['runtime-init', taskRoot]).code, 0)
+  assert.equal(cli(['round', taskRoot]).code, 0)
+  const output = path.join(root, '.spec-loop', 'output')
+  const preparedHead = '1'.repeat(40), executedHead = '2'.repeat(40)
+  const prepareText = JSON.stringify({ task_id: 'TASK-CURRENT', round: 1, head: preparedHead })
+  await writeFile(path.join(output, 'TASK-CURRENT-prepare.json'), prepareText)
+  await writeFile(path.join(output, 'TASK-CURRENT-harness-state.json'), JSON.stringify({ task_id: 'TASK-CURRENT', head: executedHead, stage: 'reported', evidence_hashes: { prepare: createHash('sha256').update(prepareText).digest('hex') }, updated_at: '2026-08-04T10:01:00.000Z' }))
+  await writeFile(path.join(output, 'TASK-CURRENT-gates.json'), JSON.stringify([{ task_id: 'TASK-CURRENT', head: executedHead, exit_code: 0, timed_out: false, created_at: '2026-08-04T10:01:00.000Z' }]))
+  const projected = await projectProgressSnapshot(root)
+  assert.deepEqual(projected.current, { task_id: 'TASK-CURRENT', round: 1, harness_step: 'reported' })
+  assert.equal(projected.recent.gate, 'pass')
 })
 
 test('unsafe card payloads are rejected and notification failures do not touch task state', async () => {

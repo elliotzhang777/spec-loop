@@ -385,7 +385,18 @@ export class OfficialFeishuTransport implements FeishuTransport {
           ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
         });
       }
-      const responseData = await response.json() as { tenant_access_token?: string; expire?: number };
+      const responseData = await response.json() as { code?: number | string; msg?: string; tenant_access_token?: string; expire?: number };
+      const businessCode = Number(responseData.code ?? 0);
+      if (Number.isFinite(businessCode) && businessCode !== 0) {
+        const message = String(responseData.msg ?? '');
+        const status = /permission|forbidden|unauthori[sz]ed|权限/i.test(message) ? 403
+          : /rate|frequency|too many|限流|频率/i.test(message) ? 429
+            : /not found|不存在/i.test(message) ? 404 : 400;
+        throw Object.assign(new Error(`Feishu SDK business request failed with code ${businessCode}`), {
+          status,
+          code: `FEISHU_${businessCode}`,
+        });
+      }
       if (payload.url.includes('/open-apis/auth/v3/tenant_access_token/internal') && responseData.tenant_access_token) {
         this.rememberTenantAccessToken(responseData.tenant_access_token, Number(responseData.expire ?? 300));
       }
