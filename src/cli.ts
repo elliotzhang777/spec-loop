@@ -10,6 +10,7 @@ import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
 import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
+import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig } from './connectors/feishu.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -142,6 +143,16 @@ triage.command('create-task').argument('<project-dir>').argument('<proposal-id>'
 const providers=program.command('providers').description('Provider configuration and diagnostics');
 providers.command('show').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const results=await providerDoctor(root(dir));print(results,o.json)}));
 providers.command('set').argument('<project-dir>').addOption(new Option('--active <provider>').choices(['codex','claude-code','qoder']).makeOptionMandatory()).action((dir,o)=>action(async()=>{await setActiveProvider(root(dir),o.active);console.log(`active provider: ${o.active}`)}));
+
+const connectors=program.command('connectors').description('External notification and confirmation connectors');
+const feishu=connectors.command('feishu').description('Feishu enterprise app bot connector');
+feishu.command('init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
+  const file=await initFeishuConfig(root(dir));print(o.json?{created:file}:`created ${file}`,o.json);
+}));
+feishu.command('check').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
+  const config=await readFeishuConfig(root(dir));print(o.json?{ok:true,enabled:config.enabled,targets:config.targets.length,approvers:config.approvers.length}:`feishu config ok: enabled=${config.enabled} targets=${config.targets.length} approvers=${config.approvers.length}`,o.json);
+}));
+feishu.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await feishuConnectorStatus(root(dir)),o.json)));
 
 const workspace=program.command('workspace').description('Task worktree management');
 workspace.command('create').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await createWorkspace(root(dir),id),o.json)));

@@ -1,0 +1,141 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+
+import { cli, tempRoot } from './helpers.mjs'
+import {
+  FakeFeishuTransport,
+  LocalSecretProvider,
+  OfficialFeishuTransport,
+  acquireFeishuLease,
+  defaultFeishuConfig,
+  feishuConnectorStatus,
+  initFeishuConfig,
+  readFeishuConfig,
+  redactFeishuText,
+  releaseFeishuLease,
+  resolveFeishuCredentials,
+} from '../dist/connectors/feishu.js'
+
+async function projectRoot(name = 'feishu-connector-') {
+  const root = await tempRoot(name)
+  await mkdir(path.join(root, '.spec-loop'))
+  return root
+}
+
+function enabledConfig() {
+  return {
+    ...defaultFeishuConfig(),
+    enabled: true,
+    tenant_key: 'tenant-test',
+    targets: [{ project_id: 'PROJ-TEST', receive_id_type: 'chat_id', receive_id: 'oc_test_chat' }],
+    approvers: [{
+      project_id: 'PROJ-TEST', open_id: 'ou_test_user', local_actor: 'zhangbo',
+      request_types: ['proposal', 'verification', 'heavy_acceptance'],
+    }],
+  }
+}
+
+test('feishu config initializes disabled and validates strictly', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  const config = await readFeishuConfig(root)
+  assert.equal(config.enabled, false)
+  assert.equal(config.targets.length, 0)
+  assert.match(file, /\.spec-loop\/connectors\/feishu\/config\.json$/)
+
+  await writeFile(file, JSON.stringify({ ...config, unexpected: true }))
+  await assert.rejects(readFeishuConfig(root), /unrecognized key|unrecognized_keys/i)
+})
+
+test('enabled config requires targets, approvers and valid retry bounds', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  const config = defaultFeishuConfig()
+  await writeFile(file, JSON.stringify({ ...config, enabled: true }))
+  await assert.rejects(readFeishuConfig(root), /target|approver/i)
+
+  await writeFile(file, JSON.stringify({ ...enabledConfig(), retry: { max_attempts: 2, base_delay_ms: 5000, max_delay_ms: 1000 } }))
+  await assert.rejects(readFeishuConfig(root), /max delay/i)
+})
+
+test('config and connector paths reject symbolic links', async () => {
+  const root = await projectRoot()
+  const outside = await tempRoot('feishu-outside-')
+  await mkdir(path.join(root, '.spec-loop', 'connectors'))
+  await symlink(outside, path.join(root, '.spec-loop', 'connectors', 'feishu'))
+  await assert.rejects(initFeishuConfig(root), /symbolic/i)
+})
+
+test('secret provider resolves references without exposing values', async () => {
+  const config = enabledConfig()
+  const secret = 'super-private-secret-value'
+  const provider = new LocalSecretProvider({
+    SPEC_LOOP_FEISHU_APP_ID: 'cli_test_app',
+    SPEC_LOOP_FEISHU_APP_SECRET: secret,
+  })
+  assert.deepEqual(await resolveFeishuCredentials(config, provider), { appId: 'cli_test_app', appSecret: secret })
+  assert.equal(redactFeishuText(`app_secret=${secret} Authorization: Bearer abcdefghijklmnop`, [secret]), 'app_secret=[REDACTED] Authorization=[REDACTED]')
+
+  await assert.rejects(resolveFeishuCredentials(config, new LocalSecretProvider({})), /reference is unavailable/)
+})
+
+test('fake and official transports share the lifecycle contract', async () => {
+  const fake = new FakeFeishuTransport()
+  const actions = []
+  await fake.connect(async (action) => actions.push(action))
+  assert.equal(fake.connectionState(), 'connected')
+  const target = enabledConfig().targets[0]
+  const sent = await fake.sendCard(target, { header: { title: 'progress' } })
+  await fake.updateCard(sent.messageId, { header: { title: 'updated' } })
+  await fake.emitCardAction({
+    messageId: sent.messageId, chatId: 'oc_test_chat', operatorOpenId: 'ou_test_user',
+    action: { value: { request_id: 'REQ-1' }, tag: 'button', name: 'approve' },
+  })
+  assert.equal(fake.sent.length, 1)
+  assert.equal(fake.updated.length, 1)
+  assert.equal(actions.length, 1)
+  await fake.disconnect()
+  assert.equal(fake.connectionState(), 'idle')
+
+  const official = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' })
+  assert.equal(official.connectionState(), 'idle')
+})
+
+test('connector lease prevents a second local consumer', async () => {
+  const root = await projectRoot()
+  const first = await acquireFeishuLease(root, 'first-holder')
+  await assert.rejects(acquireFeishuLease(root, 'second-holder'), /held by first-holder/)
+  await assert.rejects(releaseFeishuLease(root, 'wrong-token'), /token does not match/)
+  await releaseFeishuLease(root, first.token)
+  const second = await acquireFeishuLease(root, 'second-holder')
+  assert.equal(second.holder, 'second-holder')
+  await releaseFeishuLease(root, second.token)
+})
+
+test('CLI config and status never print credential values', async () => {
+  const root = await projectRoot()
+  const initialized = cli(['connectors', 'feishu', 'init', root, '--json'])
+  assert.equal(initialized.code, 0, initialized.stderr)
+  const file = path.join(root, '.spec-loop', 'connectors', 'feishu', 'config.json')
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+
+  const secret = 'never-print-this-secret'
+  const env = { ...process.env, SPEC_LOOP_FEISHU_APP_ID: 'cli_test_app', SPEC_LOOP_FEISHU_APP_SECRET: secret }
+  const checked = cli(['connectors', 'feishu', 'check', root, '--json'], { env })
+  assert.equal(checked.code, 0, checked.stderr)
+  const status = cli(['connectors', 'feishu', 'status', root, '--json'], { env })
+  assert.equal(status.code, 0, status.stderr)
+  assert.equal(JSON.parse(status.stdout).credentials_available, true)
+  assert.equal(`${checked.stdout}${checked.stderr}${status.stdout}${status.stderr}`.includes(secret), false)
+})
+
+test('default config is stable JSON without credential values', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  const raw = await readFile(file, 'utf8')
+  assert.match(raw, /SPEC_LOOP_FEISHU_APP_SECRET/)
+  assert.doesNotMatch(raw, /app_secret"\s*:\s*"(?!SPEC_LOOP_)/)
+  await rm(root, { recursive: true, force: true })
+})

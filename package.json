@@ -3,15 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "files": ["dist", "assets/target-spec"],
-  "bin": { "spec-loop": "dist/cli.js" },
+  "files": [
+    "dist",
+    "assets/target-spec"
+  ],
+  "bin": {
+    "spec-loop": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "npm run build && node dist/cli.js --help"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.72.0",
     "commander": "^14.0.0",
     "yaml": "^2.8.1",
     "zod": "^4.1.12"
