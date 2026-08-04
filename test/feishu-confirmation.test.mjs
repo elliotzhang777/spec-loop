@@ -58,10 +58,6 @@ async function create(root, type = 'verification', overrides = {}) {
   })
 }
 
-function authority(request, overrides = {}) {
-  return { revision: request.revision, round: request.round, risk: request.risk, facts: request.facts, ...overrides }
-}
-
 test('all five request types bind immutable authority facts and fixed action allowlists', async () => {
   const root = await projectRoot()
   const fixtures = {
@@ -130,26 +126,30 @@ test('requests are single-consumption, actor-bound, action-bound and expiry-boun
   const root = await projectRoot()
   const request = await create(root)
   const now = new Date('2026-08-04T10:02:00.000Z')
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'approve_proposal', actor, authority(request), now), /action is not allowed/i)
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', 'ou_87654321_other', authority(request), now), /actor is not allowed/i)
-  const consumed = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request), now)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'approve_proposal', actor, now), /action is not allowed/i)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', 'ou_87654321_other', now), /actor is not allowed/i)
+  const consumed = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, now)
   assert.equal(consumed.status, 'consumed')
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request), now), /already consumed/i)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, now), /already consumed/i)
 
   const expired = await create(root, 'proposal', { now: new Date('2026-08-04T11:00:00.000Z'), ttlSeconds: 60 })
   assert.equal(await expireConfirmationRequests(root, new Date('2026-08-04T11:02:00.000Z')), 1)
   assert.equal((await listConfirmationRequests(root)).find((item) => item.request_id === expired.request_id).status, 'expired')
 })
 
-test('direct consumption atomically invalidates a request when current authority has changed', async () => {
+test('authority changes atomically invalidate the request before consumption', async () => {
   const root = await projectRoot()
   const request = await create(root)
-  const result = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request, {
+  const result = await invalidateIfConfirmationFactsChanged(root, request.request_id, {
     revision: 'fedcba0987654321',
-  }), new Date('2026-08-04T10:03:00.000Z'))
+    round: request.round,
+    risk: request.risk,
+    facts: request.facts,
+  }, new Date('2026-08-04T10:03:00.000Z'))
   assert.equal(result.status, 'invalidated')
   assert.equal(result.consumed_action, null)
-  assert.match(result.invalidation_reason, /权威 revision/)
+  assert.match(result.invalidation_reason, /候选 revision/)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, new Date('2026-08-04T10:04:00.000Z')), /already invalidated/i)
 })
 
 test('regeneration invalidates the old request and binds a new revision and content hash', async () => {
@@ -210,4 +210,26 @@ test('request schema rejects semantically inconsistent terminal snapshots', asyn
     consumed_action: 'reject_visual',
     consumed_actor_id: actor,
   }).success, false)
+  assert.equal(confirmationRequestSchema.safeParse({
+    ...request,
+    status: 'consumed',
+    consumed_at: request.expires_at,
+    consumed_action: 'authorize_verification',
+    consumed_actor_id: actor,
+  }).success, false)
+})
+
+test('history rejects creation, expiry and consumption events at impossible times', async () => {
+  for (const mutate of [
+    (event) => { event.occurred_at = '2026-08-04T10:00:01.000Z' },
+    (event) => { event.event_type = 'expired'; event.request.status = 'expired'; event.request.invalidation_reason = '请求已过有效期' },
+  ]) {
+    const root = await projectRoot()
+    await create(root)
+    const history = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations', 'history.jsonl')
+    const event = JSON.parse((await readFile(history, 'utf8')).trim())
+    mutate(event)
+    await writeFile(history, `${JSON.stringify(event)}\n`)
+    await assert.rejects(rebuildConfirmationProjection(root), /history integrity|creation time|expired before/i)
+  }
 })

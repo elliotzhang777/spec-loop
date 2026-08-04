@@ -96,6 +96,10 @@ export const confirmationRequestSchema = z.object({
   if (hasConsumption && value.consumed_actor_id && !value.allowed_actor_ids.includes(value.consumed_actor_id)) {
     ctx.addIssue({ code: 'custom', path: ['consumed_actor_id'], message: 'consumed actor is outside the request allowlist' });
   }
+  if (hasConsumption && value.consumed_at && (Date.parse(value.consumed_at) < Date.parse(value.created_at)
+    || Date.parse(value.consumed_at) >= Date.parse(value.expires_at))) {
+    ctx.addIssue({ code: 'custom', path: ['consumed_at'], message: 'consumption must occur after creation and before expiry' });
+  }
   const rejectionAction = value.consumed_action?.startsWith('reject_') || value.consumed_action === 'defer_verification' || value.consumed_action === 'pause_task';
   if (value.status === 'consumed' && rejectionAction) ctx.addIssue({ code: 'custom', path: ['consumed_action'], message: 'rejection action may not produce consumed status' });
   if (value.status === 'rejected' && !rejectionAction) ctx.addIssue({ code: 'custom', path: ['consumed_action'], message: 'approval action may not produce rejected status' });
@@ -126,6 +130,15 @@ const projectionSchema = z.object({
   history_head: digestSchema.nullable(),
   projection_hash: digestSchema,
   requests: z.array(confirmationRequestSchema),
+}).strict();
+
+const authorityProjectionSchema = z.object({
+  schema_version: z.literal(1),
+  projection_hash: digestSchema,
+  authorities: z.array(z.object({
+    request_id: z.string().uuid(), revision: z.string(), round: z.number().int().positive(),
+    risk: z.enum(['light', 'standard', 'heavy']), content_hash: digestSchema, facts: confirmationFactsSchema,
+  }).strict()),
 }).strict();
 
 function confirmationContentHash(input: {
@@ -195,6 +208,16 @@ async function readHistory(root: string): Promise<HistoryEvent[]> {
     if ((event.event_type === 'consumed' || event.event_type === 'rejected') && event.request.consumed_at !== event.occurred_at) {
       throw new Error(`confirmation history consumption time mismatch at sequence ${index + 1}`);
     }
+    if (event.event_type === 'created' && event.occurred_at !== event.request.created_at) {
+      throw new Error(`confirmation history creation time mismatch at sequence ${index + 1}`);
+    }
+    if ((event.event_type === 'consumed' || event.event_type === 'rejected')
+      && Date.parse(event.occurred_at) >= Date.parse(event.request.expires_at)) {
+      throw new Error(`confirmation history consumed after expiry at sequence ${index + 1}`);
+    }
+    if (event.event_type === 'expired' && Date.parse(event.occurred_at) < Date.parse(event.request.expires_at)) {
+      throw new Error(`confirmation history expired before deadline at sequence ${index + 1}`);
+    }
     if (Date.parse(event.occurred_at) < Date.parse(event.request.created_at) || (priorEvent && Date.parse(event.occurred_at) < Date.parse(priorEvent.occurred_at))) {
       throw new Error(`confirmation history time moved backwards at sequence ${index + 1}`);
     }
@@ -227,26 +250,54 @@ function makeProjection(events: HistoryEvent[]): z.infer<typeof projectionSchema
   });
 }
 
+function makeAuthorityProjection(events: HistoryEvent[]): z.infer<typeof authorityProjectionSchema> {
+  const authorities = deriveRequests(events).filter((request) => request.status === 'pending').map((request) => ({
+    request_id: request.request_id, revision: request.revision, round: request.round, risk: request.risk,
+    content_hash: request.content_hash, facts: request.facts,
+  }));
+  return authorityProjectionSchema.parse({ schema_version: 1, projection_hash: sha256(JSON.stringify(authorities)), authorities });
+}
+
 async function writeStore(projectRoot: string, root: string, events: HistoryEvent[]): Promise<void> {
   const projection = makeProjection(events);
+  const authority = makeAuthorityProjection(events);
   await atomicWriteMany(projectRoot, [
     { file: path.join(root, 'history.jsonl'), content: events.map((event) => JSON.stringify(event)).join('\n') + (events.length ? '\n' : '') },
     { file: path.join(root, 'projection.json'), content: `${JSON.stringify(projection, null, 2)}\n` },
+    { file: path.join(root, 'current-authority.json'), content: `${JSON.stringify(authority, null, 2)}\n` },
   ]);
 }
 
 async function verifyProjection(root: string, events: HistoryEvent[]): Promise<boolean> {
   const file = path.join(root, 'projection.json');
   const info = await lstat(file).catch(() => null);
-  if (!info) return false;
+  const authorityFile = path.join(root, 'current-authority.json');
+  const authorityInfo = await lstat(authorityFile).catch(() => null);
+  if (!info || !authorityInfo) return false;
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('confirmation projection is symbolic or not a regular file');
+  if (!authorityInfo.isFile() || authorityInfo.isSymbolicLink()) throw new Error('confirmation authority projection is symbolic or not a regular file');
   const actual = projectionSchema.parse(JSON.parse(await readFile(file, 'utf8')));
   const expected = makeProjection(events);
   if (actual.history_head !== expected.history_head || actual.projection_hash !== expected.projection_hash
     || sha256(JSON.stringify(actual.requests)) !== expected.projection_hash) {
     throw new Error('confirmation projection integrity failure');
   }
+  const actualAuthority = authorityProjectionSchema.parse(JSON.parse(await readFile(authorityFile, 'utf8')));
+  const expectedAuthority = makeAuthorityProjection(events);
+  if (actualAuthority.projection_hash !== expectedAuthority.projection_hash
+    || sha256(JSON.stringify(actualAuthority.authorities)) !== expectedAuthority.projection_hash) {
+    throw new Error('confirmation current authority projection integrity failure');
+  }
   return true;
+}
+
+async function readCurrentAuthority(root: string, requestId: string): Promise<z.infer<typeof authorityProjectionSchema>['authorities'][number] | null> {
+  const file = path.join(root, 'current-authority.json');
+  const info = await lstat(file).catch(() => null);
+  if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error('confirmation current authority projection is unavailable');
+  const projection = authorityProjectionSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+  if (projection.projection_hash !== sha256(JSON.stringify(projection.authorities))) throw new Error('confirmation current authority projection integrity failure');
+  return projection.authorities.find((item) => item.request_id === requestId) ?? null;
 }
 
 async function appendEvent(projectRoot: string, root: string, events: HistoryEvent[], eventType: HistoryEvent['event_type'], request: ConfirmationRequest, now: string): Promise<void> {
@@ -333,14 +384,15 @@ export async function checkConfirmationProjection(projectRoot: string): Promise<
   return { valid: true, request_count: deriveRequests(events).length, history_head: events.at(-1)?.event_hash ?? null };
 }
 
-async function mutateRequest(projectRoot: string, requestId: string, mutation: (request: ConfirmationRequest, now: Date) => { event: HistoryEvent['event_type']; request: ConfirmationRequest }, now = new Date()): Promise<ConfirmationRequest> {
+async function mutateRequest(projectRoot: string, requestId: string, mutation: (request: ConfirmationRequest, now: Date, root: string) => { event: HistoryEvent['event_type']; request: ConfirmationRequest } | null | Promise<{ event: HistoryEvent['event_type']; request: ConfirmationRequest } | null>, now = new Date()): Promise<ConfirmationRequest> {
   const root = await confirmationRoot(projectRoot);
   return withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events);
     const current = deriveRequests(events).find((request) => request.request_id === requestId);
     if (!current) throw new Error('confirmation request does not exist');
-    const result = mutation(current, now);
+    const result = await mutation(current, now, root);
+    if (!result) return current;
     await appendEvent(projectRoot, root, events, result.event, result.request, now.toISOString());
     return result.request;
   });
@@ -359,28 +411,25 @@ export async function invalidateIfConfirmationFactsChanged(projectRoot: string, 
   risk: 'light' | 'standard' | 'heavy';
   facts: ConfirmationFacts;
 }, now = new Date()): Promise<ConfirmationRequest> {
-  const requests = await listConfirmationRequests(projectRoot);
-  const current = requests.find((request) => request.request_id === requestId);
-  if (!current) throw new Error('confirmation request does not exist');
-  const facts = confirmationFactsSchema.parse(input.facts);
-  const hash = confirmationContentHash({ type: current.type, projectId: current.project_id, taskId: current.task_id, ...input, facts });
-  if (current.revision === input.revision && current.round === input.round && current.risk === input.risk && current.content_hash === hash) return current;
-  return invalidateConfirmationRequest(projectRoot, requestId, '候选 revision、Acceptance、截图或 Gate Plan 已变化', now);
+  return mutateRequest(projectRoot, requestId, (current) => {
+    if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
+    const facts = confirmationFactsSchema.parse(input.facts);
+    const hash = confirmationContentHash({ type: current.type, projectId: current.project_id, taskId: current.task_id, ...input, facts });
+    if (current.revision === input.revision && current.round === input.round && current.risk === input.risk && current.content_hash === hash) return null;
+    return { event: 'invalidated', request: confirmationRequestSchema.parse({ ...current, status: 'invalidated', invalidation_reason: '候选 revision、Acceptance、截图或 Gate Plan 已变化' }) };
+  }, now);
 }
 
-export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, authority: {
-  revision: string;
-  round: number;
-  risk: 'light' | 'standard' | 'heavy';
-  facts: ConfirmationFacts;
-}, now = new Date()): Promise<ConfirmationRequest> {
-  return mutateRequest(projectRoot, requestId, (current) => {
+export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+  return mutateRequest(projectRoot, requestId, async (current, _now, root) => {
     if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
     if (Date.parse(current.expires_at) <= now.getTime()) {
       return { event: 'expired', request: confirmationRequestSchema.parse({ ...current, status: 'expired', invalidation_reason: '请求已过有效期' }) };
     }
     if (!current.allowed_actor_ids.includes(actorId)) throw new Error('actor is not allowed for this confirmation request');
     if (!current.allowed_actions.includes(action)) throw new Error('action is not allowed for this confirmation request');
+    const authority = await readCurrentAuthority(root, requestId);
+    if (!authority) throw new Error('current authority for this confirmation request is unavailable');
     const currentFacts = confirmationFactsSchema.parse(authority.facts);
     const currentHash = confirmationContentHash({
       type: current.type, projectId: current.project_id, taskId: current.task_id,
