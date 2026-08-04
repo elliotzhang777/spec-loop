@@ -323,6 +323,49 @@ const leaseSchema = z.object({
   acquired_at: z.iso.datetime(), expires_at: z.iso.datetime(),
 }).strict();
 
+const leaseHeartbeatSchema = z.object({
+  schema_version: z.literal(1), token: z.uuid(), expires_at: z.iso.datetime(),
+}).strict();
+
+function leaseHeartbeatFile(root: string, token: string): string {
+  return path.join(root, `lease-heartbeat-${token}.json`);
+}
+
+function leaseStopFile(root: string, token: string): string {
+  return path.join(root, `lease-stop-${token}.json`);
+}
+
+async function readRegularJson(file: string, description: string): Promise<unknown | null> {
+  const info = await lstat(file).catch(() => null);
+  if (!info) return null;
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${description} is symbolic or not a file`);
+  return JSON.parse(await readFile(file, 'utf8'));
+}
+
+async function withLeaseMutationLock<T>(root: string, action: () => Promise<T>): Promise<T> {
+  const file = path.join(root, 'lease-mutation.lock');
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      handle = await open(file, 'wx', 0o600);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const info = await lstat(file).catch(() => null);
+      if (info && Date.now() - info.mtimeMs > 30_000) await rm(file, { force: true });
+      else await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (!handle) throw new Error('feishu connector lease mutation is busy');
+  try {
+    await handle.writeFile(`${process.pid}\n`);
+    return await action();
+  } finally {
+    await handle.close();
+    await rm(file, { force: true });
+  }
+}
+
 export async function acquireFeishuLease(projectRoot: string, holder: string, ttlMs = 60_000): Promise<ConnectorLease> {
   if (!holder.trim() || ttlMs < 1_000 || ttlMs > 24 * 60 * 60 * 1_000) throw new Error('invalid feishu connector lease request');
   const root = await feishuConnectorRoot(projectRoot);
@@ -337,52 +380,66 @@ export async function acquireFeishuLease(projectRoot: string, holder: string, tt
     try { await handle.writeFile(`${JSON.stringify(lease, null, 2)}\n`); }
     finally { await handle.close(); }
   };
-  try { await writeExclusive(); return lease; }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  }
-  const existing = await readFeishuLease(projectRoot);
-  if (existing && Date.parse(existing.expires_at) > now) throw new Error(`feishu connector lease is held by ${existing.holder}`);
-  const stale = `${file}.stale-${randomUUID()}`;
-  try { await rename(file, stale); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  await rm(stale, { force: true });
-  try { await writeExclusive(); return lease; }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('feishu connector lease was acquired concurrently');
-    throw error;
-  }
+  return withLeaseMutationLock(root, async () => {
+    try { await writeExclusive(); return lease; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const existing = await readFeishuLease(projectRoot);
+    if (existing && Date.parse(existing.expires_at) > Date.now()) throw new Error(`feishu connector lease is held by ${existing.holder}`);
+    const stale = `${file}.stale-${randomUUID()}`;
+    try { await rename(file, stale); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await rm(stale, { force: true });
+    if (existing) {
+      await rm(leaseHeartbeatFile(root, existing.token), { force: true });
+      await rm(leaseStopFile(root, existing.token), { force: true });
+    }
+    await writeExclusive();
+    return lease;
+  });
 }
 
 export async function readFeishuLease(projectRoot: string): Promise<ConnectorLease | null> {
   const root = await feishuConnectorRoot(projectRoot);
   const file = path.join(root, 'lease.json');
-  const info = await lstat(file).catch(() => null);
-  if (!info) return null;
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error('feishu connector lease is symbolic or not a file');
-  return leaseSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+  const raw = await readRegularJson(file, 'feishu connector lease');
+  if (!raw) return null;
+  const lease = leaseSchema.parse(raw);
+  const heartbeatRaw = await readRegularJson(leaseHeartbeatFile(root, lease.token), 'feishu connector lease heartbeat');
+  if (!heartbeatRaw) return lease;
+  const heartbeat = leaseHeartbeatSchema.parse(heartbeatRaw);
+  return Date.parse(heartbeat.expires_at) > Date.parse(lease.expires_at)
+    ? { ...lease, expires_at: heartbeat.expires_at }
+    : lease;
 }
 
 export async function releaseFeishuLease(projectRoot: string, token: string): Promise<void> {
   const root = await feishuConnectorRoot(projectRoot);
   const file = path.join(root, 'lease.json');
-  const current = await readFeishuLease(projectRoot);
-  if (!current) return;
-  if (current.token !== token) throw new Error('feishu connector lease token does not match');
-  await rm(file);
+  await withLeaseMutationLock(root, async () => {
+    const current = await readFeishuLease(projectRoot);
+    if (!current) return;
+    if (current.token !== token) throw new Error('feishu connector lease token does not match');
+    await rm(file);
+    await rm(leaseHeartbeatFile(root, token), { force: true });
+    await rm(leaseStopFile(root, token), { force: true });
+  });
 }
 
 export async function renewFeishuLease(projectRoot: string, token: string, ttlMs = 60_000): Promise<ConnectorLease> {
   if (ttlMs < 1_000 || ttlMs > 24 * 60 * 60 * 1_000) throw new Error('invalid feishu connector lease renewal');
   const root = await feishuConnectorRoot(projectRoot);
-  const file = path.join(root, 'lease.json');
-  const current = await readFeishuLease(projectRoot);
-  if (!current || current.token !== token) throw new Error('feishu connector lease was lost');
-  const renewed: ConnectorLease = { ...current, expires_at: new Date(Date.now() + ttlMs).toISOString() };
-  await atomicWriteMany(root, [{ file, content: `${JSON.stringify(renewed, null, 2)}\n` }]);
-  return renewed;
+  return withLeaseMutationLock(root, async () => {
+    const current = await readFeishuLease(projectRoot);
+    if (!current || current.token !== token) throw new Error('feishu connector lease was lost');
+    const renewed: ConnectorLease = { ...current, expires_at: new Date(Date.now() + ttlMs).toISOString() };
+    const heartbeat = { schema_version: 1, token, expires_at: renewed.expires_at };
+    await atomicWriteMany(root, [{ file: leaseHeartbeatFile(root, token), content: `${JSON.stringify(heartbeat, null, 2)}\n` }]);
+    return renewed;
+  });
 }
 
 export interface RunFeishuConnectorOptions {
@@ -400,25 +457,42 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   const ttlMs = options.leaseTtlMs ?? 60_000;
   const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
   const transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
-  const controller = options.signal ? null : new AbortController();
-  const signal = options.signal ?? controller!.signal;
-  const stop = (): void => controller?.abort();
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const stop = (): void => controller.abort();
+  const forwardAbort = (): void => controller.abort();
+  options.signal?.addEventListener('abort', forwardAbort, { once: true });
   if (!options.signal) {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   }
-  let heartbeat: NodeJS.Timeout | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  let heartbeatWork: Promise<void> = Promise.resolve();
+  const heartbeatDelay = Math.max(500, Math.floor(ttlMs / 3));
+  const scheduleHeartbeat = (): void => {
+    heartbeatTimer = setTimeout(() => {
+      heartbeatWork = (async () => {
+        if (await exists(leaseStopFile(await feishuConnectorRoot(projectRoot), lease.token))) {
+          controller.abort();
+          return;
+        }
+        await renewFeishuLease(projectRoot, lease.token, ttlMs);
+      })().catch(() => controller.abort()).finally(() => {
+        if (!signal.aborted) scheduleHeartbeat();
+      });
+    }, heartbeatDelay);
+  };
   try {
     await transport.connect(async () => { /* Confirmation handling is added by TASK-024. */ });
-    heartbeat = setInterval(() => {
-      void renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller?.abort());
-    }, Math.max(500, Math.floor(ttlMs / 3)));
+    scheduleHeartbeat();
     await new Promise<void>((resolve) => {
       if (signal.aborted) resolve();
       else signal.addEventListener('abort', () => resolve(), { once: true });
     });
   } finally {
-    if (heartbeat) clearInterval(heartbeat);
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    await heartbeatWork;
+    options.signal?.removeEventListener('abort', forwardAbort);
     if (!options.signal) {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
@@ -431,11 +505,9 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
 export async function stopFeishuConnector(projectRoot: string): Promise<{ stopped: boolean; holder: string | null }> {
   const lease = await readFeishuLease(projectRoot);
   if (!lease || Date.parse(lease.expires_at) <= Date.now()) return { stopped: false, holder: lease?.holder ?? null };
-  try { process.kill(lease.pid, 'SIGTERM'); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return { stopped: false, holder: lease.holder };
-    throw new Error(`unable to stop feishu connector holder ${lease.holder}`);
-  }
+  const root = await feishuConnectorRoot(projectRoot);
+  const request = { schema_version: 1, token: lease.token, requested_at: new Date().toISOString() };
+  await atomicWriteMany(root, [{ file: leaseStopFile(root, lease.token), content: `${JSON.stringify(request, null, 2)}\n` }]);
   return { stopped: true, holder: lease.holder };
 }
 

@@ -12,10 +12,13 @@ import {
   defaultFeishuConfig,
   feishuConnectorStatus,
   initFeishuConfig,
+  readFeishuLease,
   readFeishuConfig,
   redactFeishuText,
   releaseFeishuLease,
+  renewFeishuLease,
   runFeishuConnector,
+  stopFeishuConnector,
   resolveFeishuCredentials,
 } from '../dist/connectors/feishu.js'
 
@@ -147,6 +150,39 @@ test('running connector renews its lease until stopped', async () => {
   await running
   const next = await acquireFeishuLease(root, 'next-holder', 1000)
   await releaseFeishuLease(root, next.token)
+})
+
+test('stop requests are token-bound and handled cooperatively without signalling a pid', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  const fake = new FakeFeishuTransport()
+  const originalKill = process.kill
+  let killCalled = false
+  process.kill = () => { killCalled = true; return true }
+  try {
+    const running = runFeishuConnector(root, { holder: 'cooperative-holder', transport: fake, leaseTtlMs: 1000 })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.deepEqual(await stopFeishuConnector(root), { stopped: true, holder: 'cooperative-holder' })
+    await running
+    assert.equal(killCalled, false)
+    assert.equal(await readFeishuLease(root), null)
+  } finally {
+    process.kill = originalKill
+  }
+})
+
+test('an expired owner cannot renew over a replacement lease', async () => {
+  const root = await projectRoot()
+  const oldLease = await acquireFeishuLease(root, 'expired-holder', 1000)
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const replacement = await acquireFeishuLease(root, 'replacement-holder', 1000)
+  await assert.rejects(
+    renewFeishuLease(root, oldLease.token, 1000),
+    /lease was lost/,
+  )
+  assert.equal((await readFeishuLease(root)).token, replacement.token)
+  await releaseFeishuLease(root, replacement.token)
 })
 
 test('CLI config and status never print credential values', async () => {
