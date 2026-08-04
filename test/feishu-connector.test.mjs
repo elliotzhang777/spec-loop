@@ -43,6 +43,10 @@ function enabledConfig() {
   }
 }
 
+function jsonResponse(value, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => value }
+}
+
 test('feishu config initializes disabled and validates strictly', async () => {
   const root = await projectRoot()
   const file = await initFeishuConfig(root)
@@ -162,32 +166,35 @@ test('official transport sends with the configured receive id type', async () =>
 
 test('official preflight requires bot activation and message permission', async () => {
   let permissionGranted = true
-  const channel = {
-    rawClient: {
-      application: { v6: { scope: { list: async () => ({
-        code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
-      }) } } },
-      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_preflight' } }) } } },
-      request: async ({ url }) => url.includes('/scopes')
-        ? { code: 0, data: { scopes: permissionGranted ? [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] : [] } }
-        : { code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } },
-    },
-    connect: async () => {}, disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
-    on: () => () => {}, send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  const requests = []
+  const requester = async (url, init) => {
+    requests.push({ url, init })
+    if (url.includes('/tenant_access_token/')) return jsonResponse({ code: 0, tenant_access_token: 'tenant-token-canary' })
+    if (url.includes('/scopes')) return jsonResponse({
+      code: 0,
+      data: { scopes: permissionGranted ? [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] : [] },
+    })
+    return jsonResponse({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } })
   }
-  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, undefined, requester)
   await transport.preflight(enabledConfig())
+  assert.equal(JSON.parse(requests[0].init.body).app_secret, 'not-used')
+  assert.equal(requests[1].init.headers.Authorization, 'Bearer tenant-token-canary')
   permissionGranted = false
   await assert.rejects(transport.preflight(enabledConfig()), /required permission/)
 })
 
-test('official preflight cancellation does not wait for a slow channel factory', async () => {
+test('official preflight cancellation does not wait for a stuck token request', async () => {
   const controller = new AbortController()
+  let entered
+  const requestEntered = new Promise((resolve) => { entered = resolve })
   const transport = new OfficialFeishuTransport(
     { appId: 'cli_test', appSecret: 'not-used' },
-    async () => new Promise(() => {}),
+    undefined,
+    async () => { entered(); return new Promise(() => {}) },
   )
   const preflight = transport.preflight(enabledConfig(), controller.signal)
+  await requestEntered
   controller.abort()
   await assert.rejects(preflight, /cancelled/)
 })
@@ -222,6 +229,7 @@ test('channel factory errors are redacted for preflight and message methods', as
     const transport = new OfficialFeishuTransport(
       { appId: 'factory-app-canary', appSecret: secret },
       async () => { throw new Error(`factory failed with ${secret}`) },
+      async () => { throw new Error(`preflight failed with ${secret}`) },
     )
     let error
     try {
@@ -232,6 +240,60 @@ test('channel factory errors are redacted for preflight and message methods', as
     assert.ok(error)
     assert.equal(error.message.includes(secret), false)
   }
+})
+
+test('disconnect force-closes an official channel while it is still connecting', async () => {
+  let rejectConnect
+  let forceCloses = 0
+  let rawState = 'connecting'
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({ code: 0, data: { scopes: [] } }) } } },
+      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_connecting' } }) } } },
+      request: async () => ({ code: 0 }),
+    },
+    rawWsClient: { close: ({ force }) => {
+      if (force) forceCloses += 1
+      rawState = 'idle'
+      rejectConnect(new Error('socket closed'))
+    } },
+    on: () => () => {},
+    connect: async () => new Promise((_, reject) => { rejectConnect = reject }),
+    disconnect: async () => {}, getConnectionStatus: () => ({ state: rawState }),
+    send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  const connecting = transport.connect(async () => {})
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await transport.disconnect()
+  await assert.rejects(connecting, /socket closed/)
+  assert.equal(forceCloses, 1)
+  assert.equal(transport.connectionState(), 'idle')
+})
+
+test('disconnect aborts pending HTTP inside the production official SDK channel', async () => {
+  let connecting = false
+  let entered
+  const requestEntered = new Promise((resolve) => { entered = resolve })
+  const requester = async (url) => {
+    if (url.includes('/tenant_access_token/')) return jsonResponse({ code: 0, tenant_access_token: 'tenant-token-canary', expire: 300 })
+    if (url.includes('/scopes')) return jsonResponse({
+      code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
+    })
+    if (!connecting) return jsonResponse({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } })
+    entered()
+    return new Promise(() => {})
+  }
+  const transport = new OfficialFeishuTransport(
+    { appId: 'cli_0123456789abcdef', appSecret: 'not-used' }, undefined, requester,
+  )
+  await transport.preflight(enabledConfig())
+  connecting = true
+  const pending = transport.connect(async () => {})
+  await requestEntered
+  await transport.disconnect()
+  await assert.rejects(pending, /cancelled|could not resolve bot identity/)
+  assert.equal(transport.connectionState(), 'idle')
 })
 
 test('disconnect during a slow factory prevents callbacks and concurrent retry', async () => {

@@ -260,6 +260,7 @@ interface ChannelLike {
   };
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  rawWsClient?: { close(params?: { force?: boolean }): void };
   getConnectionStatus(): { state: FeishuConnectionState } | undefined;
   on(name: 'cardAction', handler: (event: {
     messageId: string; chatId: string; operator: { openId: string };
@@ -269,6 +270,30 @@ interface ChannelLike {
   updateCard(messageId: string, card: object): Promise<void>;
 }
 
+type FeishuPreflightRequester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
+
+async function abortableRequest(
+  requester: FeishuPreflightRequester,
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Pick<Response, 'ok' | 'status' | 'json'>> {
+  if (signal?.aborted) throw new Error('feishu preflight was cancelled');
+  let abortListener: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      requester(url, { ...init, signal }),
+      new Promise<never>((_, reject) => {
+        if (!signal) return;
+        abortListener = () => reject(new Error('feishu preflight was cancelled'));
+        signal.addEventListener('abort', abortListener, { once: true });
+      }),
+    ]);
+  } finally {
+    if (signal && abortListener) signal.removeEventListener('abort', abortListener);
+  }
+}
+
 export class OfficialFeishuTransport implements FeishuTransport {
   private channel?: ChannelLike;
   private channelPromise?: Promise<ChannelLike>;
@@ -276,8 +301,57 @@ export class OfficialFeishuTransport implements FeishuTransport {
   private state: FeishuConnectionState = 'idle';
   private connectionGeneration = 0;
   private connectInFlight = false;
+  private sdkRequestController = new AbortController();
+  private tenantAccessToken = '';
+  private tenantAccessTokenExpiresAt = 0;
 
-  constructor(private readonly credentials: FeishuCredentials, private readonly channelFactory?: () => Promise<ChannelLike>) {}
+  constructor(
+    private readonly credentials: FeishuCredentials,
+    private readonly channelFactory?: () => Promise<ChannelLike>,
+    private readonly preflightRequester: FeishuPreflightRequester = (url, init) => fetch(url, init),
+  ) {}
+
+  private resetSdkRequestController(): void {
+    if (this.sdkRequestController.signal.aborted) this.sdkRequestController = new AbortController();
+  }
+
+  private sdkHttpInstance(): object {
+    const request = async (payload: {
+      url: string; method?: string; data?: unknown; params?: Record<string, unknown>; headers?: Record<string, string>;
+    }): Promise<unknown> => {
+      if (payload.url.includes('/open-apis/auth/v3/tenant_access_token/internal')
+        && this.tenantAccessToken && this.tenantAccessTokenExpiresAt > Date.now()) {
+        return { code: 0, tenant_access_token: this.tenantAccessToken, expire: Math.max(1, Math.floor((this.tenantAccessTokenExpiresAt - Date.now()) / 1000)) };
+      }
+      const target = new URL(payload.url);
+      for (const [key, value] of Object.entries(payload.params ?? {})) {
+        if (Array.isArray(value)) value.forEach((item) => target.searchParams.append(key, String(item)));
+        else if (value !== undefined && value !== null) target.searchParams.set(key, String(value));
+      }
+      const method = (payload.method ?? 'GET').toUpperCase();
+      const headers = { ...payload.headers };
+      if (payload.data !== undefined && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+        headers['Content-Type'] = 'application/json; charset=utf-8';
+      }
+      const response = await abortableRequest(this.preflightRequester, target.toString(), {
+        method,
+        headers,
+        body: payload.data === undefined ? undefined : JSON.stringify(payload.data),
+      }, this.sdkRequestController.signal);
+      if (!response.ok) throw new Error(`Feishu SDK request failed with HTTP ${response.status}`);
+      return response.json();
+    };
+    return {
+      request,
+      post: (url: string, data?: unknown, options: { headers?: Record<string, string> } = {}) => request({ url, method: 'POST', data, headers: options.headers }),
+      get: (url: string, options: { params?: Record<string, unknown>; headers?: Record<string, string> } = {}) => request({ url, method: 'GET', ...options }),
+      put: (url: string, data?: unknown, options: { headers?: Record<string, string> } = {}) => request({ url, method: 'PUT', data, headers: options.headers }),
+      patch: (url: string, data?: unknown, options: { headers?: Record<string, string> } = {}) => request({ url, method: 'PATCH', data, headers: options.headers }),
+      delete: (url: string, options: { params?: Record<string, unknown>; headers?: Record<string, string> } = {}) => request({ url, method: 'DELETE', ...options }),
+      head: (url: string, options: { params?: Record<string, unknown>; headers?: Record<string, string> } = {}) => request({ url, method: 'HEAD', ...options }),
+      options: (url: string, options: { params?: Record<string, unknown>; headers?: Record<string, string> } = {}) => request({ url, method: 'OPTIONS', ...options }),
+    };
+  }
 
   private async getChannel(signal?: AbortSignal): Promise<ChannelLike> {
     if (this.channel) return this.channel;
@@ -294,6 +368,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
           source: 'spec-loop',
           logger: createRedactingFeishuLogger(this.credentials),
           loggerLevel: sdk.LoggerLevel.error,
+          httpInstance: this.sdkHttpInstance() as never,
           handshakeTimeoutMs: 15_000,
           outbound: { retry: { maxAttempts: 1, baseDelayMs: 100 } },
         }) as ChannelLike;
@@ -322,25 +397,52 @@ export class OfficialFeishuTransport implements FeishuTransport {
   }
 
   async preflight(_config: FeishuConnectorConfig, signal?: AbortSignal): Promise<void> {
+    let tenantAccessToken = '';
     try {
-      const channel = await this.getChannel(signal);
-      const scopeResponse = await channel.rawClient.request({ url: '/open-apis/application/v6/scopes', method: 'GET', signal });
+      const tokenHttpResponse = await abortableRequest(this.preflightRequester, 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ app_id: this.credentials.appId, app_secret: this.credentials.appSecret }),
+      }, signal);
+      if (!tokenHttpResponse.ok) throw new Error(`tenant token request failed with HTTP ${tokenHttpResponse.status}`);
+      const tokenResponse = await tokenHttpResponse.json() as { code?: number; msg?: string; tenant_access_token?: string };
+      if (tokenResponse.code && tokenResponse.code !== 0) throw new Error(tokenResponse.msg || `tenant token request failed with code ${tokenResponse.code}`);
+      tenantAccessToken = tokenResponse.tenant_access_token ?? '';
+      if (!tenantAccessToken) throw new Error('tenant_access_token missing from response');
+      this.tenantAccessToken = tenantAccessToken;
+      this.tenantAccessTokenExpiresAt = Date.now() + Math.max(1, Number((tokenResponse as { expire?: number }).expire ?? 300)) * 1000;
+      const authorization = { Authorization: `Bearer ${tenantAccessToken}` };
+      const scopeHttpResponse = await abortableRequest(this.preflightRequester, 'https://open.feishu.cn/open-apis/application/v6/scopes', {
+        method: 'GET', headers: authorization,
+      }, signal);
+      if (!scopeHttpResponse.ok) throw new Error(`scope query failed with HTTP ${scopeHttpResponse.status}`);
+      const scopeResponse = await scopeHttpResponse.json() as {
+        code?: number; msg?: string;
+        data?: { scopes?: Array<{ scope_name: string; grant_status: number; scope_type?: 'user' | 'tenant' }> };
+      };
       if (scopeResponse.code && scopeResponse.code !== 0) throw new Error(scopeResponse.msg || `scope query failed with code ${scopeResponse.code}`);
       const granted = new Set((scopeResponse.data?.scopes ?? [])
         .filter((scope) => scope.scope_type !== 'user' && scope.grant_status === 1)
         .map((scope) => scope.scope_name));
       if (!granted.has('im:message:send_as_bot') && !granted.has('im:message')) throw new Error('required permission im:message:send_as_bot is not granted');
-      const botResponse = await channel.rawClient.request({ url: '/open-apis/bot/v3/info', method: 'GET', signal });
+      const botHttpResponse = await abortableRequest(this.preflightRequester, 'https://open.feishu.cn/open-apis/bot/v3/info', {
+        method: 'GET', headers: authorization,
+      }, signal);
+      if (!botHttpResponse.ok) throw new Error(`bot info failed with HTTP ${botHttpResponse.status}`);
+      const botResponse = await botHttpResponse.json() as {
+        code?: number; msg?: string; bot?: { activate_status?: number; open_id?: string; app_name?: string };
+      };
       if (botResponse.code && botResponse.code !== 0) throw new Error(botResponse.msg || `bot info failed with code ${botResponse.code}`);
       if (!botResponse.bot?.open_id || botResponse.bot.activate_status !== 2) throw new Error('bot capability is unavailable or inactive');
     } catch (error) {
-      throw new Error(redactFeishuText(`feishu preflight failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret]));
+      throw new Error(redactFeishuText(`feishu preflight failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, tenantAccessToken]));
     }
   }
 
   async connect(handler: FeishuCardActionHandler): Promise<void> {
     if (this.connectInFlight || (this.state !== 'idle' && this.state !== 'failed')) throw new Error(`feishu transport cannot connect from ${this.state}`);
     this.connectInFlight = true;
+    this.resetSdkRequestController();
     const generation = ++this.connectionGeneration;
     this.state = 'connecting';
     let channel: ChannelLike | undefined;
@@ -378,9 +480,12 @@ export class OfficialFeishuTransport implements FeishuTransport {
 
   async disconnect(): Promise<void> {
     this.connectionGeneration += 1;
+    this.sdkRequestController.abort();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
-    if (this.channel) await this.channel.disconnect();
+    try { this.channel?.rawWsClient?.close({ force: true }); }
+    catch { /* best effort: the wrapper action gate is already closed */ }
+    if (this.channel) await this.channel.disconnect().catch(() => undefined);
     this.state = 'idle';
   }
 
