@@ -10,6 +10,7 @@ import { readProject, scanTasks } from '../project.js';
 import { evidenceRecords, readState } from '../task.js';
 import { acceptanceSchema, verifySchema } from '../schemas.js';
 import { readVisualReviews } from '../review.js';
+import { guard, readBudget, readLedger } from '../runtime.js';
 
 const taskStatusSchema = z.enum(['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered']);
 const interventionSchema = z.enum(['none', 'approve_proposal', 'provide_input', 'review_visual', 'authorize_verification', 'accept_delivery']);
@@ -100,6 +101,7 @@ const outboxRecordSchema = z.object({
   id: z.string().uuid(), project_id: z.string(), wave_id: z.string(), kind: z.enum(['progress', 'critical']), target: z.object({ project_id: z.string(), receive_id_type: z.enum(['chat_id', 'open_id', 'user_id', 'union_id', 'email']), receive_id: z.string() }).strict(),
   idempotency_key: z.string().min(3).max(256), payload_hash: z.string().length(64), payload: z.record(z.string(), z.unknown()), source: outboxSourceSchema, priority: z.number().int().min(0).max(100),
   status: outboxStatusSchema, attempts: z.number().int().nonnegative(), next_attempt_at: z.iso.datetime().nullable(), message_id: z.string().nullable(), platform_request_id: z.string().nullable(),
+  delivery_payload_hash: z.string().length(64).nullable(), delivery_payload: z.record(z.string(), z.unknown()).nullable(), delivery_source: outboxSourceSchema.nullable(),
   delivery_token: z.string().uuid().nullable(),
   last_error: z.enum(['rate_limited', 'server', 'network', 'permission', 'target', 'invalid_payload']).nullable(), created_at: z.iso.datetime(), updated_at: z.iso.datetime(),
 }).strict();
@@ -154,6 +156,17 @@ async function readOutboxAt(root: string): Promise<z.infer<typeof outboxSchema>>
       || JSON.stringify(record.payload) !== JSON.stringify(expected)) {
       throw new Error('feishu outbox payload is not the deterministic rendering of its persisted source facts');
     }
+    const deliveryFields = [record.delivery_payload_hash, record.delivery_payload, record.delivery_source];
+    if (deliveryFields.some((value) => value !== null) && deliveryFields.some((value) => value === null)) {
+      throw new Error('feishu outbox in-flight delivery facts are incomplete');
+    }
+    if (record.delivery_payload && record.delivery_payload_hash && record.delivery_source) {
+      const expectedDelivery = renderOutboxSource(record.delivery_source);
+      if (sha256(JSON.stringify(record.delivery_payload)) !== record.delivery_payload_hash
+        || JSON.stringify(record.delivery_payload) !== JSON.stringify(expectedDelivery)) {
+        throw new Error('feishu outbox in-flight payload is not the deterministic rendering of its source facts');
+      }
+    }
   }
   return outbox;
 }
@@ -183,7 +196,7 @@ export async function enqueueProgressCard(projectRoot: string, snapshot: Progres
       existing.next_attempt_at = new Date(now.getTime() + aggregateWindowMs).toISOString();
       await writeOutbox(projectRoot, root, outbox); return outboxRecordSchema.parse(existing);
     }
-    const record = outboxRecordSchema.parse({ id: randomUUID(), project_id: snapshot.project_id, wave_id: snapshot.wave_id, kind: 'progress', target, idempotency_key: key, payload_hash: hash, payload: card, source: { kind: 'progress', snapshot }, priority: 20, status: 'pending', attempts: 0, next_attempt_at: new Date(now.getTime() + aggregateWindowMs).toISOString(), message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now.toISOString(), updated_at: now.toISOString() });
+    const record = outboxRecordSchema.parse({ id: randomUUID(), project_id: snapshot.project_id, wave_id: snapshot.wave_id, kind: 'progress', target, idempotency_key: key, payload_hash: hash, payload: card, source: { kind: 'progress', snapshot }, priority: 20, status: 'pending', attempts: 0, next_attempt_at: new Date(now.getTime() + aggregateWindowMs).toISOString(), message_id: null, platform_request_id: null, delivery_payload_hash: null, delivery_payload: null, delivery_source: null, delivery_token: null, last_error: null, created_at: now.toISOString(), updated_at: now.toISOString() });
     outbox.records.push(record); await writeOutbox(projectRoot, root, outbox); return record;
   });
 }
@@ -214,7 +227,7 @@ export async function enqueueCriticalCard(projectRoot: string, input: { projectI
   return withOutboxLock(root, async () => {
     const outbox = await readOutboxAt(root), key = `critical:${input.projectId}:${eventId}:${targetKey(input.target)}`, existing = outbox.records.find((record) => record.idempotency_key === key);
     if (existing) return existing;
-    const now = new Date().toISOString(), record = outboxRecordSchema.parse({ id: randomUUID(), project_id: input.projectId, wave_id: input.waveId, kind: 'critical', target: input.target, idempotency_key: key, payload_hash: sha256(JSON.stringify(card)), payload: card, source: { kind: 'critical', event_type: eventType, task_id: task }, priority: 100, status: 'pending', attempts: 0, next_attempt_at: now, message_id: null, platform_request_id: null, delivery_token: null, last_error: null, created_at: now, updated_at: now });
+    const now = new Date().toISOString(), record = outboxRecordSchema.parse({ id: randomUUID(), project_id: input.projectId, wave_id: input.waveId, kind: 'critical', target: input.target, idempotency_key: key, payload_hash: sha256(JSON.stringify(card)), payload: card, source: { kind: 'critical', event_type: eventType, task_id: task }, priority: 100, status: 'pending', attempts: 0, next_attempt_at: now, message_id: null, platform_request_id: null, delivery_payload_hash: null, delivery_payload: null, delivery_source: null, delivery_token: null, last_error: null, created_at: now, updated_at: now });
     outbox.records.push(record); await writeOutbox(projectRoot, root, outbox); return record;
   });
 }
@@ -237,7 +250,13 @@ export async function dispatchFeishuOutboxOnce(projectRoot: string, transport: F
     const outbox = await readOutboxAt(root);
     const eligible = outbox.records.filter((record) => ['pending', 'retry_wait'].includes(record.status) && (!record.next_attempt_at || Date.parse(record.next_attempt_at) <= now.getTime())).sort((left, right) => right.priority - left.priority || left.created_at.localeCompare(right.created_at));
     const record = eligible[0]; if (!record) return null;
-    record.status = 'sending'; record.attempts += 1; record.delivery_token = randomUUID(); record.platform_request_id ??= sha256(record.idempotency_key).slice(0, 32); record.updated_at = now.toISOString();
+    if (!record.message_id && !record.delivery_payload) {
+      record.delivery_payload = record.payload;
+      record.delivery_payload_hash = record.payload_hash;
+      record.delivery_source = record.source;
+      record.platform_request_id = sha256(`${record.idempotency_key}:${record.payload_hash}`).slice(0, 32);
+    }
+    record.status = 'sending'; record.attempts += 1; record.delivery_token = randomUUID(); record.updated_at = now.toISOString();
     await writeOutbox(projectRoot, root, outbox);
     return outboxRecordSchema.parse(record);
   });
@@ -247,7 +266,10 @@ export async function dispatchFeishuOutboxOnce(projectRoot: string, transport: F
   let failure: ReturnType<typeof classifyDeliveryError> | null = null;
   try {
     if (claimed.message_id) await transport.updateCard(claimed.message_id, claimed.payload);
-    else sentMessageId = (await transport.sendCard(claimed.target, claimed.payload, claimed.platform_request_id ?? undefined)).messageId;
+    else {
+      if (!claimed.delivery_payload || !claimed.delivery_payload_hash || !claimed.delivery_source || !claimed.platform_request_id) throw new Error('feishu outbox send claim lacks fenced delivery facts');
+      sentMessageId = (await transport.sendCard(claimed.target, claimed.delivery_payload, claimed.platform_request_id)).messageId;
+    }
   } catch (error) {
     const value = error as { code?: string };
     const missingExistingCard = Boolean(claimed.message_id) && (value.code === 'MESSAGE_NOT_FOUND' || value.code === 'HTTP_404' || (error as { status?: number }).status === 404);
@@ -267,11 +289,21 @@ export async function dispatchFeishuOutboxOnce(projectRoot: string, transport: F
     record.delivery_token = null;
     record.message_id = sentMessageId;
     if (failure?.category === 'target' && failure.retry && sentMessageId === null) {
-      record.platform_request_id = sha256(`${record.idempotency_key}:${record.attempts}`).slice(0, 32);
+      record.platform_request_id = null;
+      record.delivery_payload_hash = null;
+      record.delivery_payload = null;
+      record.delivery_source = null;
     }
-    if (!failure && record.payload_hash !== claimed.payload_hash) {
+    const deliveredHash = claimed.message_id ? claimed.payload_hash : claimed.delivery_payload_hash;
+    if (!failure && record.payload_hash !== deliveredHash) {
+      record.delivery_payload_hash = null;
+      record.delivery_payload = null;
+      record.delivery_source = null;
       record.status = 'pending'; record.next_attempt_at = completedAt; record.last_error = null;
     } else if (!failure) {
+      record.delivery_payload_hash = null;
+      record.delivery_payload = null;
+      record.delivery_source = null;
       record.status = 'sent'; record.next_attempt_at = null; record.last_error = null;
     } else {
       record.last_error = failure.category;
@@ -317,7 +349,10 @@ export async function readFeishuOutboxRecords(projectRoot: string): Promise<Feis
 
 const harnessFactSchema = z.object({
   task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']),
-  evidence_hashes: z.object({ prepare: z.string().length(64) }).passthrough(), updated_at: z.iso.datetime(),
+  evidence_hashes: z.object({
+    prepare: z.string().length(64), provider: z.string().length(64).optional(), collect: z.string().length(64).optional(),
+    gates: z.string().length(64).optional(), report: z.string().length(64).optional(),
+  }).strict(), updated_at: z.iso.datetime(),
 }).passthrough();
 const prepareFactSchema = z.object({ task_id: z.string(), round: z.number().int().positive(), head: z.string().regex(/^[a-f0-9]{40,64}$/) }).passthrough();
 const gateFactSchema = z.array(z.object({ task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), exit_code: z.number().int(), timed_out: z.boolean(), created_at: z.iso.datetime() }).passthrough());
@@ -329,7 +364,7 @@ async function optionalJson(file: string): Promise<unknown | null> {
   return JSON.parse(await readFile(file, 'utf8'));
 }
 
-async function candidateRevision(projectRoot: string, taskId: string, previousRevision: string): Promise<string | null> {
+async function workspaceSnapshot(projectRoot: string, taskId: string): Promise<{ head: string; base: string; clean: boolean } | null> {
   const raw = await optionalJson(path.join(projectRoot, '.spec-loop', 'output', `${taskId}-workspace.json`));
   if (!raw) return null;
   const workspace = z.object({ task_id: z.string(), worktree: z.string(), base_commit: z.string().regex(/^[a-f0-9]{40,64}$/) }).passthrough().parse(raw);
@@ -341,8 +376,25 @@ async function candidateRevision(projectRoot: string, taskId: string, previousRe
     exec('git', ['-C', expected, 'rev-parse', 'HEAD']),
     exec('git', ['-C', expected, 'status', '--porcelain=v1', '--untracked-files=all']),
   ]);
-  const revision = head.trim().toLowerCase();
-  return status.trim() === '' && revision !== workspace.base_commit.toLowerCase() && revision !== previousRevision.toLowerCase() ? revision : null;
+  return { head: head.trim().toLowerCase(), base: workspace.base_commit.toLowerCase(), clean: status.trim() === '' };
+}
+
+async function harnessMatchesCurrentEvidence(output: string, taskId: string, harness: z.infer<typeof harnessFactSchema>, prepareText: string): Promise<boolean> {
+  const required: Record<z.infer<typeof harnessFactSchema>['stage'], Array<keyof z.infer<typeof harnessFactSchema>['evidence_hashes']>> = {
+    prepared: ['prepare'], executed: ['prepare', 'provider'], collected: ['prepare', 'provider', 'collect'],
+    verified: ['prepare', 'provider', 'collect', 'gates'], reported: ['prepare', 'provider', 'collect', 'gates', 'report'],
+  };
+  const files = {
+    prepare: `${taskId}-prepare.json`, provider: `${taskId}-provider.txt`, collect: `${taskId}-collect.json`,
+    gates: `${taskId}-gates.json`, report: `${taskId}-harness-report.md`,
+  } as const;
+  for (const key of required[harness.stage]) {
+    const expected = harness.evidence_hashes[key];
+    if (!expected) return false;
+    const content = key === 'prepare' ? prepareText : await readFile(path.join(output, files[key]), 'utf8').catch(() => null);
+    if (content === null || sha256(content) !== expected) return false;
+  }
+  return true;
 }
 
 export async function projectProgressSnapshot(projectRoot: string): Promise<ProgressSnapshot> {
@@ -363,8 +415,10 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
   const harness = harnessRaw ? harnessFactSchema.parse(harnessRaw) : null;
   const gatesRaw = taskId ? await optionalJson(path.join(output, `${taskId}-gates.json`)) : null;
   const allGates = gatesRaw ? gateFactSchema.parse(gatesRaw) : [];
-  const currentPrepare = prepare?.task_id === taskId && prepare.round === active?.state.current_round && prepareText && harness?.evidence_hashes.prepare === sha256(prepareText) ? prepare : null;
-  const currentHarness = currentPrepare && harness?.task_id === taskId ? harness : null;
+  const workspace = taskId ? await workspaceSnapshot(projectRoot, taskId) : null;
+  const currentPrepare = prepare?.task_id === taskId && prepare.round === active?.state.current_round && prepareText ? prepare : null;
+  const evidenceBound = currentPrepare && harness?.task_id === taskId && prepareText ? await harnessMatchesCurrentEvidence(output, taskId as string, harness, prepareText) : false;
+  const currentHarness = evidenceBound && workspace?.clean && harness?.head === workspace.head ? harness : null;
   const currentHead = currentHarness?.head ?? null;
   const gates = currentHead ? allGates.filter((item) => item.task_id === taskId && item.head === currentHead) : [];
   let verifier: z.infer<typeof resultSchema> = 'none';
@@ -386,11 +440,10 @@ export async function projectProgressSnapshot(projectRoot: string): Promise<Prog
   const gate: z.infer<typeof resultSchema> = gates.length === 0 ? 'none' : gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'pass' : 'failed';
   const reviews = active ? await readVisualReviews(active.task.path) : [];
   const acceptance = active ? acceptanceSchema.parse((await readMarkdown(path.join(active.task.path, 'ACCEPTANCE.md'))).data) : null;
-  const candidate = active?.state.status === 'working' && taskId ? await candidateRevision(projectRoot, taskId, active.state.code_revision) : null;
+  const candidate = active?.state.status === 'working' && workspace?.clean && workspace.head !== workspace.base && workspace.head !== active.state.code_revision.toLowerCase() ? workspace.head : null;
   const visualReview = Boolean(candidate && acceptance?.human_reviews.some((required) => !reviews.some((item) => item.review_id === required.id
     && item.round === active?.state.current_round && item.code_revision === candidate && item.status === 'approved')));
-  const summary = active ? await readFile(path.join(active.task.path, 'RUN_SUMMARY.md'), 'utf8').catch(() => '') : '';
-  const needsInput = /^- Guard: needs_user$/m.test(summary);
+  const needsInput = active ? guard(await readBudget(active.task.path), await readLedger(active.task.path, active.state)).decision === 'needs_user' : false;
   const heavyAcceptance = active?.state.status === 'verifying' && active.state.level === 'heavy' && verifier === 'pass';
   const verificationAuthorization = Boolean(candidate && !currentHarness && !visualReview);
   const nextUserIntervention: z.infer<typeof interventionSchema> = heavyAcceptance ? 'accept_delivery'

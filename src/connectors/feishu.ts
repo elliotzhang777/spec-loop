@@ -373,28 +373,21 @@ export class OfficialFeishuTransport implements FeishuTransport {
         headers,
         body: payload.data === undefined ? undefined : JSON.stringify(payload.data),
       }, this.sdkRequestController.signal);
-      if (!response.ok) {
+      const responseData = await response.json().catch(() => ({})) as { code?: number | string; tenant_access_token?: string; expire?: number };
+      const businessCode = Number(responseData.code ?? 0);
+      if (!response.ok || (Number.isFinite(businessCode) && businessCode !== 0)) {
         const retryAfter = response.headers?.get('retry-after');
         const parsedRetryAfter = retryAfter
           ? (/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1_000 : Date.parse(retryAfter) - Date.now())
           : Number.NaN;
         const retryAfterMs = Number.isFinite(parsedRetryAfter) ? Math.max(0, parsedRetryAfter) : undefined;
-        throw Object.assign(new Error(`Feishu SDK request failed with HTTP ${response.status}`), {
-          status: response.status,
-          code: `HTTP_${response.status}`,
-          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-        });
-      }
-      const responseData = await response.json() as { code?: number | string; msg?: string; tenant_access_token?: string; expire?: number };
-      const businessCode = Number(responseData.code ?? 0);
-      if (Number.isFinite(businessCode) && businessCode !== 0) {
-        const message = String(responseData.msg ?? '');
-        const status = /permission|forbidden|unauthori[sz]ed|权限/i.test(message) ? 403
-          : /rate|frequency|too many|限流|频率/i.test(message) ? 429
-            : /not found|不存在/i.test(message) ? 404 : 400;
+        const isApplicationRateLimit = businessCode === 99991400;
+        const status = isApplicationRateLimit ? 429 : response.status;
+        const code = businessCode !== 0 && Number.isFinite(businessCode) ? `FEISHU_${businessCode}` : `HTTP_${response.status}`;
         throw Object.assign(new Error(`Feishu SDK business request failed with code ${businessCode}`), {
           status,
-          code: `FEISHU_${businessCode}`,
+          code,
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
         });
       }
       if (payload.url.includes('/open-apis/auth/v3/tenant_access_token/internal') && responseData.tenant_access_token) {
