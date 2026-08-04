@@ -849,6 +849,15 @@ export async function feishuConnectorStatus(projectRoot: string, provider: Secre
     try { await resolveFeishuCredentials(config, provider); credentialsAvailable = true; }
     catch (error) { credentialError = redactFeishuText((error as Error).message); }
   }
+  const outbox = await import('./feishu-progress.js')
+    .then(({ readFeishuOutboxSummary }) => readFeishuOutboxSummary(projectRoot))
+    .catch((error: unknown) => ({
+      pending: null,
+      retry_wait: null,
+      dead_letter: null,
+      last_sent_at: null,
+      error: redactFeishuText((error as Error).message),
+    }));
   return {
     enabled: config.enabled,
     tenant_configured: isValidTenantKey(config.tenant_key),
@@ -856,6 +865,7 @@ export async function feishuConnectorStatus(projectRoot: string, provider: Secre
     approver_count: config.approvers.length,
     credentials_available: credentialsAvailable,
     credential_error: credentialError,
+    outbox,
     lease: lease ? { holder: lease.holder, pid: lease.pid, expires_at: lease.expires_at, expired: Date.parse(lease.expires_at) <= Date.now() } : null,
   };
 }
