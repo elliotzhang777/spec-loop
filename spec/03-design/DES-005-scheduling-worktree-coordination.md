@@ -3,7 +3,7 @@
 - 状态：草稿
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-08-04
 - 所属特性：[FEAT-005](../02-feature/FEAT-005-scheduling-isolation.md)
 
 ## 设计目标
@@ -12,7 +12,7 @@
 
 ## 现状与约束
 
-- 现状：Phase 3 已具备多任务管理、串行单步 Harness 和 worktree 隔离原型，加固实现待正式验收；当前没有 Scheduler。
+- 现状：Phase 3 已完成多任务管理、串行单步 Harness、worktree 隔离和正式 Heavy 验收；当前没有 Scheduler。
 - 技术约束：依赖单步 worktree 和 Phase 4 Controller 幂等。
 - 不在范围：跨机器分布式 Worker 和默认生产写入。
 
@@ -42,7 +42,7 @@ Pause 阻止新 Triage/Task/Round，允许安全 Gate 收尾。Kill 取消 Agent
 
 ### 连接器
 
-按项目授权，只读开始；评论/标签和有限状态更新单独批准。merge、delete、生产数据、credential、签名和发布默认 deny。
+按项目授权，只读开始；评论/标签和有限状态更新单独批准。merge、delete、生产数据、credential、签名和发布默认 deny。飞书正式机器人的进度投影、远程身份、交互确认、Inbox/Outbox 与恢复契约由 [DES-008](DES-008-feishu-bot-connector.md) 定义。
 
 ### 安全与审计
 
@@ -62,7 +62,7 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 
 ## 工单拆分
 
-Phase 4 未满足进入条件，不创建工单。
+Phase 4 尚未获得实施授权。飞书 Connector 已形成 TASK-021～026 草稿，但不得因此自动开工；Scheduling、Controller 和 Toolchain 的其他工单仍待统一拆分。
 
 ## 实际实现
 
@@ -73,3 +73,4 @@ Phase 4 未满足进入条件，不创建工单。
 | 日期 | 变更 | 原因 | 关联工单 |
 |---|---|---|---|
 | 2026-07-12 | 融合 Scheduling、多任务与安全 | 最终 Roadmap | - |
+| 2026-08-04 | 引用飞书正式机器人专项设计与草稿工单 | 将通用 Connector Policy 与具体双向交互实现分层 | TASK-021～026 |

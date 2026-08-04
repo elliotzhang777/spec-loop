@@ -95,6 +95,7 @@ roadmap.md
               → TASK-002 Phase 2 实现
       → FEAT-003 Project Loop 与 Agent 执行（Phase 3）
       → FEAT-004～006 受控自动化、调度隔离与 Toolchain（Phase 4）
+      → FEAT-008 飞书进度通知与确认连接器（Phase 4）
       → FEAT-007 Portfolio、能力资产与持续优化（Phase 5）
 ```
 

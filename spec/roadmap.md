@@ -118,6 +118,8 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 - T2 平台预设按需求增加：Spring Boot、Xcode/iOS、微信小程序。
 - Connector 权限按只读 → 评论/标签 → 有限状态更新逐级开放。
+- 飞书企业自建应用机器人作为首个双向 Connector：通过长连接发送/更新总体进度卡片，并把绑定 Task、Round、revision、有效期和用户身份的结构化确认交给 Controller。
+- 飞书只做本地事实的交互投影；卡片、消息和回调不得成为第二 Task 状态源，连接器不可用时必须回退本地 `needs_user` 与确认入口。
 - 默认禁止自动 merge、删除、生产数据、凭据、签名和发布修改。
 
 ### 完成标准
@@ -129,8 +131,9 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 5. Connector 遵循最小权限，不自动合并、不默认写生产环境。
 6. 多个低风险真实任务 Dogfood delivered。
 7. 独立功能和安全验收 PASS，Phase 1–3 全量回归通过。
+8. 飞书正式机器人完成进度通知、失效/越权拒绝、有效确认、重复回调幂等、断线恢复和本地回退 Dogfood。
 
-关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)。
+关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)、[FEAT-008 飞书进度通知与确认连接器](02-feature/FEAT-008-feishu-progress-approval-connector.md)。
 
 ## Phase 5：Portfolio、能力资产与持续优化治理
 

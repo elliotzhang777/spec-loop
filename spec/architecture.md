@@ -34,7 +34,7 @@ Spec-Loop 不是新的编码模型，也不替代目标工程的代码和规格�
 | Spec/AC | 定义目标、范围、非目标和可验证验收标准 | 不随实现结果任意降低标准 |
 | Evidence | 保存绑定 Task、Round、revision 和 artifact 哈希的验证事实 | 不接受 Agent 自述作为完成证明 |
 
-人工视觉 Review 是横跨 Spec/AC、Gate 与 Delivery 的显式卡点，不由受控 Worktree 中的 Maker、Gate 或 Verifier 代签。UI 或视觉 AC 声明 Review 后，用户必须通过可信 Controller 查看当前候选截图并作出批准或拒绝；决定绑定 Round、revision、截图文件和 SHA-256。代码或截图变化后旧批准自动失效。Phase 3 是本机单用户工具，CLI 的 `--by` 只做审计归属，不承担操作系统身份认证；可信边界是主控制目录及其外层会话/文件权限，获得同一用户主控制目录写权限的恶意进程不在本阶段威胁模型内，远程身份认证留给 Phase 4 Connector。
+人工视觉 Review 是横跨 Spec/AC、Gate 与 Delivery 的显式卡点，不由受控 Worktree 中的 Maker、Gate 或 Verifier 代签。UI 或视觉 AC 声明 Review 后，用户必须通过可信 Controller 查看当前候选截图并作出批准或拒绝；决定绑定 Round、revision、截图文件和 SHA-256。代码或截图变化后旧批准自动失效。Phase 3 是本机单用户工具，CLI 的 `--by` 只做审计归属，不承担操作系统身份认证；可信边界是主控制目录及其外层会话/文件权限，获得同一用户主控制目录写权限的恶意进程不在本阶段威胁模型内。Phase 4 的飞书 Connector 使用企业自建应用、单租户绑定和允许用户映射提供远程身份，但仍必须经过本地 Approval/Review/Verification/Delivery Guard。
 
 ## 主控制链
 
@@ -229,6 +229,7 @@ Phase 5：增加多项目 Portfolio 治理和受控持续优化
 | [DES-005](03-design/DES-005-scheduling-worktree-coordination.md) | Scheduling、Lease、并发、Pause/Kill 和 Connector |
 | [DES-006](03-design/DES-006-engineering-toolchain-adapters.md) | 通用命令和平台 Toolchain Adapter |
 | [DES-007](03-design/DES-007-portfolio-capability-governance.md) | Portfolio、能力资产、指标与持续优化治理 |
+| [DES-008](03-design/DES-008-feishu-bot-connector.md) | 飞书正式机器人、进度投影、交互确认、身份、恢复与审计 |
 
 ## 阅读顺序
 
@@ -252,3 +253,4 @@ README
 | 2026-07-26 | 强制非 Heavy 定向 Gate 与长期验证数据库 | 消除普通 Task 全量回归和数据库容器反复创建销毁 | TASK-016 |
 | 2026-07-19 | 明确工程物理布局与按 Phase 交付归档 | 将当前工程与历史证据分层 | TASK-018 |
 | 2026-07-25 | 增加验证阶段显式升级授权 | 防止把 Task 启动、继续修改或效果图反馈误判为正式交付 | TASK-016 |
+| 2026-08-04 | 定义飞书正式机器人远程交互边界 | 让用户远程获知进度并处理必要卡点，同时保持本地事实源和 fail-closed 授权 | TASK-021～026 |

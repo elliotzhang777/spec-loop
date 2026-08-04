@@ -63,6 +63,7 @@
 | [FEAT-005 Scheduling 与隔离](../02-feature/FEAT-005-scheduling-isolation.md) | 报告型调度、并发隔离和安全控制 | P1 | 草稿 |
 | [FEAT-006 工程 Toolchain](../02-feature/FEAT-006-engineering-toolchains.md) | 自动构建、测试并生成平台证据 | P1 | 待验证 |
 | [FEAT-007 Portfolio 与持续优化](../02-feature/FEAT-007-portfolio-capability-optimization.md) | 多项目组合、能力资产和优化治理 | P2 | 草稿 |
+| [FEAT-008 飞书进度通知与确认连接器](../02-feature/FEAT-008-feishu-progress-approval-connector.md) | 远程查看任务进度并安全完成必要人工卡点 | P1 | 草稿 |
 
 ## 实际结果
 
@@ -79,3 +80,4 @@
 | 2026-07-23 | 增加人工视觉 Review 与 Playwright Web Gate | 让主观效果确认和真实浏览器功能分别形成可审计证据 | TASK-019 |
 | 2026-07-25 | 明确正式验证与阶段推进的授权边界 | 防止 Loop 启动和反馈迭代频繁触发正式交付 | TASK-016 |
 | 2026-08-03 | 重新签署 Phase 3 正式交付 | 加固候选通过完整 Evidence 闭环、独立 Verifier 与用户 Heavy 验收 | TASK-013 |
+| 2026-08-04 | 起草飞书正式机器人连接器 | 让用户离开本机会话后仍能获知进度并处理受控确认 | TASK-021～026 |

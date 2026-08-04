@@ -3,7 +3,7 @@
 - 状态：草稿
 - 负责人：待定
 - 创建日期：2026-07-12
-- 最后更新：2026-07-12
+- 最后更新：2026-08-04
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 4
 
@@ -21,7 +21,7 @@
 2. 所有自动代码修改必须使用 worktree、branch、base commit 和 touched files 记录。
 3. 无冲突任务可并发，冲突写资源必须串行。
 4. Pause 阻止新动作；Kill 取消执行、保留现场并要求 reconcile。
-5. Connector 按只读→评论/标签→有限状态更新逐级授权。
+5. Connector 按只读→评论/标签→有限状态更新逐级授权；首个双向实现为 [FEAT-008 飞书正式机器人](FEAT-008-feishu-progress-approval-connector.md)，远程决定仍必须经过本地 Guard。
 6. 默认禁止 merge、删除、生产数据、凭据和发布动作。
 
 ## 验收标准
@@ -49,4 +49,4 @@
 | 日期 | 变更 | 原因 | 关联工单 |
 |---|---|---|---|
 | 2026-07-12 | 融合 Scheduling、多任务和安全控制 | 最终 Roadmap 定稿 | - |
-
+| 2026-08-04 | 将飞书正式机器人下沉为独立 Feature | 通用 Connector 规则不足以表达远程身份、卡片确认和恢复契约 | TASK-021～026 |
