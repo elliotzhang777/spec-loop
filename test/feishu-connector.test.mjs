@@ -216,6 +216,15 @@ test('concurrent renewals are serialized without losing lease ownership', async 
   await releaseFeishuLease(root, lease.token)
 })
 
+test('orphaned mutation locks fail closed instead of being reclaimed concurrently', async () => {
+  const root = await projectRoot()
+  await initFeishuConfig(root)
+  const lockDirectory = path.join(root, '.spec-loop', 'connectors', 'feishu', 'lease-mutation.lock')
+  await mkdir(lockDirectory)
+  await assert.rejects(acquireFeishuLease(root, 'blocked-holder', 1000), /explicit recovery is required/)
+  await rm(lockDirectory, { recursive: true, force: true })
+})
+
 test('CLI config and status never print credential values', async () => {
   const root = await projectRoot()
   const initialized = cli(['connectors', 'feishu', 'init', root, '--json'])

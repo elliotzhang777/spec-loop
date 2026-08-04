@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { lock } from 'proper-lockfile';
 import { z } from 'zod';
 import { atomicWriteMany, exists } from '../files.js';
 
@@ -344,17 +343,23 @@ async function readRegularJson(file: string, description: string): Promise<unkno
 }
 
 async function withLeaseMutationLock<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const file = path.join(root, 'lease-mutation.lock');
-  const release = await lock(file, {
-    realpath: false,
-    stale: 10_000,
-    update: 2_000,
-    retries: { retries: 100, factor: 1, minTimeout: 10, maxTimeout: 10 },
-  });
+  const directory = path.join(root, 'lease-mutation.lock');
+  let acquired = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await mkdir(directory, { mode: 0o700 });
+      acquired = true;
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (!acquired) throw new Error('feishu connector lease mutation is busy; explicit recovery is required');
   try {
     return await action();
   } finally {
-    await release();
+    await rmdir(directory);
   }
 }
 
