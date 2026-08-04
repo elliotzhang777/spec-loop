@@ -250,10 +250,14 @@ test('channel factory errors are redacted for preflight and message methods', as
   }
 })
 
-test('tenant access token is redacted when SDK errors contain it as bare text', async () => {
-  const token = 'runtime-tenant-token-canary'
+test('current and previous tenant access tokens stay redacted after refresh', async () => {
+  const token = 'runtime-tenant-token-a-canary'
+  const refreshedToken = 'runtime-tenant-token-b-canary'
+  let tokenRequests = 0
   const requester = async (url) => {
-    if (url.includes('/tenant_access_token/')) return jsonResponse({ code: 0, tenant_access_token: token, expire: 300 })
+    if (url.includes('/tenant_access_token/')) return jsonResponse({
+      code: 0, tenant_access_token: tokenRequests++ === 0 ? token : refreshedToken, expire: 300,
+    })
     if (url.includes('/scopes')) return jsonResponse({
       code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
     })
@@ -271,6 +275,9 @@ test('tenant access token is redacted when SDK errors contain it as bare text', 
   }
   const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel, requester)
   await transport.preflight(enabledConfig())
+  transport.tenantAccessTokenExpiresAt = 0
+  await transport.sdkHttpInstance().post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {})
+  assert.equal(transport.tenantAccessToken, refreshedToken)
   for (const action of [
     () => transport.connect(async () => {}),
     () => transport.sendCard(enabledConfig().targets[0], {}),
@@ -282,6 +289,16 @@ test('tenant access token is redacted when SDK errors contain it as bare text', 
     assert.equal(error.message.includes(token), false)
     assert.match(error.message, /\[REDACTED\]/)
   }
+  const sdkLogs = []
+  const sdkLogger = createRedactingFeishuLogger(
+    { appId: 'cli_test', appSecret: 'not-used' },
+    { error: (line) => sdkLogs.push(line), warn: (line) => sdkLogs.push(line), info: (line) => sdkLogs.push(line), debug: (line) => sdkLogs.push(line) },
+    () => [...transport.tenantAccessTokenRedactions],
+  )
+  sdkLogger.error(`late errors ${token} ${refreshedToken}`)
+  assert.equal(sdkLogs[0].includes(token), false)
+  assert.equal(sdkLogs[0].includes(refreshedToken), false)
+  assert.match(sdkLogs[0], /\[REDACTED\]/)
 })
 
 test('disconnect force-closes an official channel while it is still connecting', async () => {
