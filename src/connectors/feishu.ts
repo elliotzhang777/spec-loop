@@ -367,17 +367,17 @@ export async function acquireFeishuLease(projectRoot: string, holder: string, tt
   if (!holder.trim() || ttlMs < 1_000 || ttlMs > 24 * 60 * 60 * 1_000) throw new Error('invalid feishu connector lease request');
   const root = await feishuConnectorRoot(projectRoot);
   const file = path.join(root, 'lease.json');
-  const now = Date.now();
-  const lease: ConnectorLease = {
-    schema_version: 1, holder: holder.trim(), pid: process.pid, token: randomUUID(),
-    acquired_at: new Date(now).toISOString(), expires_at: new Date(now + ttlMs).toISOString(),
-  };
-  const writeExclusive = async (): Promise<void> => {
-    const handle = await open(file, 'wx', 0o600);
-    try { await handle.writeFile(`${JSON.stringify(lease, null, 2)}\n`); }
-    finally { await handle.close(); }
-  };
   return withLeaseMutationLock(root, async () => {
+    const now = Date.now();
+    const lease: ConnectorLease = {
+      schema_version: 1, holder: holder.trim(), pid: process.pid, token: randomUUID(),
+      acquired_at: new Date(now).toISOString(), expires_at: new Date(now + ttlMs).toISOString(),
+    };
+    const writeExclusive = async (): Promise<void> => {
+      const handle = await open(file, 'wx', 0o600);
+      try { await handle.writeFile(`${JSON.stringify(lease, null, 2)}\n`); }
+      finally { await handle.close(); }
+    };
     try { await writeExclusive(); return lease; }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -482,12 +482,24 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   };
   try {
     if (!signal.aborted) {
-      await transport.connect(async () => { /* Confirmation handling is added by TASK-024. */ });
       scheduleHeartbeat();
-      await new Promise<void>((resolve) => {
-        if (signal.aborted) resolve();
-        else signal.addEventListener('abort', () => resolve(), { once: true });
+      let acceptingActions = false;
+      await transport.connect(async () => {
+        if (!acceptingActions) return;
+        const current = await readFeishuLease(projectRoot);
+        if (!current || current.token !== lease.token || Date.parse(current.expires_at) <= Date.now()) {
+          controller.abort();
+          return;
+        }
+        /* Confirmation handling is added by TASK-024. */
       });
+      if (!signal.aborted) {
+        await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
+        acceptingActions = !signal.aborted;
+      }
+      if (!signal.aborted) {
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+      }
     }
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);

@@ -152,6 +152,26 @@ test('running connector renews its lease until stopped', async () => {
   await releaseFeishuLease(root, next.token)
 })
 
+test('slow transport connection keeps renewing before callbacks are accepted', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  class SlowTransport extends FakeFeishuTransport {
+    async connect(handler) {
+      await new Promise((resolve) => setTimeout(resolve, 1250))
+      await super.connect(handler)
+    }
+  }
+  const controller = new AbortController()
+  const running = runFeishuConnector(root, {
+    holder: 'slow-connecting-holder', transport: new SlowTransport(), signal: controller.signal, leaseTtlMs: 1000,
+  })
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  await assert.rejects(acquireFeishuLease(root, 'slow-connection-competitor', 1000), /held by slow-connecting-holder/)
+  controller.abort()
+  await running
+})
+
 test('stop requests are token-bound and handled cooperatively without signalling a pid', async () => {
   const root = await projectRoot()
   const file = await initFeishuConfig(root)
@@ -223,6 +243,18 @@ test('orphaned mutation locks fail closed instead of being reclaimed concurrentl
   await mkdir(lockDirectory)
   await assert.rejects(acquireFeishuLease(root, 'blocked-holder', 1000), /explicit recovery is required/)
   await rm(lockDirectory, { recursive: true, force: true })
+})
+
+test('lease ttl starts only after mutation lock acquisition', async () => {
+  const root = await projectRoot()
+  await initFeishuConfig(root)
+  const lockDirectory = path.join(root, '.spec-loop', 'connectors', 'feishu', 'lease-mutation.lock')
+  await mkdir(lockDirectory)
+  const removal = new Promise((resolve) => setTimeout(resolve, 500)).then(() => rm(lockDirectory, { recursive: true, force: true }))
+  const lease = await acquireFeishuLease(root, 'delayed-holder', 1000)
+  await removal
+  assert.ok(Date.parse(lease.expires_at) - Date.now() > 850)
+  await releaseFeishuLease(root, lease.token)
 })
 
 test('CLI config and status never print credential values', async () => {
