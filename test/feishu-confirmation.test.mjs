@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -152,6 +153,21 @@ test('authority changes atomically invalidate the request before consumption', a
   await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, new Date('2026-08-04T10:04:00.000Z')), /already invalidated/i)
 })
 
+test('consumption reads an independently persisted current authority projection', async () => {
+  const root = await projectRoot()
+  const request = await create(root)
+  const authorityFile = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations', 'current-authority.json')
+  const authority = JSON.parse(await readFile(authorityFile, 'utf8'))
+  authority.authorities[0].revision = 'fedcba0987654321'
+  authority.authorities[0].generation += 1
+  authority.authorities[0].updated_at = '2026-08-04T10:01:00.000Z'
+  authority.projection_hash = createHash('sha256').update(JSON.stringify(authority.authorities)).digest('hex')
+  await writeFile(authorityFile, JSON.stringify(authority, null, 2))
+  const result = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, new Date('2026-08-04T10:02:00.000Z'))
+  assert.equal(result.status, 'invalidated')
+  assert.match(result.invalidation_reason, /当前权威 revision/)
+})
+
 test('regeneration invalidates the old request and binds a new revision and content hash', async () => {
   const root = await projectRoot()
   const old = await create(root, 'visual_review', { facts: facts({ screenshot_hashes: [digest('c')] }) })
@@ -191,9 +207,19 @@ test('projection deletion is rebuildable while projection or history tampering f
   await assert.rejects(rebuildConfirmationProjection(root), /history integrity|content hash/i)
 })
 
+test('missing history can never be replaced by empty rebuilt projections', async () => {
+  const root = await projectRoot()
+  await create(root)
+  const store = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations')
+  await rm(path.join(store, 'history.jsonl'))
+  await assert.rejects(rebuildConfirmationProjection(root), /history is missing/i)
+})
+
 test('sensitive summaries and non-predefined options fail before persistence', async () => {
   const root = await projectRoot()
   await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'Authorization: Bearer abcdefghijklmnop' }) }), /sensitive/i)
+  await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'password=hunter2' }) }), /sensitive/i)
+  await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'api_key=abcdefghijklmnopqrstuvxyz0123456789' }) }), /sensitive/i)
   await assert.rejects(create(root, 'needs_user', { facts: facts({ options: [] }) }), /predefined options/i)
   assert.equal((await listConfirmationRequests(root)).length, 0)
 })
@@ -232,4 +258,15 @@ test('history rejects creation, expiry and consumption events at impossible time
     await writeFile(history, `${JSON.stringify(event)}\n`)
     await assert.rejects(rebuildConfirmationProjection(root), /history integrity|creation time|expired before/i)
   }
+})
+
+test('global history time cannot move backwards and invalid events are rejected before persistence', async () => {
+  const root = await projectRoot()
+  const request = await create(root)
+  await assert.rejects(create(root, 'proposal', { now: new Date('2026-08-04T09:59:00.000Z') }), /time may not move backwards/i)
+  await assert.rejects(invalidateIfConfirmationFactsChanged(root, request.request_id, {
+    revision: 'fedcba0987654321', round: request.round, risk: request.risk, facts: request.facts,
+  }, new Date('2026-08-04T09:59:00.000Z')), /time may not move backwards/i)
+  const current = (await listConfirmationRequests(root)).find((item) => item.request_id === request.request_id)
+  assert.equal(current.status, 'pending')
 })
