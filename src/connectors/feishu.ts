@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { lock } from 'proper-lockfile';
 import { z } from 'zod';
 import { atomicWriteMany, exists } from '../files.js';
 
@@ -344,25 +345,16 @@ async function readRegularJson(file: string, description: string): Promise<unkno
 
 async function withLeaseMutationLock<T>(root: string, action: () => Promise<T>): Promise<T> {
   const file = path.join(root, 'lease-mutation.lock');
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      handle = await open(file, 'wx', 0o600);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const info = await lstat(file).catch(() => null);
-      if (info && Date.now() - info.mtimeMs > 30_000) await rm(file, { force: true });
-      else await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (!handle) throw new Error('feishu connector lease mutation is busy');
+  const release = await lock(file, {
+    realpath: false,
+    stale: 10_000,
+    update: 2_000,
+    retries: { retries: 100, factor: 1, minTimeout: 10, maxTimeout: 10 },
+  });
   try {
-    await handle.writeFile(`${process.pid}\n`);
     return await action();
   } finally {
-    await handle.close();
-    await rm(file, { force: true });
+    await release();
   }
 }
 
@@ -455,13 +447,14 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   if (!config.enabled) throw new Error('feishu connector is disabled');
   const holder = options.holder ?? `spec-loop-feishu-${process.pid}`;
   const ttlMs = options.leaseTtlMs ?? 60_000;
-  const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
   const transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
+  const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
   const controller = new AbortController();
   const signal = controller.signal;
   const stop = (): void => controller.abort();
   const forwardAbort = (): void => controller.abort();
-  options.signal?.addEventListener('abort', forwardAbort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', forwardAbort, { once: true });
   if (!options.signal) {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
@@ -483,12 +476,14 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     }, heartbeatDelay);
   };
   try {
-    await transport.connect(async () => { /* Confirmation handling is added by TASK-024. */ });
-    scheduleHeartbeat();
-    await new Promise<void>((resolve) => {
-      if (signal.aborted) resolve();
-      else signal.addEventListener('abort', () => resolve(), { once: true });
-    });
+    if (!signal.aborted) {
+      await transport.connect(async () => { /* Confirmation handling is added by TASK-024. */ });
+      scheduleHeartbeat();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     await heartbeatWork;

@@ -185,6 +185,37 @@ test('an expired owner cannot renew over a replacement lease', async () => {
   await releaseFeishuLease(root, replacement.token)
 })
 
+test('pre-aborted external signals stop before connecting and release the lease', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  const fake = new FakeFeishuTransport()
+  const controller = new AbortController()
+  controller.abort()
+  await runFeishuConnector(root, { holder: 'aborted-holder', transport: fake, signal: controller.signal })
+  assert.equal(fake.connectionState(), 'idle')
+  assert.equal(await readFeishuLease(root), null)
+})
+
+test('credential resolution failure happens before lease acquisition', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  await assert.rejects(
+    runFeishuConnector(root, { holder: 'missing-secret-holder', secretProvider: new LocalSecretProvider({}) }),
+    /reference is unavailable/,
+  )
+  assert.equal(await readFeishuLease(root), null)
+})
+
+test('concurrent renewals are serialized without losing lease ownership', async () => {
+  const root = await projectRoot()
+  const lease = await acquireFeishuLease(root, 'serialized-holder', 1000)
+  await Promise.all(Array.from({ length: 12 }, () => renewFeishuLease(root, lease.token, 1000)))
+  assert.equal((await readFeishuLease(root)).token, lease.token)
+  await releaseFeishuLease(root, lease.token)
+})
+
 test('CLI config and status never print credential values', async () => {
   const root = await projectRoot()
   const initialized = cli(['connectors', 'feishu', 'init', root, '--json'])
