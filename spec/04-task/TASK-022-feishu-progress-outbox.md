@@ -1,10 +1,10 @@
 # TASK-022：飞书进度投影与可靠 Outbox
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P1
 - 负责人：待定
 - 创建日期：2026-08-04
-- 最后更新：2026-08-04
+- 最后更新：2026-08-05
 - 所属设计：[DES-008](../03-design/DES-008-feishu-bot-connector.md)
 - 所属特性：[FEAT-008](../02-feature/FEAT-008-feishu-progress-approval-connector.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -31,11 +31,11 @@
 
 ## 验收标准
 
-- [ ] AC-1：总体卡片准确显示 Task 总量、各状态数量、当前 Task/Round/Harness 步骤、最近 Gate/Verifier 和下次用户介入点。
-- [ ] AC-2：高频 Attempt 在聚合窗口内合并，同一项目优先更新一张卡片，不产生逐事件刷屏。
-- [ ] AC-3：重试、重启和重复事件不会重复发送关键消息，旧快照可被更新快照安全替代。
-- [ ] AC-4：429、5xx、网络错误和永久权限错误被正确分类，普通通知失败不修改或阻断 Task 状态。
-- [ ] AC-5：卡片只包含允许公开的摘要，不泄漏源码、完整日志、Secret、Token 或敏感 Evidence。
+- [x] AC-1：总体卡片准确显示 Task 总量、各状态数量、当前 Task/Round/Harness 步骤、最近 Gate/Verifier 和下次用户介入点。
+- [x] AC-2：高频 Attempt 在聚合窗口内合并，同一项目优先更新一张卡片，不产生逐事件刷屏。
+- [x] AC-3：重试、重启和重复事件不会重复发送关键消息，旧快照可被更新快照安全替代。
+- [x] AC-4：429、5xx、网络错误和永久权限错误被正确分类，普通通知失败不修改或阻断 Task 状态。
+- [x] AC-5：卡片只包含允许公开的摘要，不泄漏源码、完整日志、Secret、Token 或敏感 Evidence。
 
 ## 验证计划
 
@@ -53,8 +53,8 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施（草稿阶段）
-- 变更文件/交付物：实施完成后按实际结果记录
-- 关键实现与决策：进度卡 Projection-only、单卡更新和持久 Outbox。
+- 完成日期：2026-08-05
+- 变更文件/交付物：`src/connectors/feishu-progress.ts`、`test/feishu-progress-outbox.test.mjs`、候选 `ecb067e` 与 `EV-5` Harness Evidence。
+- 关键实现与决策：进度卡 Projection-only、单卡更新、持久 Outbox、结果不明恢复和 Evidence 哈希链绑定。
 - 与原设计的差异：无
 - 遗留风险：真实平台限流行为在 TASK-026 验证。

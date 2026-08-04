@@ -1,10 +1,10 @@
 # TASK-023：飞书确认请求与交互卡片契约
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 负责人：待定
 - 创建日期：2026-08-04
-- 最后更新：2026-08-04
+- 最后更新：2026-08-05
 - 所属设计：[DES-008](../03-design/DES-008-feishu-bot-connector.md)
 - 所属特性：[FEAT-008](../02-feature/FEAT-008-feishu-progress-approval-connector.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -32,11 +32,11 @@
 
 ## 验收标准
 
-- [ ] AC-1：每个请求绑定 Task、类型、Round、revision、content hash、risk、有效期、允许用户和允许动作。
-- [ ] AC-2：五类卡片完整展示用户作出决定所需的范围、风险、Evidence 摘要和失效条件。
-- [ ] AC-3：候选 revision、Acceptance、截图或 Gate Plan 变化后旧请求立即失效。
-- [ ] AC-4：卡片 payload 不包含可篡改的授权范围，也不提供 MVP 禁止动作。
-- [ ] AC-5：请求状态可从历史重建，手工篡改当前投影会被检查发现。
+- [x] AC-1：每个请求绑定 Task、类型、Round、revision、content hash、risk、有效期、允许用户和允许动作。
+- [x] AC-2：五类卡片完整展示用户作出决定所需的范围、风险、Evidence 摘要和失效条件。
+- [x] AC-3：候选 revision、Acceptance、截图或 Gate Plan 变化后旧请求立即失效。
+- [x] AC-4：卡片 payload 不包含可篡改的授权范围，也不提供 MVP 禁止动作。
+- [x] AC-5：请求状态可从历史重建，手工篡改当前投影会被检查发现。
 
 ## 验证计划
 
@@ -53,8 +53,8 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施（草稿阶段）
-- 变更文件/交付物：实施完成后按实际结果记录
-- 关键实现与决策：固定动作、权威范围留在本地、候选变化即失效。
+- 完成日期：2026-08-05
+- 变更文件/交付物：`src/connectors/feishu-confirmation.ts`、`test/feishu-confirmation.test.mjs`、候选 `8d1e269` 与 `EV-5` Harness Evidence。
+- 关键实现与决策：固定动作、独立当前权威留在本地、单锁原子再生成、持久化锚点和候选变化即失效。
 - 与原设计的差异：无
 - 遗留风险：远程身份与并发消费在 TASK-024 处理。
