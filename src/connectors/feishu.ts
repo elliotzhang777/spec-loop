@@ -239,7 +239,7 @@ export interface FeishuTransport {
   connect(handler: FeishuCardActionHandler): Promise<void>;
   disconnect(): Promise<void>;
   connectionState(): FeishuConnectionState;
-  sendCard(target: FeishuTarget, card: object): Promise<{ messageId: string }>;
+  sendCard(target: FeishuTarget, card: object, platformRequestId?: string): Promise<{ messageId: string }>;
   updateCard(messageId: string, card: object): Promise<void>;
 }
 
@@ -250,7 +250,7 @@ interface ChannelLike {
     }> } } };
     im: { v1: { message: { create(payload: {
       params: { receive_id_type: FeishuTarget['receive_id_type'] };
-      data: { receive_id: string; msg_type: 'interactive'; content: string };
+      data: { receive_id: string; msg_type: 'interactive'; content: string; uuid?: string };
     }): Promise<{ data?: { message_id?: string } }> } } };
     request(payload: { url: string; method: 'GET'; signal?: AbortSignal }): Promise<{
       code?: number; msg?: string;
@@ -268,6 +268,16 @@ interface ChannelLike {
   }) => Promise<void> | void): () => void;
   send(to: string, input: { card: object }): Promise<{ messageId: string }>;
   updateCard(messageId: string, card: object): Promise<void>;
+}
+
+function wrapFeishuDeliveryError(prefix: string, error: unknown, secrets: string[]): Error {
+  const source = error as { status?: unknown; code?: unknown; retryAfterMs?: unknown; response?: { status?: unknown } };
+  const wrapped = new Error(redactFeishuText(`${prefix}: ${error instanceof Error ? error.message : String(error)}`, secrets));
+  if (typeof source.status === 'number') Object.assign(wrapped, { status: source.status });
+  else if (typeof source.response?.status === 'number') Object.assign(wrapped, { status: source.response.status });
+  if (typeof source.code === 'string') Object.assign(wrapped, { code: source.code });
+  if (typeof source.retryAfterMs === 'number') Object.assign(wrapped, { retryAfterMs: source.retryAfterMs });
+  return wrapped;
 }
 
 type FeishuPreflightRequester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
@@ -540,18 +550,18 @@ export class OfficialFeishuTransport implements FeishuTransport {
     return this.channel?.getConnectionStatus()?.state ?? this.state;
   }
 
-  async sendCard(target: FeishuTarget, card: object): Promise<{ messageId: string }> {
+  async sendCard(target: FeishuTarget, card: object, platformRequestId?: string): Promise<{ messageId: string }> {
     try {
       const channel = await this.getChannel();
       const result = await channel.rawClient.im.v1.message.create({
         params: { receive_id_type: target.receive_id_type },
-        data: { receive_id: target.receive_id, msg_type: 'interactive', content: JSON.stringify(card) },
+        data: { receive_id: target.receive_id, msg_type: 'interactive', content: JSON.stringify(card), ...(platformRequestId ? { uuid: platformRequestId } : {}) },
       });
       const messageId = result.data?.message_id;
       if (!messageId) throw new Error('message_id missing from create response');
       return { messageId };
     }
-    catch (error) { throw new Error(redactFeishuText(`feishu card send failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, ...this.tenantAccessTokenSecrets()])); }
+    catch (error) { throw wrapFeishuDeliveryError('feishu card send failed', error, [this.credentials.appId, this.credentials.appSecret, ...this.tenantAccessTokenSecrets()]); }
   }
 
   async updateCard(messageId: string, card: object): Promise<void> {
@@ -559,12 +569,12 @@ export class OfficialFeishuTransport implements FeishuTransport {
       const channel = await this.getChannel();
       await channel.updateCard(messageId, card);
     }
-    catch (error) { throw new Error(redactFeishuText(`feishu card update failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, ...this.tenantAccessTokenSecrets()])); }
+    catch (error) { throw wrapFeishuDeliveryError('feishu card update failed', error, [this.credentials.appId, this.credentials.appSecret, ...this.tenantAccessTokenSecrets()]); }
   }
 }
 
 export class FakeFeishuTransport implements FeishuTransport {
-  readonly sent: Array<{ target: FeishuTarget; card: object; messageId: string }> = [];
+  readonly sent: Array<{ target: FeishuTarget; card: object; messageId: string; platformRequestId?: string }> = [];
   readonly updated: Array<{ messageId: string; card: object }> = [];
   private handler?: FeishuCardActionHandler;
   private state: FeishuConnectionState = 'idle';
@@ -573,9 +583,11 @@ export class FakeFeishuTransport implements FeishuTransport {
   async connect(handler: FeishuCardActionHandler): Promise<void> { this.handler = handler; this.state = 'connected'; }
   async disconnect(): Promise<void> { this.handler = undefined; this.state = 'idle'; }
   connectionState(): FeishuConnectionState { return this.state; }
-  async sendCard(target: FeishuTarget, card: object): Promise<{ messageId: string }> {
+  async sendCard(target: FeishuTarget, card: object, platformRequestId?: string): Promise<{ messageId: string }> {
+    const duplicate = platformRequestId ? this.sent.find((item) => item.platformRequestId === platformRequestId) : undefined;
+    if (duplicate) return { messageId: duplicate.messageId };
     const messageId = `fake-${this.sent.length + 1}`;
-    this.sent.push({ target, card, messageId });
+    this.sent.push({ target, card, messageId, platformRequestId });
     return { messageId };
   }
   async updateCard(messageId: string, card: object): Promise<void> { this.updated.push({ messageId, card }); }
@@ -730,6 +742,8 @@ export interface RunFeishuConnectorOptions {
   secretProvider?: SecretProvider;
   signal?: AbortSignal;
   leaseTtlMs?: number;
+  outboxPollMs?: number;
+  progressAggregateWindowMs?: number;
 }
 
 export async function runFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
@@ -754,6 +768,8 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   let lease: ConnectorLease | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let heartbeatWork: Promise<void> = Promise.resolve();
+  let progressTimer: NodeJS.Timeout | undefined;
+  let progressWork: Promise<void> = Promise.resolve();
   const heartbeatDelay = Math.max(500, Math.floor(ttlMs / 3));
   const scheduleHeartbeat = (): void => {
     heartbeatTimer = setTimeout(() => {
@@ -791,6 +807,8 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
     if (signal.aborted) return;
     scheduleHeartbeat();
+    const progress = await import('./feishu-progress.js');
+    await progress.reconcileFeishuOutbox(projectRoot);
     const connectPromise = transport.connect(async () => {
       if (signal.aborted || !acceptingActions || !lease) return;
       try {
@@ -814,12 +832,34 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     if (!connected || signal.aborted) return;
     await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
     acceptingActions = !signal.aborted;
+    const outboxPollMs = options.outboxPollMs ?? 1_000;
+    if (!Number.isInteger(outboxPollMs) || outboxPollMs < 10 || outboxPollMs > 60_000) throw new Error('invalid feishu outbox poll interval');
+    const aggregateWindowMs = options.progressAggregateWindowMs ?? config.notifications.aggregate_window_seconds * 1_000;
+    const runProgressCycle = async (): Promise<void> => {
+      if (signal.aborted || !transport) return;
+      await progress.enqueueCurrentProjectProgress(projectRoot, config.targets, aggregateWindowMs).catch(() => 0);
+      for (let count = 0; count < 100; count += 1) {
+        if (!await progress.dispatchFeishuOutboxOnce(projectRoot, transport)) break;
+      }
+    };
+    const scheduleProgress = (): void => {
+      progressTimer = setTimeout(() => {
+        progressWork = runProgressCycle().catch(() => undefined).finally(() => {
+          if (!signal.aborted) scheduleProgress();
+        });
+      }, outboxPollMs);
+    };
+    progressWork = runProgressCycle().catch(() => undefined);
+    await progressWork;
+    if (!signal.aborted) scheduleProgress();
     if (!signal.aborted) {
       await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    if (progressTimer) clearTimeout(progressTimer);
     await heartbeatWork;
+    await progressWork;
     signal.removeEventListener('abort', closeActionGate);
     options.signal?.removeEventListener('abort', forwardAbort);
     if (!options.signal) {
