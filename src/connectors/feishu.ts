@@ -150,10 +150,10 @@ export function createRedactingFeishuLogger(credentials: FeishuCredentials, sink
   warn: (message) => console.warn(message),
   info: (message) => console.info(message),
   debug: (message) => console.debug(message),
-}): { error: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void; debug: (...args: unknown[]) => void; trace: (...args: unknown[]) => void } {
+}, additionalSecrets: () => string[] = () => []): { error: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void; debug: (...args: unknown[]) => void; trace: (...args: unknown[]) => void } {
   const emit = (level: keyof FeishuLogSink, args: unknown[]): void => {
     const rendered = args.map((item) => typeof item === 'string' ? item : inspect(item, { depth: 5, breakLength: Infinity })).join(' ');
-    sink[level](`[feishu-sdk] ${redactFeishuText(rendered, [credentials.appId, credentials.appSecret])}`);
+    sink[level](`[feishu-sdk] ${redactFeishuText(rendered, [credentials.appId, credentials.appSecret, ...additionalSecrets()])}`);
   };
   return {
     error: (...args) => emit('error', args),
@@ -351,7 +351,12 @@ export class OfficialFeishuTransport implements FeishuTransport {
         body: payload.data === undefined ? undefined : JSON.stringify(payload.data),
       }, this.sdkRequestController.signal);
       if (!response.ok) throw new Error(`Feishu SDK request failed with HTTP ${response.status}`);
-      return response.json();
+      const responseData = await response.json() as { tenant_access_token?: string; expire?: number };
+      if (payload.url.includes('/open-apis/auth/v3/tenant_access_token/internal') && responseData.tenant_access_token) {
+        this.tenantAccessToken = responseData.tenant_access_token;
+        this.tenantAccessTokenExpiresAt = Date.now() + Math.max(1, Number(responseData.expire ?? 300)) * 1000;
+      }
+      return responseData;
     };
     return {
       request,
@@ -378,7 +383,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
           transport: 'websocket',
           includeRawEvent: true,
           source: 'spec-loop',
-          logger: createRedactingFeishuLogger(this.credentials),
+          logger: createRedactingFeishuLogger(this.credentials, undefined, () => [this.tenantAccessToken]),
           loggerLevel: sdk.LoggerLevel.error,
           httpInstance: this.sdkHttpInstance() as never,
           handshakeTimeoutMs: 15_000,
@@ -502,7 +507,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
       await new Promise<void>((resolve) => setImmediate(resolve));
       this.forceCloseChannel(channel);
       this.state = generation === this.connectionGeneration ? 'failed' : 'idle';
-      throw new Error(redactFeishuText(`feishu connection failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret]));
+      throw new Error(redactFeishuText(`feishu connection failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, this.tenantAccessToken]));
     } finally {
       this.connectInFlight = false;
       settleConnect();
@@ -537,7 +542,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
       if (!messageId) throw new Error('message_id missing from create response');
       return { messageId };
     }
-    catch (error) { throw new Error(redactFeishuText(`feishu card send failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret])); }
+    catch (error) { throw new Error(redactFeishuText(`feishu card send failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, this.tenantAccessToken])); }
   }
 
   async updateCard(messageId: string, card: object): Promise<void> {
@@ -545,7 +550,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
       const channel = await this.getChannel();
       await channel.updateCard(messageId, card);
     }
-    catch (error) { throw new Error(redactFeishuText(`feishu card update failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret])); }
+    catch (error) { throw new Error(redactFeishuText(`feishu card update failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret, this.tenantAccessToken])); }
   }
 }
 

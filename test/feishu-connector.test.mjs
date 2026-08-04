@@ -119,6 +119,14 @@ test('secret provider resolves references without exposing values', async () => 
   assert.equal(sdkLogs[0].includes(secret), false)
   assert.equal(sdkLogs[0].includes('json-token'), false)
   assert.equal(sdkLogs[0].includes('abcdefghijklmnop'), false)
+  const runtimeToken = 'runtime-tenant-token-canary'
+  const runtimeLogger = createRedactingFeishuLogger(
+    { appId: 'cli_sensitive_app', appSecret: secret },
+    { error: (line) => sdkLogs.push(line), warn: (line) => sdkLogs.push(line), info: (line) => sdkLogs.push(line), debug: (line) => sdkLogs.push(line) },
+    () => [runtimeToken],
+  )
+  runtimeLogger.error(`bare SDK failure ${runtimeToken}`)
+  assert.equal(sdkLogs.at(-1).includes(runtimeToken), false)
 
   await assert.rejects(resolveFeishuCredentials(config, new LocalSecretProvider({})), /reference is unavailable/)
 })
@@ -239,6 +247,40 @@ test('channel factory errors are redacted for preflight and message methods', as
     } catch (caught) { error = caught }
     assert.ok(error)
     assert.equal(error.message.includes(secret), false)
+  }
+})
+
+test('tenant access token is redacted when SDK errors contain it as bare text', async () => {
+  const token = 'runtime-tenant-token-canary'
+  const requester = async (url) => {
+    if (url.includes('/tenant_access_token/')) return jsonResponse({ code: 0, tenant_access_token: token, expire: 300 })
+    if (url.includes('/scopes')) return jsonResponse({
+      code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
+    })
+    return jsonResponse({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } })
+  }
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({ code: 0, data: { scopes: [] } }) } } },
+      im: { v1: { message: { create: async () => { throw new Error(`send failed ${token}`) } } } },
+      request: async () => ({ code: 0 }),
+    },
+    connect: async () => { throw new Error(`connect failed ${token}`) },
+    disconnect: async () => {}, getConnectionStatus: () => ({ state: 'idle' }), on: () => () => {},
+    send: async () => ({ messageId: 'unused' }), updateCard: async () => { throw new Error(`update failed ${token}`) },
+  }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel, requester)
+  await transport.preflight(enabledConfig())
+  for (const action of [
+    () => transport.connect(async () => {}),
+    () => transport.sendCard(enabledConfig().targets[0], {}),
+    () => transport.updateCard('om_test', {}),
+  ]) {
+    let error
+    try { await action() } catch (caught) { error = caught }
+    assert.ok(error)
+    assert.equal(error.message.includes(token), false)
+    assert.match(error.message, /\[REDACTED\]/)
   }
 })
 
