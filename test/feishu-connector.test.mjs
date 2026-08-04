@@ -20,6 +20,7 @@ import {
   renewFeishuLease,
   runFeishuConnector,
   stopFeishuConnector,
+  withFeishuLeaseFence,
   resolveFeishuCredentials,
 } from '../dist/connectors/feishu.js'
 
@@ -33,7 +34,7 @@ function enabledConfig() {
   return {
     ...defaultFeishuConfig(),
     enabled: true,
-    tenant_key: 'tenant-test',
+    tenant_key: '736588c9260f175c',
     targets: [{ project_id: 'PROJ-TEST', receive_id_type: 'chat_id', receive_id: 'oc_test_chat' }],
     approvers: [{
       project_id: 'PROJ-TEST', open_id: 'ou_test_user', local_actor: 'zhangbo',
@@ -65,7 +66,10 @@ test('enabled config requires targets, approvers and valid retry bounds', async 
   await assert.rejects(readFeishuConfig(root), /max delay/i)
 
   await writeFile(file, JSON.stringify({ ...enabledConfig(), tenant_key: 'configure-tenant-key' }))
-  await assert.rejects(readFeishuConfig(root), /configured tenant key/i)
+  await assert.rejects(readFeishuConfig(root), /valid tenant key/i)
+
+  await writeFile(file, JSON.stringify({ ...enabledConfig(), tenant_key: 'TODO' }))
+  await assert.rejects(readFeishuConfig(root), /valid tenant key/i)
 })
 
 test('config and connector paths reject symbolic links', async () => {
@@ -87,6 +91,11 @@ test('secret provider resolves references without exposing values', async () => 
   assert.equal(redactFeishuText(`app_secret=${secret} Authorization: Bearer abcdefghijklmnop`, [secret]), 'app_secret=[REDACTED] Authorization=[REDACTED]')
   const jsonLog = '{"app_secret":"json-secret","tenant_access_token":"json-token"}'
   assert.equal(redactFeishuText(jsonLog), '{"app_secret":"[REDACTED]","tenant_access_token":"[REDACTED]"}')
+  const genericLog = 'token=plain-canary-token refresh_token=refresh-canary-token Authorization: Basic Zm9vOmJhcg=='
+  const genericRedacted = redactFeishuText(genericLog)
+  assert.equal(genericRedacted.includes('plain-canary-token'), false)
+  assert.equal(genericRedacted.includes('refresh-canary-token'), false)
+  assert.equal(genericRedacted.includes('Zm9vOmJhcg=='), false)
 
   const sdkLogs = []
   const sdkLogger = createRedactingFeishuLogger(
@@ -143,6 +152,47 @@ test('official transport sends with the configured receive id type', async () =>
   assert.equal(calls[0].params.receive_id_type, 'user_id')
 })
 
+test('official preflight requires bot activation and message permission', async () => {
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({
+        code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
+      }) } } },
+      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_preflight' } }) } } },
+      request: async () => ({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } }),
+    },
+    connect: async () => {}, disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
+    on: () => () => {}, send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  await transport.preflight(enabledConfig())
+  channel.rawClient.application.v6.scope.list = async () => ({ code: 0, data: { scopes: [] } })
+  await assert.rejects(transport.preflight(enabledConfig()), /required permission/)
+})
+
+test('official connect failure removes the old callback before retry', async () => {
+  const handlers = []
+  let attempts = 0
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({ code: 0, data: { scopes: [] } }) } } },
+      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_retry' } }) } } },
+      request: async () => ({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } }),
+    },
+    connect: async () => { if (attempts++ === 0) throw new Error('first connect fails') },
+    disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
+    on: (_name, handler) => { handlers.push(handler); return () => handlers.splice(handlers.indexOf(handler), 1) },
+    send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  await assert.rejects(transport.connect(async () => {}), /first connect fails/)
+  assert.equal(handlers.length, 0)
+  await transport.connect(async () => {})
+  assert.equal(handlers.length, 1)
+  await transport.disconnect()
+  assert.equal(handlers.length, 0)
+})
+
 test('connector lease prevents a second local consumer', async () => {
   const root = await projectRoot()
   const first = await acquireFeishuLease(root, 'first-holder')
@@ -187,6 +237,26 @@ test('slow transport connection keeps renewing before callbacks are accepted', a
   await assert.rejects(acquireFeishuLease(root, 'slow-connection-competitor', 1000), /held by slow-connecting-holder/)
   controller.abort()
   await running
+})
+
+test('abort can stop a connector whose transport connect never resolves', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  class HangingTransport extends FakeFeishuTransport {
+    async connect() { await new Promise(() => {}) }
+  }
+  const controller = new AbortController()
+  const running = runFeishuConnector(root, {
+    holder: 'hanging-transport-holder', transport: new HangingTransport(), signal: controller.signal, leaseTtlMs: 1000,
+  })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  controller.abort()
+  await Promise.race([
+    running,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('connector did not stop after abort')), 500)),
+  ])
+  assert.equal(await readFeishuLease(root), null)
 })
 
 test('stop requests are token-bound and handled cooperatively without signalling a pid', async () => {
@@ -284,6 +354,24 @@ test('concurrent renewals are serialized without losing lease ownership', async 
   await Promise.all(Array.from({ length: 12 }, () => renewFeishuLease(root, lease.token, 1000)))
   assert.equal((await readFeishuLease(root)).token, lease.token)
   await releaseFeishuLease(root, lease.token)
+})
+
+test('lease fencing prevents takeover until callback persistence finishes', async () => {
+  const root = await projectRoot()
+  const lease = await acquireFeishuLease(root, 'fenced-holder', 1000)
+  let actionActive = false
+  const fenced = withFeishuLeaseFence(root, lease.token, async () => {
+    actionActive = true
+    await new Promise((resolve) => setTimeout(resolve, 1150))
+    actionActive = false
+  })
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  const replacementPromise = acquireFeishuLease(root, 'post-fence-holder', 1000)
+  await fenced
+  const replacement = await replacementPromise
+  assert.equal(actionActive, false)
+  assert.equal(replacement.holder, 'post-fence-holder')
+  await releaseFeishuLease(root, replacement.token)
 })
 
 test('orphaned mutation locks fail closed instead of being reclaimed concurrently', async () => {
