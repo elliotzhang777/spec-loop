@@ -260,7 +260,7 @@ interface ChannelLike {
   };
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  rawWsClient?: { close(params?: { force?: boolean }): void };
+  rawWsClient?: { close(params?: { force?: boolean }): void; onError?: (error: Error) => void };
   getConnectionStatus(): { state: FeishuConnectionState } | undefined;
   on(name: 'cardAction', handler: (event: {
     messageId: string; chatId: string; operator: { openId: string };
@@ -301,6 +301,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
   private state: FeishuConnectionState = 'idle';
   private connectionGeneration = 0;
   private connectInFlight = false;
+  private connectSettlement?: Promise<void>;
   private sdkRequestController = new AbortController();
   private tenantAccessToken = '';
   private tenantAccessTokenExpiresAt = 0;
@@ -313,6 +314,17 @@ export class OfficialFeishuTransport implements FeishuTransport {
 
   private resetSdkRequestController(): void {
     if (this.sdkRequestController.signal.aborted) this.sdkRequestController = new AbortController();
+  }
+
+  private forceCloseChannel(channel: ChannelLike | undefined): void {
+    try {
+      const state = channel?.getConnectionStatus()?.state;
+      channel?.rawWsClient?.close({ force: true });
+      if (state === 'connecting' || state === 'reconnecting') {
+        channel?.rawWsClient?.onError?.(new Error('feishu connection was cancelled'));
+      }
+    }
+    catch { /* best effort: generation and action gates remain authoritative */ }
   }
 
   private sdkHttpInstance(): object {
@@ -443,13 +455,17 @@ export class OfficialFeishuTransport implements FeishuTransport {
     if (this.connectInFlight || (this.state !== 'idle' && this.state !== 'failed')) throw new Error(`feishu transport cannot connect from ${this.state}`);
     this.connectInFlight = true;
     this.resetSdkRequestController();
+    let settleConnect!: () => void;
+    const connectSettlement = new Promise<void>((resolve) => { settleConnect = resolve; });
+    this.connectSettlement = connectSettlement;
+    const connectSignal = this.sdkRequestController.signal;
     const generation = ++this.connectionGeneration;
     this.state = 'connecting';
     let channel: ChannelLike | undefined;
     let unsubscribe: (() => void) | undefined;
     let acceptingEvents = false;
     try {
-      channel = await this.getChannel();
+      channel = await this.getChannel(connectSignal);
       if (generation !== this.connectionGeneration) throw new Error('feishu connection was cancelled');
       unsubscribe = channel.on('cardAction', async (event) => {
         if (!acceptingEvents || generation !== this.connectionGeneration) return;
@@ -462,7 +478,18 @@ export class OfficialFeishuTransport implements FeishuTransport {
         });
       });
       this.unsubscribe = unsubscribe;
-      await channel.connect();
+      let abortListener: (() => void) | undefined;
+      try {
+        await Promise.race([
+          channel.connect(),
+          new Promise<never>((_, reject) => {
+            abortListener = () => reject(new Error('feishu connection was cancelled'));
+            connectSignal.addEventListener('abort', abortListener, { once: true });
+          }),
+        ]);
+      } finally {
+        if (abortListener) connectSignal.removeEventListener('abort', abortListener);
+      }
       if (generation !== this.connectionGeneration) throw new Error('feishu connection was cancelled');
       this.state = 'connected';
       acceptingEvents = true;
@@ -470,11 +497,16 @@ export class OfficialFeishuTransport implements FeishuTransport {
       acceptingEvents = false;
       unsubscribe?.();
       if (this.unsubscribe === unsubscribe) this.unsubscribe = undefined;
+      this.forceCloseChannel(channel);
       await channel?.disconnect().catch(() => undefined);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      this.forceCloseChannel(channel);
       this.state = generation === this.connectionGeneration ? 'failed' : 'idle';
       throw new Error(redactFeishuText(`feishu connection failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret]));
     } finally {
       this.connectInFlight = false;
+      settleConnect();
+      if (this.connectSettlement === connectSettlement) this.connectSettlement = undefined;
     }
   }
 
@@ -483,9 +515,10 @@ export class OfficialFeishuTransport implements FeishuTransport {
     this.sdkRequestController.abort();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
-    try { this.channel?.rawWsClient?.close({ force: true }); }
-    catch { /* best effort: the wrapper action gate is already closed */ }
+    this.forceCloseChannel(this.channel);
     if (this.channel) await this.channel.disconnect().catch(() => undefined);
+    await this.connectSettlement;
+    this.forceCloseChannel(this.channel);
     this.state = 'idle';
   }
 

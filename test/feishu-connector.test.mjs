@@ -266,13 +266,12 @@ test('disconnect force-closes an official channel while it is still connecting',
   const connecting = transport.connect(async () => {})
   await new Promise((resolve) => setTimeout(resolve, 0))
   await transport.disconnect()
-  await assert.rejects(connecting, /socket closed/)
-  assert.equal(forceCloses, 1)
+  await assert.rejects(connecting, /cancelled|socket closed/)
+  assert.ok(forceCloses >= 1)
   assert.equal(transport.connectionState(), 'idle')
 })
 
-test('disconnect aborts pending HTTP inside the production official SDK channel', async () => {
-  let connecting = false
+test('disconnect aborts a pending endpoint request and stops official SDK reconnect', async () => {
   let entered
   const requestEntered = new Promise((resolve) => { entered = resolve })
   const requester = async (url) => {
@@ -280,15 +279,17 @@ test('disconnect aborts pending HTTP inside the production official SDK channel'
     if (url.includes('/scopes')) return jsonResponse({
       code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
     })
-    if (!connecting) return jsonResponse({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } })
-    entered()
-    return new Promise(() => {})
+    if (url.includes('/bot/v3/info')) return jsonResponse({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } })
+    if (url.includes('/callback/ws/endpoint')) {
+      entered()
+      return new Promise(() => {})
+    }
+    throw new Error(`unexpected URL ${url}`)
   }
   const transport = new OfficialFeishuTransport(
     { appId: 'cli_0123456789abcdef', appSecret: 'not-used' }, undefined, requester,
   )
   await transport.preflight(enabledConfig())
-  connecting = true
   const pending = transport.connect(async () => {})
   await requestEntered
   await transport.disconnect()
@@ -315,9 +316,10 @@ test('disconnect during a slow factory prevents callbacks and concurrent retry',
   const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => factoryBarrier)
   const connecting = transport.connect(async () => { handled += 1 })
   await transport.disconnect()
-  await assert.rejects(transport.connect(async () => {}), /cannot connect/)
-  releaseFactory()
   await assert.rejects(connecting, /cancelled/)
+  releaseFactory()
+  await transport.connect(async () => {})
+  await transport.disconnect()
   assert.equal(handled, 0)
   assert.equal(transport.connectionState(), 'idle')
 })
