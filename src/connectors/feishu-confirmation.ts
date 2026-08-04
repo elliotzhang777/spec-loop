@@ -76,6 +76,34 @@ export const confirmationRequestSchema = z.object({
   if (Date.parse(value.expires_at) <= Date.parse(value.created_at)) {
     ctx.addIssue({ code: 'custom', path: ['expires_at'], message: 'confirmation expiry must be after creation' });
   }
+  const hasConsumption = value.consumed_at !== null && value.consumed_action !== null && value.consumed_actor_id !== null;
+  const hasNoConsumption = value.consumed_at === null && value.consumed_action === null && value.consumed_actor_id === null;
+  if ((value.status === 'consumed' || value.status === 'rejected') && !hasConsumption) {
+    ctx.addIssue({ code: 'custom', path: ['status'], message: 'consumed or rejected request requires complete consumption facts' });
+  }
+  if ((value.status === 'pending' || value.status === 'expired' || value.status === 'invalidated') && !hasNoConsumption) {
+    ctx.addIssue({ code: 'custom', path: ['status'], message: 'unconsumed request may not carry consumption facts' });
+  }
+  if ((value.status === 'expired' || value.status === 'invalidated') && !value.invalidation_reason) {
+    ctx.addIssue({ code: 'custom', path: ['invalidation_reason'], message: 'expired or invalidated request requires a reason' });
+  }
+  if ((value.status === 'pending' || value.status === 'consumed' || value.status === 'rejected') && value.invalidation_reason !== null) {
+    ctx.addIssue({ code: 'custom', path: ['invalidation_reason'], message: 'active or consumed request may not carry an invalidation reason' });
+  }
+  if (hasConsumption && value.consumed_action && !value.allowed_actions.includes(value.consumed_action)) {
+    ctx.addIssue({ code: 'custom', path: ['consumed_action'], message: 'consumed action is outside the request allowlist' });
+  }
+  if (hasConsumption && value.consumed_actor_id && !value.allowed_actor_ids.includes(value.consumed_actor_id)) {
+    ctx.addIssue({ code: 'custom', path: ['consumed_actor_id'], message: 'consumed actor is outside the request allowlist' });
+  }
+  const rejectionAction = value.consumed_action?.startsWith('reject_') || value.consumed_action === 'defer_verification' || value.consumed_action === 'pause_task';
+  if (value.status === 'consumed' && rejectionAction) ctx.addIssue({ code: 'custom', path: ['consumed_action'], message: 'rejection action may not produce consumed status' });
+  if (value.status === 'rejected' && !rejectionAction) ctx.addIssue({ code: 'custom', path: ['consumed_action'], message: 'approval action may not produce rejected status' });
+  const expectedContentHash = confirmationContentHash({
+    type: value.type, projectId: value.project_id, taskId: value.task_id, round: value.round,
+    revision: value.revision, risk: value.risk, facts: value.facts,
+  });
+  if (value.content_hash !== expectedContentHash) ctx.addIssue({ code: 'custom', path: ['content_hash'], message: 'content hash does not match authority facts' });
 });
 
 export type ConfirmationRequest = z.infer<typeof confirmationRequestSchema>;
@@ -157,6 +185,26 @@ async function readHistory(root: string): Promise<HistoryEvent[]> {
     const previous = events.at(-1)?.event_hash ?? null;
     if (event.sequence !== index + 1 || event.previous_hash !== previous || eventHash(unsigned) !== storedHash) {
       throw new Error(`confirmation history integrity failure at sequence ${index + 1}`);
+    }
+    const priorEvent = [...events].reverse().find((candidate) => candidate.request.request_id === event.request.request_id);
+    const prior = priorEvent?.request;
+    const expectedStatus: Record<HistoryEvent['event_type'], ConfirmationRequest['status']> = {
+      created: 'pending', consumed: 'consumed', rejected: 'rejected', expired: 'expired', invalidated: 'invalidated',
+    };
+    if (event.request.status !== expectedStatus[event.event_type]) throw new Error(`confirmation history semantic failure at sequence ${index + 1}`);
+    if ((event.event_type === 'consumed' || event.event_type === 'rejected') && event.request.consumed_at !== event.occurred_at) {
+      throw new Error(`confirmation history consumption time mismatch at sequence ${index + 1}`);
+    }
+    if (Date.parse(event.occurred_at) < Date.parse(event.request.created_at) || (priorEvent && Date.parse(event.occurred_at) < Date.parse(priorEvent.occurred_at))) {
+      throw new Error(`confirmation history time moved backwards at sequence ${index + 1}`);
+    }
+    if (event.event_type === 'created') {
+      if (prior) throw new Error(`confirmation history duplicate creation at sequence ${index + 1}`);
+    } else {
+      if (!prior || prior.status !== 'pending') throw new Error(`confirmation history illegal transition at sequence ${index + 1}`);
+      const immutableBefore = { ...prior, status: undefined, consumed_at: undefined, consumed_action: undefined, consumed_actor_id: undefined, invalidation_reason: undefined };
+      const immutableAfter = { ...event.request, status: undefined, consumed_at: undefined, consumed_action: undefined, consumed_actor_id: undefined, invalidation_reason: undefined };
+      if (sha256(JSON.stringify(immutableBefore)) !== sha256(JSON.stringify(immutableAfter))) throw new Error(`confirmation history authority changed at sequence ${index + 1}`);
     }
     events.push(event);
   }
@@ -320,7 +368,12 @@ export async function invalidateIfConfirmationFactsChanged(projectRoot: string, 
   return invalidateConfirmationRequest(projectRoot, requestId, '候选 revision、Acceptance、截图或 Gate Plan 已变化', now);
 }
 
-export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, authority: {
+  revision: string;
+  round: number;
+  risk: 'light' | 'standard' | 'heavy';
+  facts: ConfirmationFacts;
+}, now = new Date()): Promise<ConfirmationRequest> {
   return mutateRequest(projectRoot, requestId, (current) => {
     if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
     if (Date.parse(current.expires_at) <= now.getTime()) {
@@ -328,6 +381,17 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
     }
     if (!current.allowed_actor_ids.includes(actorId)) throw new Error('actor is not allowed for this confirmation request');
     if (!current.allowed_actions.includes(action)) throw new Error('action is not allowed for this confirmation request');
+    const currentFacts = confirmationFactsSchema.parse(authority.facts);
+    const currentHash = confirmationContentHash({
+      type: current.type, projectId: current.project_id, taskId: current.task_id,
+      revision: authority.revision, round: authority.round, risk: authority.risk, facts: currentFacts,
+    });
+    if (current.revision !== authority.revision || current.round !== authority.round || current.risk !== authority.risk || current.content_hash !== currentHash) {
+      return {
+        event: 'invalidated',
+        request: confirmationRequestSchema.parse({ ...current, status: 'invalidated', invalidation_reason: '当前权威 revision、Acceptance、截图或 Gate Plan 与请求不一致' }),
+      };
+    }
     const rejected = action.startsWith('reject_') || action === 'defer_verification' || action === 'pause_task';
     return {
       event: rejected ? 'rejected' : 'consumed',

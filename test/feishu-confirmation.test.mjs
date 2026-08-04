@@ -7,6 +7,7 @@ import { tempRoot } from './helpers.mjs'
 import { initFeishuConfig } from '../dist/connectors/feishu.js'
 import {
   checkConfirmationProjection,
+  confirmationRequestSchema,
   consumeConfirmationRequest,
   createConfirmationRequest,
   expireConfirmationRequests,
@@ -55,6 +56,10 @@ async function create(root, type = 'verification', overrides = {}) {
     now: new Date('2026-08-04T10:00:00.000Z'),
     ...overrides,
   })
+}
+
+function authority(request, overrides = {}) {
+  return { revision: request.revision, round: request.round, risk: request.risk, facts: request.facts, ...overrides }
 }
 
 test('all five request types bind immutable authority facts and fixed action allowlists', async () => {
@@ -124,15 +129,27 @@ test('revision, Acceptance, screenshots and Gate Plan changes invalidate the old
 test('requests are single-consumption, actor-bound, action-bound and expiry-bound', async () => {
   const root = await projectRoot()
   const request = await create(root)
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'approve_proposal', actor), /action is not allowed/i)
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', 'ou_87654321_other'), /actor is not allowed/i)
-  const consumed = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, new Date('2026-08-04T10:02:00.000Z'))
+  const now = new Date('2026-08-04T10:02:00.000Z')
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'approve_proposal', actor, authority(request), now), /action is not allowed/i)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', 'ou_87654321_other', authority(request), now), /actor is not allowed/i)
+  const consumed = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request), now)
   assert.equal(consumed.status, 'consumed')
-  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor), /already consumed/i)
+  await assert.rejects(consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request), now), /already consumed/i)
 
   const expired = await create(root, 'proposal', { now: new Date('2026-08-04T11:00:00.000Z'), ttlSeconds: 60 })
   assert.equal(await expireConfirmationRequests(root, new Date('2026-08-04T11:02:00.000Z')), 1)
   assert.equal((await listConfirmationRequests(root)).find((item) => item.request_id === expired.request_id).status, 'expired')
+})
+
+test('direct consumption atomically invalidates a request when current authority has changed', async () => {
+  const root = await projectRoot()
+  const request = await create(root)
+  const result = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, authority(request, {
+    revision: 'fedcba0987654321',
+  }), new Date('2026-08-04T10:03:00.000Z'))
+  assert.equal(result.status, 'invalidated')
+  assert.equal(result.consumed_action, null)
+  assert.match(result.invalidation_reason, /权威 revision/)
 })
 
 test('regeneration invalidates the old request and binds a new revision and content hash', async () => {
@@ -165,13 +182,13 @@ test('projection deletion is rebuildable while projection or history tampering f
   const projectionValue = JSON.parse(await readFile(projection, 'utf8'))
   projectionValue.requests[0].risk = 'heavy'
   await writeFile(projection, JSON.stringify(projectionValue, null, 2))
-  await assert.rejects(checkConfirmationProjection(root), /projection integrity/i)
+  await assert.rejects(checkConfirmationProjection(root), /projection integrity|content hash/i)
 
   await rebuildConfirmationProjection(root)
   const history = path.join(store, 'history.jsonl')
   const historyText = await readFile(history, 'utf8')
   await writeFile(history, historyText.replace('1234567890abcdef', 'fedcba0987654321'))
-  await assert.rejects(rebuildConfirmationProjection(root), /history integrity/i)
+  await assert.rejects(rebuildConfirmationProjection(root), /history integrity|content hash/i)
 })
 
 test('sensitive summaries and non-predefined options fail before persistence', async () => {
@@ -179,4 +196,18 @@ test('sensitive summaries and non-predefined options fail before persistence', a
   await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'Authorization: Bearer abcdefghijklmnop' }) }), /sensitive/i)
   await assert.rejects(create(root, 'needs_user', { facts: facts({ options: [] }) }), /predefined options/i)
   assert.equal((await listConfirmationRequests(root)).length, 0)
+})
+
+test('request schema rejects semantically inconsistent terminal snapshots', async () => {
+  const root = await projectRoot()
+  const request = await create(root)
+  assert.equal(confirmationRequestSchema.safeParse({ ...request, status: 'consumed' }).success, false)
+  assert.equal(confirmationRequestSchema.safeParse({ ...request, status: 'invalidated', invalidation_reason: null }).success, false)
+  assert.equal(confirmationRequestSchema.safeParse({
+    ...request,
+    status: 'consumed',
+    consumed_at: '2026-08-04T10:02:00.000Z',
+    consumed_action: 'reject_visual',
+    consumed_actor_id: actor,
+  }).success, false)
 })
