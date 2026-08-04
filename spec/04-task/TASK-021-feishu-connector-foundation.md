@@ -1,6 +1,6 @@
 # TASK-021：飞书连接器配置与 SDK 基础
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P0
 - 负责人：待定
 - 创建日期：2026-08-04
@@ -31,11 +31,11 @@
 
 ## 验收标准
 
-- [ ] AC-1：缺少配置、权限或 Secret 时连接器明确拒绝启动，未启用时不影响现有本地闭环。
-- [ ] AC-2：Secret、Token 和 Authorization header 不进入 Git、日志、错误、Task 或 Evidence。
-- [ ] AC-3：SDK Adapter 可发送/更新测试卡片、建立/关闭长连接，并可被 Fake Adapter 替换。
-- [ ] AC-4：配置严格校验单租户、接收目标、允许确认用户、通知策略和重试边界，未知字段或越界路径失败。
-- [ ] AC-5：同一控制根通过 Connector lease 防止两个实例同时消费回调。
+- [x] AC-1：缺少配置、权限或 Secret 时连接器明确拒绝启动，未启用时不影响现有本地闭环。
+- [x] AC-2：Secret、Token 和 Authorization header 不进入 Git、日志、错误、Task 或 Evidence。
+- [x] AC-3：SDK Adapter 可发送/更新测试卡片、建立/关闭长连接，并可被 Fake Adapter 替换。
+- [x] AC-4：配置严格校验单租户、接收目标、允许确认用户、通知策略和重试边界，未知字段或越界路径失败。
+- [x] AC-5：同一控制根通过 Connector lease 防止两个实例同时消费回调。
 
 ## 验证计划
 
@@ -53,8 +53,8 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施（草稿阶段）
-- 变更文件/交付物：实施完成后按实际结果记录
-- 关键实现与决策：企业自建应用、官方 SDK 长连接、凭据外置。
+- 完成日期：2026-08-04
+- 变更文件/交付物：`src/connectors/feishu.ts`、`src/cli.ts`、`test/feishu-connector.test.mjs`、官方 SDK 依赖与 `EV-7` Harness Evidence。
+- 关键实现与决策：默认关闭、企业自建应用、凭据外置、可取消官方 SDK 长连接、历史 token 动态脱敏和 token-bound Connector lease。
 - 与原设计的差异：无
 - 遗留风险：真实租户权限和可用范围在 TASK-026 验证。
