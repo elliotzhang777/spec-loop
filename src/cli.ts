@@ -10,7 +10,7 @@ import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
 import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
-import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig } from './connectors/feishu.js';
+import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig, runFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -153,6 +153,11 @@ feishu.command('check').argument('<project-dir>').option('--json').action((dir,o
   const config=await readFeishuConfig(root(dir));print(o.json?{ok:true,enabled:config.enabled,targets:config.targets.length,approvers:config.approvers.length}:`feishu config ok: enabled=${config.enabled} targets=${config.targets.length} approvers=${config.approvers.length}`,o.json);
 }));
 feishu.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await feishuConnectorStatus(root(dir)),o.json)));
+feishu.command('start').argument('<project-dir>').option('--holder <identity>').action((dir,o)=>action(async()=>{
+  console.log('starting feishu connector; press Ctrl+C to stop');
+  await runFeishuConnector(root(dir),{holder:o.holder});
+}));
+feishu.command('stop').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await stopFeishuConnector(root(dir)),o.json)));
 
 const workspace=program.command('workspace').description('Task worktree management');
 workspace.command('create').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await createWorkspace(root(dir),id),o.json)));

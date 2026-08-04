@@ -192,6 +192,12 @@ export interface FeishuTransport {
 }
 
 interface ChannelLike {
+  rawClient: {
+    im: { v1: { message: { create(payload: {
+      params: { receive_id_type: FeishuTarget['receive_id_type'] };
+      data: { receive_id: string; msg_type: 'interactive'; content: string };
+    }): Promise<{ data?: { message_id?: string } }> } } };
+  };
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   getConnectionStatus(): { state: FeishuConnectionState } | undefined;
@@ -208,10 +214,14 @@ export class OfficialFeishuTransport implements FeishuTransport {
   private unsubscribe?: () => void;
   private state: FeishuConnectionState = 'idle';
 
-  constructor(private readonly credentials: FeishuCredentials) {}
+  constructor(private readonly credentials: FeishuCredentials, private readonly channelFactory?: () => Promise<ChannelLike>) {}
 
   private async getChannel(): Promise<ChannelLike> {
     if (!this.channel) {
+      if (this.channelFactory) {
+        this.channel = await this.channelFactory();
+        return this.channel;
+      }
       const sdk = await import('@larksuiteoapi/node-sdk');
       this.channel = sdk.createLarkChannel({
         appId: this.credentials.appId,
@@ -259,7 +269,15 @@ export class OfficialFeishuTransport implements FeishuTransport {
 
   async sendCard(target: FeishuTarget, card: object): Promise<{ messageId: string }> {
     const channel = await this.getChannel();
-    try { return await channel.send(target.receive_id, { card }); }
+    try {
+      const result = await channel.rawClient.im.v1.message.create({
+        params: { receive_id_type: target.receive_id_type },
+        data: { receive_id: target.receive_id, msg_type: 'interactive', content: JSON.stringify(card) },
+      });
+      const messageId = result.data?.message_id;
+      if (!messageId) throw new Error('message_id missing from create response');
+      return { messageId };
+    }
     catch (error) { throw new Error(redactFeishuText(`feishu card send failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret])); }
   }
 
@@ -354,6 +372,71 @@ export async function releaseFeishuLease(projectRoot: string, token: string): Pr
   if (!current) return;
   if (current.token !== token) throw new Error('feishu connector lease token does not match');
   await rm(file);
+}
+
+export async function renewFeishuLease(projectRoot: string, token: string, ttlMs = 60_000): Promise<ConnectorLease> {
+  if (ttlMs < 1_000 || ttlMs > 24 * 60 * 60 * 1_000) throw new Error('invalid feishu connector lease renewal');
+  const root = await feishuConnectorRoot(projectRoot);
+  const file = path.join(root, 'lease.json');
+  const current = await readFeishuLease(projectRoot);
+  if (!current || current.token !== token) throw new Error('feishu connector lease was lost');
+  const renewed: ConnectorLease = { ...current, expires_at: new Date(Date.now() + ttlMs).toISOString() };
+  await atomicWriteMany(root, [{ file, content: `${JSON.stringify(renewed, null, 2)}\n` }]);
+  return renewed;
+}
+
+export interface RunFeishuConnectorOptions {
+  holder?: string;
+  transport?: FeishuTransport;
+  secretProvider?: SecretProvider;
+  signal?: AbortSignal;
+  leaseTtlMs?: number;
+}
+
+export async function runFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
+  const config = await readFeishuConfig(projectRoot);
+  if (!config.enabled) throw new Error('feishu connector is disabled');
+  const holder = options.holder ?? `spec-loop-feishu-${process.pid}`;
+  const ttlMs = options.leaseTtlMs ?? 60_000;
+  const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
+  const transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
+  const controller = options.signal ? null : new AbortController();
+  const signal = options.signal ?? controller!.signal;
+  const stop = (): void => controller?.abort();
+  if (!options.signal) {
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  }
+  let heartbeat: NodeJS.Timeout | undefined;
+  try {
+    await transport.connect(async () => { /* Confirmation handling is added by TASK-024. */ });
+    heartbeat = setInterval(() => {
+      void renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller?.abort());
+    }, Math.max(500, Math.floor(ttlMs / 3)));
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) resolve();
+      else signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (!options.signal) {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+    }
+    await transport.disconnect().catch(() => undefined);
+    await releaseFeishuLease(projectRoot, lease.token).catch(() => undefined);
+  }
+}
+
+export async function stopFeishuConnector(projectRoot: string): Promise<{ stopped: boolean; holder: string | null }> {
+  const lease = await readFeishuLease(projectRoot);
+  if (!lease || Date.parse(lease.expires_at) <= Date.now()) return { stopped: false, holder: lease?.holder ?? null };
+  try { process.kill(lease.pid, 'SIGTERM'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return { stopped: false, holder: lease.holder };
+    throw new Error(`unable to stop feishu connector holder ${lease.holder}`);
+  }
+  return { stopped: true, holder: lease.holder };
 }
 
 export async function feishuConnectorStatus(projectRoot: string, provider: SecretProvider = new LocalSecretProvider()): Promise<Record<string, unknown>> {

@@ -15,6 +15,7 @@ import {
   readFeishuConfig,
   redactFeishuText,
   releaseFeishuLease,
+  runFeishuConnector,
   resolveFeishuCredentials,
 } from '../dist/connectors/feishu.js'
 
@@ -103,6 +104,25 @@ test('fake and official transports share the lifecycle contract', async () => {
   assert.equal(official.connectionState(), 'idle')
 })
 
+test('official transport sends with the configured receive id type', async () => {
+  const calls = []
+  const channel = {
+    rawClient: { im: { v1: { message: { create: async (payload) => {
+      calls.push(payload)
+      return { data: { message_id: 'om_explicit' } }
+    } } } } },
+    connect: async () => {}, disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
+    on: () => () => {}, send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  const result = await transport.sendCard(
+    { project_id: 'PROJ-TEST', receive_id_type: 'user_id', receive_id: 'ou_prefix_must_not_override_config' },
+    { header: { title: 'explicit route' } },
+  )
+  assert.equal(result.messageId, 'om_explicit')
+  assert.equal(calls[0].params.receive_id_type, 'user_id')
+})
+
 test('connector lease prevents a second local consumer', async () => {
   const root = await projectRoot()
   const first = await acquireFeishuLease(root, 'first-holder')
@@ -112,6 +132,21 @@ test('connector lease prevents a second local consumer', async () => {
   const second = await acquireFeishuLease(root, 'second-holder')
   assert.equal(second.holder, 'second-holder')
   await releaseFeishuLease(root, second.token)
+})
+
+test('running connector renews its lease until stopped', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  const fake = new FakeFeishuTransport()
+  const controller = new AbortController()
+  const running = runFeishuConnector(root, { holder: 'renewing-holder', transport: fake, signal: controller.signal, leaseTtlMs: 1000 })
+  await new Promise((resolve) => setTimeout(resolve, 1250))
+  await assert.rejects(acquireFeishuLease(root, 'competing-holder', 1000), /held by renewing-holder/)
+  controller.abort()
+  await running
+  const next = await acquireFeishuLease(root, 'next-holder', 1000)
+  await releaseFeishuLease(root, next.token)
 })
 
 test('CLI config and status never print credential values', async () => {
@@ -129,6 +164,10 @@ test('CLI config and status never print credential values', async () => {
   assert.equal(status.code, 0, status.stderr)
   assert.equal(JSON.parse(status.stdout).credentials_available, true)
   assert.equal(`${checked.stdout}${checked.stderr}${status.stdout}${status.stderr}`.includes(secret), false)
+  const help = cli(['connectors', 'feishu', '--help'])
+  assert.equal(help.code, 0, help.stderr)
+  assert.match(help.stdout, /start/)
+  assert.match(help.stdout, /stop/)
 })
 
 test('default config is stable JSON without credential values', async () => {
