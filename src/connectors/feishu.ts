@@ -10,7 +10,16 @@ const execFileAsync = promisify(execFile);
 
 const requestTypes = ['proposal', 'needs_user', 'visual_review', 'verification', 'heavy_acceptance'] as const;
 const receiveIdTypes = ['chat_id', 'open_id', 'user_id', 'union_id', 'email'] as const;
-const tenantKeyPattern = /^[0-9a-z]{8,64}$/;
+const tenantKeyPattern = /^[0-9a-z]{16}$/;
+const placeholderValue = /^(?:todo|tbd|unknown|placeholder|configure|待填写|待补充)$/i;
+
+function isSubstantiveIdentifier(value: string, pattern: RegExp): boolean {
+  return !placeholderValue.test(value.trim()) && pattern.test(value.trim());
+}
+
+function isValidTenantKey(value: string): boolean {
+  return tenantKeyPattern.test(value) && new Set(value).size >= 4;
+}
 
 const secretReferenceSchema = z.discriminatedUnion('provider', [
   z.object({ provider: z.literal('environment'), reference: z.string().regex(/^[A-Z][A-Z0-9_]{2,127}$/) }).strict(),
@@ -34,12 +43,12 @@ export const feishuConnectorConfigSchema = z.object({
   targets: z.array(z.object({
     project_id: z.string().regex(/^PROJ-[A-Z0-9][A-Z0-9-]*$/),
     receive_id_type: z.enum(receiveIdTypes),
-    receive_id: z.string().min(3).max(256),
+    receive_id: z.string().trim().min(3).max(256),
   }).strict()),
   approvers: z.array(z.object({
     project_id: z.string().regex(/^PROJ-[A-Z0-9][A-Z0-9-]*$/),
-    open_id: z.string().min(3).max(256),
-    local_actor: z.string().min(3).max(128),
+    open_id: z.string().trim().regex(/^ou_[A-Za-z0-9_-]{8,128}$/),
+    local_actor: z.string().trim().min(3).max(128).refine((value) => !placeholderValue.test(value), 'local actor must not be a placeholder'),
     request_types: z.array(z.enum(requestTypes)).min(1),
   }).strict()),
   notifications: z.object({
@@ -54,12 +63,20 @@ export const feishuConnectorConfigSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   if (value.enabled && value.targets.length === 0) ctx.addIssue({ code: 'custom', path: ['targets'], message: 'enabled connector requires at least one target' });
   if (value.enabled && value.approvers.length === 0) ctx.addIssue({ code: 'custom', path: ['approvers'], message: 'enabled connector requires at least one approver' });
-  if (value.enabled && !tenantKeyPattern.test(value.tenant_key)) ctx.addIssue({ code: 'custom', path: ['tenant_key'], message: 'enabled connector requires a valid tenant key' });
+  if (value.enabled && !isValidTenantKey(value.tenant_key)) ctx.addIssue({ code: 'custom', path: ['tenant_key'], message: 'enabled connector requires a valid tenant key' });
   if (value.retry.max_delay_ms < value.retry.base_delay_ms) ctx.addIssue({ code: 'custom', path: ['retry', 'max_delay_ms'], message: 'max delay must be greater than or equal to base delay' });
   const targetKeys = value.targets.map((item) => `${item.project_id}\0${item.receive_id_type}\0${item.receive_id}`);
   if (new Set(targetKeys).size !== targetKeys.length) ctx.addIssue({ code: 'custom', path: ['targets'], message: 'duplicate target' });
   const approverKeys = value.approvers.map((item) => `${item.project_id}\0${item.open_id}`);
   if (new Set(approverKeys).size !== approverKeys.length) ctx.addIssue({ code: 'custom', path: ['approvers'], message: 'duplicate approver' });
+  value.targets.forEach((target, index) => {
+    const valid = target.receive_id_type === 'chat_id' ? isSubstantiveIdentifier(target.receive_id, /^oc_[A-Za-z0-9_-]{8,128}$/)
+      : target.receive_id_type === 'open_id' ? isSubstantiveIdentifier(target.receive_id, /^ou_[A-Za-z0-9_-]{8,128}$/)
+        : target.receive_id_type === 'union_id' ? isSubstantiveIdentifier(target.receive_id, /^on_[A-Za-z0-9_-]{8,128}$/)
+          : target.receive_id_type === 'email' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target.receive_id)
+            : isSubstantiveIdentifier(target.receive_id, /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/);
+    if (!valid) ctx.addIssue({ code: 'custom', path: ['targets', index, 'receive_id'], message: `invalid ${target.receive_id_type} target` });
+  });
 });
 
 export type FeishuConnectorConfig = z.infer<typeof feishuConnectorConfigSchema>;
@@ -106,7 +123,7 @@ export async function resolveFeishuCredentials(config: FeishuConnectorConfig, pr
 }
 
 const authorizationHeader = /\bauthorization\b["']?\s*[:=]\s*["']?[^,;}\]\r\n]+/gi;
-const sensitiveKey = '(?:app[_-]?secret|client[_-]?secret|secret|(?:[a-z][a-z0-9_-]*[_-])?token)';
+const sensitiveKey = '(?:app[_-]?secret|client[_-]?secret|secret|token|[a-z][a-z0-9_-]*token)';
 const sensitiveJsonAssignment = new RegExp(`(["'])(${sensitiveKey})\\1\\s*:\\s*(["'])[^\\r\\n]*?\\3`, 'gi');
 const sensitiveAssignment = new RegExp(`\\b(${sensitiveKey})\\b\\s*[:=]\\s*([^\\s,;]+)`, 'gi');
 const bearerToken = /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}/gi;
@@ -145,18 +162,6 @@ export function createRedactingFeishuLogger(credentials: FeishuCredentials, sink
     debug: (...args) => emit('debug', args),
     trace: (...args) => emit('debug', args),
   };
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 async function connectorControlRoot(projectRoot: string): Promise<string> {
@@ -230,7 +235,7 @@ export type FeishuCardActionHandler = (action: FeishuCardAction) => Promise<void
 export type FeishuConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 
 export interface FeishuTransport {
-  preflight(config: FeishuConnectorConfig): Promise<void>;
+  preflight(config: FeishuConnectorConfig, signal?: AbortSignal): Promise<void>;
   connect(handler: FeishuCardActionHandler): Promise<void>;
   disconnect(): Promise<void>;
   connectionState(): FeishuConnectionState;
@@ -247,8 +252,10 @@ interface ChannelLike {
       params: { receive_id_type: FeishuTarget['receive_id_type'] };
       data: { receive_id: string; msg_type: 'interactive'; content: string };
     }): Promise<{ data?: { message_id?: string } }> } } };
-    request(payload: { url: string; method: 'GET' }): Promise<{
-      code?: number; msg?: string; bot?: { activate_status?: number; open_id?: string; app_name?: string };
+    request(payload: { url: string; method: 'GET'; signal?: AbortSignal }): Promise<{
+      code?: number; msg?: string;
+      data?: { scopes?: Array<{ scope_name: string; grant_status: number; scope_type?: 'user' | 'tenant' }> };
+      bot?: { activate_status?: number; open_id?: string; app_name?: string };
     }>;
   };
   connect(): Promise<void>;
@@ -264,44 +271,66 @@ interface ChannelLike {
 
 export class OfficialFeishuTransport implements FeishuTransport {
   private channel?: ChannelLike;
+  private channelPromise?: Promise<ChannelLike>;
   private unsubscribe?: () => void;
   private state: FeishuConnectionState = 'idle';
   private connectionGeneration = 0;
+  private connectInFlight = false;
 
   constructor(private readonly credentials: FeishuCredentials, private readonly channelFactory?: () => Promise<ChannelLike>) {}
 
-  private async getChannel(): Promise<ChannelLike> {
-    if (!this.channel) {
-      if (this.channelFactory) {
-        this.channel = await this.channelFactory();
-        return this.channel;
-      }
-      const sdk = await import('@larksuiteoapi/node-sdk');
-      this.channel = sdk.createLarkChannel({
-        appId: this.credentials.appId,
-        appSecret: this.credentials.appSecret,
-        transport: 'websocket',
-        includeRawEvent: true,
-        source: 'spec-loop',
-        logger: createRedactingFeishuLogger(this.credentials),
-        loggerLevel: sdk.LoggerLevel.error,
-        handshakeTimeoutMs: 15_000,
-        outbound: { retry: { maxAttempts: 1, baseDelayMs: 100 } },
-      }) as ChannelLike;
+  private async getChannel(signal?: AbortSignal): Promise<ChannelLike> {
+    if (this.channel) return this.channel;
+    if (signal?.aborted) throw new Error('feishu channel creation was cancelled');
+    if (!this.channelPromise) {
+      const channelPromise = (async () => {
+        if (this.channelFactory) return this.channelFactory();
+        const sdk = await import('@larksuiteoapi/node-sdk');
+        return sdk.createLarkChannel({
+          appId: this.credentials.appId,
+          appSecret: this.credentials.appSecret,
+          transport: 'websocket',
+          includeRawEvent: true,
+          source: 'spec-loop',
+          logger: createRedactingFeishuLogger(this.credentials),
+          loggerLevel: sdk.LoggerLevel.error,
+          handshakeTimeoutMs: 15_000,
+          outbound: { retry: { maxAttempts: 1, baseDelayMs: 100 } },
+        }) as ChannelLike;
+      })();
+      const trackedChannelPromise = channelPromise.catch((error) => {
+        if (this.channelPromise === trackedChannelPromise) this.channelPromise = undefined;
+        throw error;
+      });
+      this.channelPromise = trackedChannelPromise;
     }
-    return this.channel;
+    const channelPromise = this.channelPromise;
+    let abortListener: (() => void) | undefined;
+    try {
+      this.channel = await Promise.race([
+        channelPromise,
+        new Promise<never>((_, reject) => {
+          if (!signal) return;
+          abortListener = () => reject(new Error('feishu channel creation was cancelled'));
+          signal.addEventListener('abort', abortListener, { once: true });
+        }),
+      ]);
+      return this.channel;
+    } finally {
+      if (signal && abortListener) signal.removeEventListener('abort', abortListener);
+    }
   }
 
-  async preflight(_config: FeishuConnectorConfig): Promise<void> {
-    const channel = await this.getChannel();
+  async preflight(_config: FeishuConnectorConfig, signal?: AbortSignal): Promise<void> {
     try {
-      const scopeResponse = await channel.rawClient.application.v6.scope.list({});
+      const channel = await this.getChannel(signal);
+      const scopeResponse = await channel.rawClient.request({ url: '/open-apis/application/v6/scopes', method: 'GET', signal });
       if (scopeResponse.code && scopeResponse.code !== 0) throw new Error(scopeResponse.msg || `scope query failed with code ${scopeResponse.code}`);
       const granted = new Set((scopeResponse.data?.scopes ?? [])
         .filter((scope) => scope.scope_type !== 'user' && scope.grant_status === 1)
         .map((scope) => scope.scope_name));
       if (!granted.has('im:message:send_as_bot') && !granted.has('im:message')) throw new Error('required permission im:message:send_as_bot is not granted');
-      const botResponse = await channel.rawClient.request({ url: '/open-apis/bot/v3/info', method: 'GET' });
+      const botResponse = await channel.rawClient.request({ url: '/open-apis/bot/v3/info', method: 'GET', signal });
       if (botResponse.code && botResponse.code !== 0) throw new Error(botResponse.msg || `bot info failed with code ${botResponse.code}`);
       if (!botResponse.bot?.open_id || botResponse.bot.activate_status !== 2) throw new Error('bot capability is unavailable or inactive');
     } catch (error) {
@@ -310,28 +339,40 @@ export class OfficialFeishuTransport implements FeishuTransport {
   }
 
   async connect(handler: FeishuCardActionHandler): Promise<void> {
-    if (this.state !== 'idle' && this.state !== 'failed') throw new Error(`feishu transport cannot connect from ${this.state}`);
+    if (this.connectInFlight || (this.state !== 'idle' && this.state !== 'failed')) throw new Error(`feishu transport cannot connect from ${this.state}`);
+    this.connectInFlight = true;
     const generation = ++this.connectionGeneration;
     this.state = 'connecting';
     let channel: ChannelLike | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let acceptingEvents = false;
     try {
       channel = await this.getChannel();
-      this.unsubscribe = channel.on('cardAction', async (event) => handler({
+      if (generation !== this.connectionGeneration) throw new Error('feishu connection was cancelled');
+      unsubscribe = channel.on('cardAction', async (event) => {
+        if (!acceptingEvents || generation !== this.connectionGeneration) return;
+        return handler({
         messageId: event.messageId,
         chatId: event.chatId,
         operatorOpenId: event.operator.openId,
         action: event.action,
         raw: event.raw,
-      }));
+        });
+      });
+      this.unsubscribe = unsubscribe;
       await channel.connect();
       if (generation !== this.connectionGeneration) throw new Error('feishu connection was cancelled');
       this.state = 'connected';
+      acceptingEvents = true;
     } catch (error) {
-      this.unsubscribe?.();
-      this.unsubscribe = undefined;
+      acceptingEvents = false;
+      unsubscribe?.();
+      if (this.unsubscribe === unsubscribe) this.unsubscribe = undefined;
       await channel?.disconnect().catch(() => undefined);
       this.state = generation === this.connectionGeneration ? 'failed' : 'idle';
       throw new Error(redactFeishuText(`feishu connection failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret]));
+    } finally {
+      this.connectInFlight = false;
     }
   }
 
@@ -348,8 +389,8 @@ export class OfficialFeishuTransport implements FeishuTransport {
   }
 
   async sendCard(target: FeishuTarget, card: object): Promise<{ messageId: string }> {
-    const channel = await this.getChannel();
     try {
+      const channel = await this.getChannel();
       const result = await channel.rawClient.im.v1.message.create({
         params: { receive_id_type: target.receive_id_type },
         data: { receive_id: target.receive_id, msg_type: 'interactive', content: JSON.stringify(card) },
@@ -362,8 +403,10 @@ export class OfficialFeishuTransport implements FeishuTransport {
   }
 
   async updateCard(messageId: string, card: object): Promise<void> {
-    const channel = await this.getChannel();
-    try { await channel.updateCard(messageId, card); }
+    try {
+      const channel = await this.getChannel();
+      await channel.updateCard(messageId, card);
+    }
     catch (error) { throw new Error(redactFeishuText(`feishu card update failed: ${(error as Error).message}`, [this.credentials.appId, this.credentials.appSecret])); }
   }
 }
@@ -374,7 +417,7 @@ export class FakeFeishuTransport implements FeishuTransport {
   private handler?: FeishuCardActionHandler;
   private state: FeishuConnectionState = 'idle';
 
-  async preflight(_config: FeishuConnectorConfig): Promise<void> {}
+  async preflight(_config: FeishuConnectorConfig, _signal?: AbortSignal): Promise<void> {}
   async connect(handler: FeishuCardActionHandler): Promise<void> { this.handler = handler; this.state = 'connected'; }
   async disconnect(): Promise<void> { this.handler = undefined; this.state = 'idle'; }
   connectionState(): FeishuConnectionState { return this.state; }
@@ -542,9 +585,6 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   if (!config.enabled) throw new Error('feishu connector is disabled');
   const holder = options.holder ?? `spec-loop-feishu-${process.pid}`;
   const ttlMs = options.leaseTtlMs ?? 60_000;
-  const transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
-  await withTimeout(transport.preflight(config), 15_000, 'feishu preflight timed out');
-  const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
   const controller = new AbortController();
   const signal = controller.signal;
   let acceptingActions = false;
@@ -558,12 +598,15 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   }
+  let transport: FeishuTransport | undefined;
+  let lease: ConnectorLease | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let heartbeatWork: Promise<void> = Promise.resolve();
   const heartbeatDelay = Math.max(500, Math.floor(ttlMs / 3));
   const scheduleHeartbeat = (): void => {
     heartbeatTimer = setTimeout(() => {
       heartbeatWork = (async () => {
+        if (!lease) throw new Error('feishu connector lease is unavailable');
         if (await exists(leaseStopFile(await feishuConnectorRoot(projectRoot), lease.token))) {
           controller.abort();
           return;
@@ -575,31 +618,52 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     }, heartbeatDelay);
   };
   try {
+    if (signal.aborted) return;
+    transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
+    if (signal.aborted) return;
+    let preflightTimedOut = false;
+    const preflightTimer = setTimeout(() => {
+      preflightTimedOut = true;
+      controller.abort();
+    }, 15_000);
+    try {
+      await transport.preflight(config, signal);
+    } catch (error) {
+      if (preflightTimedOut) throw new Error('feishu preflight timed out');
+      if (signal.aborted) return;
+      throw error;
+    } finally {
+      clearTimeout(preflightTimer);
+    }
+    if (signal.aborted) return;
+    lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
+    if (signal.aborted) return;
+    scheduleHeartbeat();
+    const connectPromise = transport.connect(async () => {
+      if (signal.aborted || !acceptingActions || !lease) return;
+      try {
+        await withFeishuLeaseFence(projectRoot, lease.token, async () => {
+          if (signal.aborted || !acceptingActions) return;
+          /* Confirmation handling is added by TASK-024. */
+        });
+      } catch {
+        controller.abort();
+      }
+    });
+    let connectAbortListener: (() => void) | undefined;
+    const connected = await Promise.race([
+      connectPromise.then(() => true),
+      new Promise<false>((resolve) => {
+        connectAbortListener = () => resolve(false);
+        signal.addEventListener('abort', connectAbortListener, { once: true });
+      }),
+    ]);
+    if (connectAbortListener) signal.removeEventListener('abort', connectAbortListener);
+    if (!connected || signal.aborted) return;
+    await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
+    acceptingActions = !signal.aborted;
     if (!signal.aborted) {
-      scheduleHeartbeat();
-      const connectPromise = transport.connect(async () => {
-        if (signal.aborted || !acceptingActions) return;
-        try {
-          await withFeishuLeaseFence(projectRoot, lease.token, async () => {
-            if (signal.aborted || !acceptingActions) return;
-            /* Confirmation handling is added by TASK-024. */
-          });
-        } catch {
-          controller.abort();
-        }
-      });
-      const connected = await Promise.race([
-        connectPromise.then(() => true),
-        new Promise<false>((resolve) => signal.addEventListener('abort', () => resolve(false), { once: true })),
-      ]);
-      if (!connected) return;
-      if (!signal.aborted) {
-        await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
-        acceptingActions = !signal.aborted;
-      }
-      if (!signal.aborted) {
-        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
-      }
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
@@ -610,8 +674,8 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
     }
-    await transport.disconnect().catch(() => undefined);
-    await releaseFeishuLease(projectRoot, lease.token).catch(() => undefined);
+    await transport?.disconnect().catch(() => undefined);
+    if (lease) await releaseFeishuLease(projectRoot, lease.token).catch(() => undefined);
   }
 }
 
@@ -635,7 +699,7 @@ export async function feishuConnectorStatus(projectRoot: string, provider: Secre
   }
   return {
     enabled: config.enabled,
-    tenant_configured: tenantKeyPattern.test(config.tenant_key),
+    tenant_configured: isValidTenantKey(config.tenant_key),
     target_count: config.targets.length,
     approver_count: config.approvers.length,
     credentials_available: credentialsAvailable,

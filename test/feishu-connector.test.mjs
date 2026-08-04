@@ -70,6 +70,14 @@ test('enabled config requires targets, approvers and valid retry bounds', async 
 
   await writeFile(file, JSON.stringify({ ...enabledConfig(), tenant_key: 'TODO' }))
   await assert.rejects(readFeishuConfig(root), /valid tenant key/i)
+
+  await writeFile(file, JSON.stringify({ ...enabledConfig(), targets: [{ project_id: 'PROJ-TEST', receive_id_type: 'chat_id', receive_id: 'todo' }] }))
+  await assert.rejects(readFeishuConfig(root), /invalid chat_id target/i)
+
+  await writeFile(file, JSON.stringify({ ...enabledConfig(), approvers: [{
+    project_id: 'PROJ-TEST', open_id: 'todo', local_actor: 'todo', request_types: ['proposal'],
+  }] }))
+  await assert.rejects(readFeishuConfig(root), /open_id|local actor/i)
 })
 
 test('config and connector paths reject symbolic links', async () => {
@@ -153,21 +161,35 @@ test('official transport sends with the configured receive id type', async () =>
 })
 
 test('official preflight requires bot activation and message permission', async () => {
+  let permissionGranted = true
   const channel = {
     rawClient: {
       application: { v6: { scope: { list: async () => ({
         code: 0, data: { scopes: [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] },
       }) } } },
       im: { v1: { message: { create: async () => ({ data: { message_id: 'om_preflight' } }) } } },
-      request: async () => ({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } }),
+      request: async ({ url }) => url.includes('/scopes')
+        ? { code: 0, data: { scopes: permissionGranted ? [{ scope_name: 'im:message:send_as_bot', grant_status: 1, scope_type: 'tenant' }] : [] } }
+        : { code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } },
     },
     connect: async () => {}, disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
     on: () => () => {}, send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
   }
   const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
   await transport.preflight(enabledConfig())
-  channel.rawClient.application.v6.scope.list = async () => ({ code: 0, data: { scopes: [] } })
+  permissionGranted = false
   await assert.rejects(transport.preflight(enabledConfig()), /required permission/)
+})
+
+test('official preflight cancellation does not wait for a slow channel factory', async () => {
+  const controller = new AbortController()
+  const transport = new OfficialFeishuTransport(
+    { appId: 'cli_test', appSecret: 'not-used' },
+    async () => new Promise(() => {}),
+  )
+  const preflight = transport.preflight(enabledConfig(), controller.signal)
+  controller.abort()
+  await assert.rejects(preflight, /cancelled/)
 })
 
 test('official connect failure removes the old callback before retry', async () => {
@@ -193,6 +215,51 @@ test('official connect failure removes the old callback before retry', async () 
   assert.equal(handlers.length, 0)
 })
 
+test('channel factory errors are redacted for preflight and message methods', async () => {
+  const secret = 'factory-secret-canary'
+  const methods = ['preflight', 'sendCard', 'updateCard']
+  for (const method of methods) {
+    const transport = new OfficialFeishuTransport(
+      { appId: 'factory-app-canary', appSecret: secret },
+      async () => { throw new Error(`factory failed with ${secret}`) },
+    )
+    let error
+    try {
+      if (method === 'preflight') await transport.preflight(enabledConfig())
+      else if (method === 'sendCard') await transport.sendCard(enabledConfig().targets[0], {})
+      else await transport.updateCard('om_test', {})
+    } catch (caught) { error = caught }
+    assert.ok(error)
+    assert.equal(error.message.includes(secret), false)
+  }
+})
+
+test('disconnect during a slow factory prevents callbacks and concurrent retry', async () => {
+  let releaseFactory
+  let handler
+  let handled = 0
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({ code: 0, data: { scopes: [] } }) } } },
+      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_cancel' } }) } } },
+      request: async () => ({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } }),
+    },
+    on: (_name, callback) => { handler = callback; return () => { handler = undefined } },
+    connect: async () => { if (handler) await handler({ messageId: 'm', chatId: 'c', operator: { openId: 'o' }, action: { value: {}, tag: 'button' } }) },
+    disconnect: async () => {}, getConnectionStatus: () => ({ state: 'idle' }),
+    send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const factoryBarrier = new Promise((resolve) => { releaseFactory = () => resolve(channel) })
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => factoryBarrier)
+  const connecting = transport.connect(async () => { handled += 1 })
+  await transport.disconnect()
+  await assert.rejects(transport.connect(async () => {}), /cannot connect/)
+  releaseFactory()
+  await assert.rejects(connecting, /cancelled/)
+  assert.equal(handled, 0)
+  assert.equal(transport.connectionState(), 'idle')
+})
+
 test('connector lease prevents a second local consumer', async () => {
   const root = await projectRoot()
   const first = await acquireFeishuLease(root, 'first-holder')
@@ -202,6 +269,23 @@ test('connector lease prevents a second local consumer', async () => {
   const second = await acquireFeishuLease(root, 'second-holder')
   assert.equal(second.holder, 'second-holder')
   await releaseFeishuLease(root, second.token)
+})
+
+test('lease competition failure still disconnects the preflight transport', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  const first = await acquireFeishuLease(root, 'existing-holder')
+  let disconnects = 0
+  class TrackedTransport extends FakeFeishuTransport {
+    async disconnect() { disconnects += 1; await super.disconnect() }
+  }
+  await assert.rejects(
+    runFeishuConnector(root, { holder: 'competing-runner', transport: new TrackedTransport() }),
+    /held by existing-holder/,
+  )
+  assert.equal(disconnects, 1)
+  await releaseFeishuLease(root, first.token)
 })
 
 test('running connector renews its lease until stopped', async () => {
@@ -308,6 +392,33 @@ test('pre-aborted external signals stop before connecting and release the lease'
   controller.abort()
   await runFeishuConnector(root, { holder: 'aborted-holder', transport: fake, signal: controller.signal })
   assert.equal(fake.connectionState(), 'idle')
+  assert.equal(await readFeishuLease(root), null)
+})
+
+test('abort cancels preflight and always disconnects transport before lease acquisition', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  let preflightAborted = false
+  let disconnects = 0
+  class AbortablePreflightTransport extends FakeFeishuTransport {
+    async preflight(_config, signal) {
+      await new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+        preflightAborted = true
+        reject(new Error('preflight aborted'))
+      }, { once: true }))
+    }
+    async disconnect() { disconnects += 1; await super.disconnect() }
+  }
+  const controller = new AbortController()
+  const running = runFeishuConnector(root, {
+    holder: 'preflight-abort-holder', transport: new AbortablePreflightTransport(), signal: controller.signal,
+  })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  controller.abort()
+  await running
+  assert.equal(preflightAborted, true)
+  assert.equal(disconnects, 1)
   assert.equal(await readFeishuLease(root), null)
 })
 
