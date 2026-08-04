@@ -1,10 +1,10 @@
 # TASK-024：飞书长连接回调与身份授权
 
-- 状态：已批准
+- 状态：进行中
 - 优先级：P0
-- 负责人：待定
+- 负责人：Codex
 - 创建日期：2026-08-04
-- 最后更新：2026-08-04
+- 最后更新：2026-08-05
 - 所属设计：[DES-008](../03-design/DES-008-feishu-bot-connector.md)
 - 所属特性：[FEAT-008](../02-feature/FEAT-008-feishu-progress-approval-connector.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
