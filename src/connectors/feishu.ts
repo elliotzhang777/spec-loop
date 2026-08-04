@@ -4,7 +4,8 @@ import { lstat, mkdir, open, readFile, realpath, rename, rm, rmdir } from 'node:
 import path from 'node:path';
 import { inspect, promisify } from 'node:util';
 import { z } from 'zod';
-import { atomicWriteMany, exists } from '../files.js';
+import { atomicWriteMany, exists, sha256 } from '../files.js';
+import type { ConfirmationControllerAdapter, FeishuActionInboxRecord } from './feishu-callback.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -224,11 +225,24 @@ export async function readFeishuConfig(projectRoot: string): Promise<FeishuConne
 }
 
 export interface FeishuCardAction {
+  eventId: string;
+  tenantKey: string;
   messageId: string;
   chatId: string;
   operatorOpenId: string;
   action: { value: unknown; tag: string; name?: string; option?: string };
   raw?: unknown;
+}
+
+function cardActionIdentity(raw: unknown): { eventId: string; tenantKey: string } {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const header = value.header && typeof value.header === 'object' ? value.header as Record<string, unknown> : {};
+  const event = value.event && typeof value.event === 'object' ? value.event as Record<string, unknown> : {};
+  const eventId = [header.event_id, value.event_id, event.event_id].find((item): item is string => typeof item === 'string' && item.length >= 8);
+  const tenantKey = [header.tenant_key, value.tenant_key, event.tenant_key].find((item): item is string => typeof item === 'string' && item.length >= 3);
+  let fingerprint = 'unavailable';
+  try { fingerprint = sha256(JSON.stringify(value)).slice(0, 24); } catch { /* 原始回调不受信任，且不会被持久化。 */ }
+  return { eventId: eventId ?? `raw_${fingerprint}`, tenantKey: tenantKey ?? 'missing-tenant' };
 }
 
 export type FeishuCardActionHandler = (action: FeishuCardAction) => Promise<void> | void;
@@ -510,12 +524,15 @@ export class OfficialFeishuTransport implements FeishuTransport {
       if (generation !== this.connectionGeneration) throw new Error('feishu connection was cancelled');
       unsubscribe = channel.on('cardAction', async (event) => {
         if (!acceptingEvents || generation !== this.connectionGeneration) return;
+        const identity = cardActionIdentity(event.raw);
         return handler({
-        messageId: event.messageId,
-        chatId: event.chatId,
-        operatorOpenId: event.operator.openId,
-        action: event.action,
-        raw: event.raw,
+          eventId: identity.eventId,
+          tenantKey: identity.tenantKey,
+          messageId: event.messageId,
+          chatId: event.chatId,
+          operatorOpenId: event.operator.openId,
+          action: event.action,
+          raw: event.raw,
         });
       });
       this.unsubscribe = unsubscribe;
@@ -761,6 +778,8 @@ export interface RunFeishuConnectorOptions {
   leaseTtlMs?: number;
   outboxPollMs?: number;
   progressAggregateWindowMs?: number;
+  confirmationController?: ConfirmationControllerAdapter;
+  onConfirmationResult?: (record: FeishuActionInboxRecord) => Promise<void> | void;
 }
 
 export async function runFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
@@ -826,12 +845,19 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     scheduleHeartbeat();
     const progress = await import('./feishu-progress.js');
     await progress.reconcileFeishuOutbox(projectRoot);
-    const connectPromise = transport.connect(async () => {
+    const actionHandler = options.confirmationController
+      ? (await import('./feishu-callback.js')).createFeishuCardActionHandler(projectRoot, {
+        projectId: (await (await import('../project.js')).readProject(projectRoot)).project_id,
+        controller: options.confirmationController,
+        onResult: options.onConfirmationResult,
+      })
+      : null;
+    const connectPromise = transport.connect(async (action) => {
       if (signal.aborted || !acceptingActions || !lease) return;
       try {
         await withFeishuLeaseFence(projectRoot, lease.token, async () => {
           if (signal.aborted || !acceptingActions) return;
-          /* Confirmation handling is added by TASK-024. */
+          if (actionHandler) await actionHandler(action);
         });
       } catch {
         controller.abort();

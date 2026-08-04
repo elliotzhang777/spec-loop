@@ -11,6 +11,7 @@ import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFrom
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
 import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig, runFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
+import { acceptLocalConfirmationAction, listFeishuActionInbox } from './connectors/feishu-callback.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -158,6 +159,23 @@ feishu.command('start').argument('<project-dir>').option('--holder <identity>').
   await runFeishuConnector(root(dir),{holder:o.holder});
 }));
 feishu.command('stop').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await stopFeishuConnector(root(dir)),o.json)));
+feishu.command('confirm-local').argument('<project-dir>').requiredOption('--request <request-id>')
+  .addOption(new Option('--action <action-id>').choices([
+    'approve_proposal','reject_proposal','choose_option','pause_task','approve_visual','reject_visual',
+    'authorize_verification','defer_verification','accept_heavy','reject_heavy',
+  ]).makeOptionMandatory())
+  .requiredOption('--actor <identity>').option('--option <option-id>').option('--event <event-id>').option('--json')
+  .action((dir,o)=>action(async()=>{
+    const projectRoot=root(dir),project=await readProject(projectRoot);
+    const result=await acceptLocalConfirmationAction(projectRoot,{
+      eventId:o.event,projectId:project.project_id,actor:o.actor,requestId:o.request,action:o.action,optionId:o.option,
+    });
+    print(o.json?result:`accepted local confirmation ${result.record.inbox_id} (${result.record.status})`,o.json);
+  }));
+feishu.command('inbox').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
+  const records=await listFeishuActionInbox(root(dir));
+  print(o.json?records:records.map((item)=>`${item.inbox_id}\t${item.status}\t${item.envelope.action_id}\t${item.envelope.request_id}`).join('\n'),o.json);
+}));
 
 const workspace=program.command('workspace').description('Task worktree management');
 workspace.command('create').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await createWorkspace(root(dir),id),o.json)));

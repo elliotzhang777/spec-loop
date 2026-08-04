@@ -54,7 +54,7 @@ export const confirmationRequestSchema = z.object({
   risk: z.enum(['light', 'standard', 'heavy']),
   facts: confirmationFactsSchema,
   allowed_actions: z.array(actionSchema).min(2),
-  allowed_actor_ids: z.array(z.string().regex(/^ou_[A-Za-z0-9_-]{8,128}$/)).min(1),
+  allowed_actor_ids: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$/)).min(1),
   created_at: z.iso.datetime(),
   expires_at: z.iso.datetime(),
   status: requestStatusSchema,
@@ -462,7 +462,14 @@ export async function invalidateIfConfirmationFactsChanged(projectRoot: string, 
   }, now);
 }
 
-export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+export async function executeConfirmationRequest(
+  projectRoot: string,
+  requestId: string,
+  action: ConfirmationAction,
+  actorId: string,
+  executor: (request: ConfirmationRequest) => Promise<void>,
+  now = new Date(),
+): Promise<ConfirmationRequest> {
   return mutateRequest(projectRoot, requestId, async (current, _now, _root, authority) => {
     if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
     if (Date.parse(current.expires_at) <= now.getTime()) {
@@ -481,6 +488,7 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
         request: confirmationRequestSchema.parse({ ...current, status: 'invalidated', invalidation_reason: '当前权威 revision、Acceptance、截图或 Gate Plan 与请求不一致' }),
       };
     }
+    await executor(current);
     const rejected = action.startsWith('reject_') || action === 'defer_verification' || action === 'pause_task';
     return {
       event: rejected ? 'rejected' : 'consumed',
@@ -493,6 +501,10 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
       }),
     };
   }, now);
+}
+
+export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+  return executeConfirmationRequest(projectRoot, requestId, action, actorId, async () => undefined, now);
 }
 
 export async function expireConfirmationRequests(projectRoot: string, now = new Date()): Promise<number> {
