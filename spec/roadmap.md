@@ -86,6 +86,8 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
+> 当前授权：仅 FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；本授权不自动启动 FEAT-004～006 的完整 Controller、Scheduler、并发或平台 Toolchain。
+
 ### 目标
 
 在 Project Loop 稳定后，引入只报告 Scheduling、用户批准门禁、自动单任务 Controller、受控并发、Maker/Checker、安全控制和最小权限 Connector。

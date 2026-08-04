@@ -1,6 +1,6 @@
 # FEAT-008：飞书进度通知与确认连接器
 
-- 状态：草稿
+- 状态：已批准
 - 负责人：待定
 - 创建日期：2026-08-04
 - 最后更新：2026-08-04
@@ -55,8 +55,8 @@ Spec-Loop 把本地 Project、Task、Harness、Gate、Review 和 Delivery 事实
 
 | 类型 | 文档 | 状态 |
 |---|---|---|
-| Design | [DES-008 飞书正式机器人连接器](../03-design/DES-008-feishu-bot-connector.md) | 草稿 |
-| Task | [TASK-021](../04-task/TASK-021-feishu-connector-foundation.md)～[TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 草稿 |
+| Design | [DES-008 飞书正式机器人连接器](../03-design/DES-008-feishu-bot-connector.md) | 已批准 |
+| Task | [TASK-021](../04-task/TASK-021-feishu-connector-foundation.md)～[TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 已批准 |
 
 ## 实际交付
 

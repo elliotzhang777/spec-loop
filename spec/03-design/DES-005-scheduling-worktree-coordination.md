@@ -62,7 +62,7 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 
 ## 工单拆分
 
-Phase 4 尚未获得实施授权。飞书 Connector 已形成 TASK-021～026 草稿，但不得因此自动开工；Scheduling、Controller 和 Toolchain 的其他工单仍待统一拆分。
+Phase 4 的飞书 Connector 已形成 TASK-021～026 并获专项实施授权；Scheduling、完整 Controller、并发和 Toolchain 的其他工单仍待统一拆分与授权。
 
 ## 实际实现
 

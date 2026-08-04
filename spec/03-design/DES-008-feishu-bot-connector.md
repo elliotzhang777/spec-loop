@@ -1,6 +1,6 @@
 # DES-008：飞书正式机器人连接器
 
-- 状态：草稿
+- 状态：已批准
 - 负责人：待定
 - 创建日期：2026-08-04
 - 最后更新：2026-08-04
@@ -182,12 +182,12 @@ Outbox 状态为 `pending → sending → sent | retry_wait | dead_letter`，记
 
 | 工单 | 交付物 | 依赖 | 状态 |
 |---|---|---|---|
-| [TASK-021](../04-task/TASK-021-feishu-connector-foundation.md) | Connector 配置、Secret Provider 和官方 SDK 适配基础 | Phase 4 Controller 接口草案 | 草稿 |
-| [TASK-022](../04-task/TASK-022-feishu-progress-outbox.md) | 进度投影、卡片渲染和可靠 Outbox | TASK-021 | 草稿 |
-| [TASK-023](../04-task/TASK-023-feishu-confirmation-contract.md) | 确认请求、卡片动作和候选绑定契约 | TASK-021 | 草稿 |
-| [TASK-024](../04-task/TASK-024-feishu-callback-identity.md) | 长连接回调、身份授权、幂等消费和 Controller 接入 | TASK-023 | 草稿 |
-| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 草稿 |
-| [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 真实机器人 Dogfood、独立 Verifier 和最终 Heavy | TASK-021～025 | 草稿 |
+| [TASK-021](../04-task/TASK-021-feishu-connector-foundation.md) | Connector 配置、Secret Provider 和官方 SDK 适配基础 | Phase 4 Controller 接口草案 | 已批准 |
+| [TASK-022](../04-task/TASK-022-feishu-progress-outbox.md) | 进度投影、卡片渲染和可靠 Outbox | TASK-021 | 已批准 |
+| [TASK-023](../04-task/TASK-023-feishu-confirmation-contract.md) | 确认请求、卡片动作和候选绑定契约 | TASK-021 | 已批准 |
+| [TASK-024](../04-task/TASK-024-feishu-callback-identity.md) | 长连接回调、身份授权、幂等消费和 Controller 接入 | TASK-023 | 已批准 |
+| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 已批准 |
+| [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 真实机器人 Dogfood、独立 Verifier 和最终 Heavy | TASK-021～025 | 已批准 |
 
 ## 实际实现
 
