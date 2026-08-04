@@ -9,6 +9,7 @@ import {
   LocalSecretProvider,
   OfficialFeishuTransport,
   acquireFeishuLease,
+  createRedactingFeishuLogger,
   defaultFeishuConfig,
   feishuConnectorStatus,
   initFeishuConfig,
@@ -62,6 +63,9 @@ test('enabled config requires targets, approvers and valid retry bounds', async 
 
   await writeFile(file, JSON.stringify({ ...enabledConfig(), retry: { max_attempts: 2, base_delay_ms: 5000, max_delay_ms: 1000 } }))
   await assert.rejects(readFeishuConfig(root), /max delay/i)
+
+  await writeFile(file, JSON.stringify({ ...enabledConfig(), tenant_key: 'configure-tenant-key' }))
+  await assert.rejects(readFeishuConfig(root), /configured tenant key/i)
 })
 
 test('config and connector paths reject symbolic links', async () => {
@@ -81,6 +85,19 @@ test('secret provider resolves references without exposing values', async () => 
   })
   assert.deepEqual(await resolveFeishuCredentials(config, provider), { appId: 'cli_test_app', appSecret: secret })
   assert.equal(redactFeishuText(`app_secret=${secret} Authorization: Bearer abcdefghijklmnop`, [secret]), 'app_secret=[REDACTED] Authorization=[REDACTED]')
+  const jsonLog = '{"app_secret":"json-secret","tenant_access_token":"json-token"}'
+  assert.equal(redactFeishuText(jsonLog), '{"app_secret":"[REDACTED]","tenant_access_token":"[REDACTED]"}')
+
+  const sdkLogs = []
+  const sdkLogger = createRedactingFeishuLogger(
+    { appId: 'cli_sensitive_app', appSecret: secret },
+    { error: (line) => sdkLogs.push(line), warn: (line) => sdkLogs.push(line), info: (line) => sdkLogs.push(line), debug: (line) => sdkLogs.push(line) },
+  )
+  sdkLogger.error({ app_secret: secret, tenant_access_token: 'json-token', authorization: 'Bearer abcdefghijklmnop' })
+  assert.equal(sdkLogs.length, 1)
+  assert.equal(sdkLogs[0].includes(secret), false)
+  assert.equal(sdkLogs[0].includes('json-token'), false)
+  assert.equal(sdkLogs[0].includes('abcdefghijklmnop'), false)
 
   await assert.rejects(resolveFeishuCredentials(config, new LocalSecretProvider({})), /reference is unavailable/)
 })
@@ -205,6 +222,13 @@ test('an expired owner cannot renew over a replacement lease', async () => {
   await releaseFeishuLease(root, replacement.token)
 })
 
+test('an expired lease cannot be revived by its original token', async () => {
+  const root = await projectRoot()
+  const lease = await acquireFeishuLease(root, 'expired-original-holder', 1000)
+  await new Promise((resolve) => setTimeout(resolve, 1050))
+  await assert.rejects(renewFeishuLease(root, lease.token, 1000), /lease was lost/)
+})
+
 test('pre-aborted external signals stop before connecting and release the lease', async () => {
   const root = await projectRoot()
   const file = await initFeishuConfig(root)
@@ -215,6 +239,32 @@ test('pre-aborted external signals stop before connecting and release the lease'
   await runFeishuConnector(root, { holder: 'aborted-holder', transport: fake, signal: controller.signal })
   assert.equal(fake.connectionState(), 'idle')
   assert.equal(await readFeishuLease(root), null)
+})
+
+test('aborting closes the action gate before transport disconnect completes', async () => {
+  const root = await projectRoot()
+  const file = await initFeishuConfig(root)
+  await writeFile(file, `${JSON.stringify(enabledConfig(), null, 2)}\n`)
+  let releaseDisconnect
+  const disconnectBarrier = new Promise((resolve) => { releaseDisconnect = resolve })
+  class SlowDisconnectTransport extends FakeFeishuTransport {
+    async disconnect() {
+      await disconnectBarrier
+      await super.disconnect()
+    }
+  }
+  const transport = new SlowDisconnectTransport()
+  const controller = new AbortController()
+  const running = runFeishuConnector(root, { holder: 'abort-gate-holder', transport, signal: controller.signal })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  controller.abort()
+  await writeFile(path.join(root, '.spec-loop', 'connectors', 'feishu', 'lease.json'), 'invalid-json')
+  await transport.emitCardAction({
+    messageId: 'om_after_abort', chatId: 'oc_test_chat', operatorOpenId: 'ou_test_user',
+    action: { value: {}, tag: 'button', name: 'approve' },
+  })
+  releaseDisconnect()
+  await running
 })
 
 test('credential resolution failure happens before lease acquisition', async () => {

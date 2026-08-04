@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { lstat, mkdir, open, readFile, realpath, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { inspect, promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, exists } from '../files.js';
 
@@ -25,7 +25,7 @@ export type SecretReference = z.infer<typeof secretReferenceSchema>;
 export const feishuConnectorConfigSchema = z.object({
   schema_version: z.literal(1),
   enabled: z.boolean(),
-  tenant_key: z.string().min(3).max(256),
+  tenant_key: z.string().trim().min(3).max(256),
   credentials: z.object({
     app_id: secretReferenceSchema,
     app_secret: secretReferenceSchema,
@@ -53,6 +53,7 @@ export const feishuConnectorConfigSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   if (value.enabled && value.targets.length === 0) ctx.addIssue({ code: 'custom', path: ['targets'], message: 'enabled connector requires at least one target' });
   if (value.enabled && value.approvers.length === 0) ctx.addIssue({ code: 'custom', path: ['approvers'], message: 'enabled connector requires at least one approver' });
+  if (value.enabled && value.tenant_key === 'configure-tenant-key') ctx.addIssue({ code: 'custom', path: ['tenant_key'], message: 'enabled connector requires a configured tenant key' });
   if (value.retry.max_delay_ms < value.retry.base_delay_ms) ctx.addIssue({ code: 'custom', path: ['retry', 'max_delay_ms'], message: 'max delay must be greater than or equal to base delay' });
   const targetKeys = value.targets.map((item) => `${item.project_id}\0${item.receive_id_type}\0${item.receive_id}`);
   if (new Set(targetKeys).size !== targetKeys.length) ctx.addIssue({ code: 'custom', path: ['targets'], message: 'duplicate target' });
@@ -103,14 +104,45 @@ export async function resolveFeishuCredentials(config: FeishuConnectorConfig, pr
   return { appId, appSecret };
 }
 
-const authorizationHeader = /\bauthorization\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/gi;
+const authorizationHeader = /\bauthorization\b["']?\s*[:=]\s*["']?(?:Bearer\s+)?[^\s,;}\]]+/gi;
+const sensitiveJsonAssignment = /(["'])(app[_-]?secret|access[_-]?token|tenant[_-]?access[_-]?token)\1\s*:\s*(["'])[^\r\n]*?\3/gi;
 const sensitiveAssignment = /\b(app[_-]?secret|access[_-]?token|tenant[_-]?access[_-]?token)\b\s*[:=]\s*([^\s,;]+)/gi;
 const bearerToken = /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}/gi;
 
 export function redactFeishuText(value: string, secrets: string[] = []): string {
-  let redacted = value.replace(authorizationHeader, 'Authorization=[REDACTED]').replace(sensitiveAssignment, '$1=[REDACTED]').replace(bearerToken, 'Bearer [REDACTED]');
+  let redacted = value
+    .replace(sensitiveJsonAssignment, '$1$2$1:$3[REDACTED]$3')
+    .replace(authorizationHeader, 'Authorization=[REDACTED]')
+    .replace(sensitiveAssignment, '$1=[REDACTED]')
+    .replace(bearerToken, 'Bearer [REDACTED]');
   for (const secret of secrets.filter((item) => item.length >= 4).sort((a, b) => b.length - a.length)) redacted = redacted.split(secret).join('[REDACTED]');
   return redacted;
+}
+
+export interface FeishuLogSink {
+  error(message: string): void;
+  warn(message: string): void;
+  info(message: string): void;
+  debug(message: string): void;
+}
+
+export function createRedactingFeishuLogger(credentials: FeishuCredentials, sink: FeishuLogSink = {
+  error: (message) => console.error(message),
+  warn: (message) => console.warn(message),
+  info: (message) => console.info(message),
+  debug: (message) => console.debug(message),
+}): { error: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void; debug: (...args: unknown[]) => void; trace: (...args: unknown[]) => void } {
+  const emit = (level: keyof FeishuLogSink, args: unknown[]): void => {
+    const rendered = args.map((item) => typeof item === 'string' ? item : inspect(item, { depth: 5, breakLength: Infinity })).join(' ');
+    sink[level](`[feishu-sdk] ${redactFeishuText(rendered, [credentials.appId, credentials.appSecret])}`);
+  };
+  return {
+    error: (...args) => emit('error', args),
+    warn: (...args) => emit('warn', args),
+    info: (...args) => emit('info', args),
+    debug: (...args) => emit('debug', args),
+    trace: (...args) => emit('debug', args),
+  };
 }
 
 async function connectorControlRoot(projectRoot: string): Promise<string> {
@@ -229,6 +261,7 @@ export class OfficialFeishuTransport implements FeishuTransport {
         transport: 'websocket',
         includeRawEvent: true,
         source: 'spec-loop',
+        logger: createRedactingFeishuLogger(this.credentials),
         loggerLevel: sdk.LoggerLevel.error,
         outbound: { retry: { maxAttempts: 1, baseDelayMs: 100 } },
       }) as ChannelLike;
@@ -431,7 +464,7 @@ export async function renewFeishuLease(projectRoot: string, token: string, ttlMs
   const root = await feishuConnectorRoot(projectRoot);
   return withLeaseMutationLock(root, async () => {
     const current = await readFeishuLease(projectRoot);
-    if (!current || current.token !== token) throw new Error('feishu connector lease was lost');
+    if (!current || current.token !== token || Date.parse(current.expires_at) <= Date.now()) throw new Error('feishu connector lease was lost');
     const renewed: ConnectorLease = { ...current, expires_at: new Date(Date.now() + ttlMs).toISOString() };
     const heartbeat = { schema_version: 1, token, expires_at: renewed.expires_at };
     await atomicWriteMany(root, [{ file: leaseHeartbeatFile(root, token), content: `${JSON.stringify(heartbeat, null, 2)}\n` }]);
@@ -456,6 +489,9 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   const lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
   const controller = new AbortController();
   const signal = controller.signal;
+  let acceptingActions = false;
+  const closeActionGate = (): void => { acceptingActions = false; };
+  signal.addEventListener('abort', closeActionGate, { once: true });
   const stop = (): void => controller.abort();
   const forwardAbort = (): void => controller.abort();
   if (options.signal?.aborted) controller.abort();
@@ -483,11 +519,10 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   try {
     if (!signal.aborted) {
       scheduleHeartbeat();
-      let acceptingActions = false;
       await transport.connect(async () => {
-        if (!acceptingActions) return;
+        if (signal.aborted || !acceptingActions) return;
         const current = await readFeishuLease(projectRoot);
-        if (!current || current.token !== lease.token || Date.parse(current.expires_at) <= Date.now()) {
+        if (signal.aborted || !current || current.token !== lease.token || Date.parse(current.expires_at) <= Date.now()) {
           controller.abort();
           return;
         }
@@ -504,6 +539,7 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     await heartbeatWork;
+    signal.removeEventListener('abort', closeActionGate);
     options.signal?.removeEventListener('abort', forwardAbort);
     if (!options.signal) {
       process.off('SIGINT', stop);
