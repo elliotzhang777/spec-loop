@@ -163,6 +163,8 @@ test('consumption reads an independently persisted current authority projection'
   authority.authorities[0].updated_at = '2026-08-04T10:01:00.000Z'
   authority.projection_hash = createHash('sha256').update(JSON.stringify(authority.authorities)).digest('hex')
   await writeFile(authorityFile, JSON.stringify(authority, null, 2))
+  await rm(path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations', 'projection.json'))
+  assert.equal((await listConfirmationRequests(root)).length, 1)
   const result = await consumeConfirmationRequest(root, request.request_id, 'authorize_verification', actor, new Date('2026-08-04T10:02:00.000Z'))
   assert.equal(result.status, 'invalidated')
   assert.match(result.invalidation_reason, /当前权威 revision/)
@@ -213,6 +215,12 @@ test('missing history can never be replaced by empty rebuilt projections', async
   const store = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations')
   await rm(path.join(store, 'history.jsonl'))
   await assert.rejects(rebuildConfirmationProjection(root), /history is missing/i)
+
+  const fullyMissingRoot = await projectRoot()
+  await create(fullyMissingRoot)
+  const fullyMissingStore = path.join(fullyMissingRoot, '.spec-loop', 'connectors', 'feishu', 'confirmations')
+  await Promise.all(['history.jsonl', 'projection.json', 'current-authority.json'].map((name) => rm(path.join(fullyMissingStore, name))))
+  await assert.rejects(rebuildConfirmationProjection(fullyMissingRoot), /history is missing/i)
 })
 
 test('sensitive summaries and non-predefined options fail before persistence', async () => {
@@ -220,6 +228,9 @@ test('sensitive summaries and non-predefined options fail before persistence', a
   await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'Authorization: Bearer abcdefghijklmnop' }) }), /sensitive/i)
   await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'password=hunter2' }) }), /sensitive/i)
   await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'api_key=abcdefghijklmnopqrstuvxyz0123456789' }) }), /sensitive/i)
+  await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'AKIAIOSFODNN7EXAMPLE' }) }), /sensitive/i)
+  await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'AIzaSyD8xYQf8JkY0xM6wQ2pN4rS7tU9vW1zA' }) }), /sensitive/i)
+  await assert.rejects(create(root, 'proposal', { facts: facts({ scope_summary: 'glpat-abcdefghijklmnopqrst' }) }), /sensitive/i)
   await assert.rejects(create(root, 'needs_user', { facts: facts({ options: [] }) }), /predefined options/i)
   assert.equal((await listConfirmationRequests(root)).length, 0)
 })

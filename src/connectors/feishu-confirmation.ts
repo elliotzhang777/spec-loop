@@ -25,7 +25,7 @@ const actionsByType: Record<z.infer<typeof requestTypeSchema>, Array<z.infer<typ
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const publicTextSchema = z.string().trim().min(1).max(500).refine(
-  (value) => !/(?:authorization|bearer\s+|secret|token|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credential|cookie|session[_-]?id|webhook|完整日志|source\s*diff|evidence\/|-----BEGIN|[A-Za-z0-9_+=/-]{40,})/i.test(value),
+  (value) => !/(?:authorization|bearer\s+|secret|token|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credential|cookie|session[_-]?id|webhook|完整日志|source\s*diff|evidence\/|-----BEGIN|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|glpat-[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[0-9A-Za-z-]{10,}|sk_(?:live|test)_[0-9A-Za-z]{16,}|[A-Za-z0-9_+=/-]{40,})/i.test(value),
   'confirmation summary contains forbidden sensitive content',
 );
 
@@ -190,7 +190,7 @@ async function readHistory(root: string): Promise<HistoryEvent[]> {
   const file = path.join(root, 'history.jsonl');
   const info = await lstat(file).catch(() => null);
   if (!info) {
-    const remnants = await Promise.all(['projection.json', 'current-authority.json'].map((name) => lstat(path.join(root, name)).catch(() => null)));
+    const remnants = await Promise.all(['projection.json', 'current-authority.json', 'store.json'].map((name) => lstat(path.join(root, name)).catch(() => null)));
     if (remnants.some(Boolean)) throw new Error('confirmation history is missing while projections still exist');
     return [];
   }
@@ -255,18 +255,15 @@ function makeProjection(events: HistoryEvent[]): z.infer<typeof projectionSchema
   });
 }
 
-function makeAuthorityProjection(events: HistoryEvent[]): z.infer<typeof authorityProjectionSchema> {
-  const authorities = deriveRequests(events).filter((request) => request.status === 'pending').map((request) => ({
-    request_id: request.request_id, revision: request.revision, round: request.round, risk: request.risk,
-    content_hash: request.content_hash, facts: request.facts, generation: 1, updated_at: request.created_at,
-  }));
-  return authorityProjectionSchema.parse({ schema_version: 1, projection_hash: sha256(JSON.stringify(authorities)), authorities });
+function emptyAuthorityProjection(): z.infer<typeof authorityProjectionSchema> {
+  return authorityProjectionSchema.parse({ schema_version: 1, projection_hash: sha256(JSON.stringify([])), authorities: [] });
 }
 
 async function writeStore(projectRoot: string, root: string, events: HistoryEvent[], authority: z.infer<typeof authorityProjectionSchema>): Promise<void> {
   const projection = makeProjection(events);
   const checkedAuthority = authorityProjectionSchema.parse({ ...authority, projection_hash: sha256(JSON.stringify(authority.authorities)) });
   await atomicWriteMany(projectRoot, [
+    { file: path.join(root, 'store.json'), content: `${JSON.stringify({ schema_version: 1, initialized: true }, null, 2)}\n` },
     { file: path.join(root, 'history.jsonl'), content: events.map((event) => JSON.stringify(event)).join('\n') + (events.length ? '\n' : '') },
     { file: path.join(root, 'projection.json'), content: `${JSON.stringify(projection, null, 2)}\n` },
     { file: path.join(root, 'current-authority.json'), content: `${JSON.stringify(checkedAuthority, null, 2)}\n` },
@@ -278,7 +275,14 @@ async function verifyProjection(root: string, events: HistoryEvent[]): Promise<b
   const info = await lstat(file).catch(() => null);
   const authorityFile = path.join(root, 'current-authority.json');
   const authorityInfo = await lstat(authorityFile).catch(() => null);
-  if (!info || !authorityInfo) return false;
+  if (!authorityInfo) {
+    if (!info && events.length === 0) return false;
+    throw new Error('confirmation current authority projection is missing; it cannot be rebuilt from request history');
+  }
+  if (!info) {
+    if (events.length === 0) throw new Error('confirmation projection is missing while current authority still exists');
+    return false;
+  }
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('confirmation projection is symbolic or not a regular file');
   if (!authorityInfo.isFile() || authorityInfo.isSymbolicLink()) throw new Error('confirmation authority projection is symbolic or not a regular file');
   const actual = projectionSchema.parse(JSON.parse(await readFile(file, 'utf8')));
@@ -349,7 +353,7 @@ export async function createConfirmationRequest(projectRoot: string, input: {
   return withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events).catch((error) => { throw error; });
-    const authority = await readAuthorityProjection(root) ?? makeAuthorityProjection(events);
+    const authority = await readAuthorityProjection(root) ?? emptyAuthorityProjection();
     const createdAt = input.now ?? new Date();
     const facts = confirmationFactsSchema.parse(input.facts);
     const request = confirmationRequestSchema.parse({
@@ -383,7 +387,12 @@ export async function listConfirmationRequests(projectRoot: string): Promise<Con
   const root = await confirmationRoot(projectRoot);
   return withConfirmationLock(root, async () => {
     const events = await readHistory(root);
-    if (!(await verifyProjection(root, events))) await writeStore(projectRoot, root, events, makeAuthorityProjection(events));
+    if (!(await verifyProjection(root, events))) {
+      const authority = await readAuthorityProjection(root);
+      if (!authority && events.length === 0) return [];
+      if (!authority) throw new Error('confirmation current authority projection is missing; it cannot be rebuilt from request history');
+      await writeStore(projectRoot, root, events, authority);
+    }
     return deriveRequests(events);
   });
 }
@@ -392,7 +401,14 @@ export async function rebuildConfirmationProjection(projectRoot: string): Promis
   const root = await confirmationRoot(projectRoot);
   return withConfirmationLock(root, async () => {
     const events = await readHistory(root);
-    await writeStore(projectRoot, root, events, makeAuthorityProjection(events));
+    if (events.length === 0) throw new Error('confirmation projection cannot be rebuilt from empty or missing history');
+    const authority = await readAuthorityProjection(root);
+    if (!authority) throw new Error('confirmation current authority projection is missing; it cannot be rebuilt from request history');
+    const pending = new Set(deriveRequests(events).filter((request) => request.status === 'pending').map((request) => request.request_id));
+    if (new Set(authority.authorities.map((item) => item.request_id)).size !== authority.authorities.length
+      || authority.authorities.some((item) => !pending.has(item.request_id))
+      || authority.authorities.length !== pending.size) throw new Error('confirmation current authority does not match pending request identities');
+    await writeStore(projectRoot, root, events, authority);
     return deriveRequests(events).length;
   });
 }
