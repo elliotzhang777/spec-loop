@@ -547,6 +547,25 @@ test('startup reconcile reclaims a stale processing action and completes it idem
   assert.equal(controller.calls.length, 1)
 })
 
+test('startup reconcile never steals a stale claim from a live process', async () => {
+  const root = await projectRoot()
+  const current = await request(root)
+  await acceptFeishuAction(root, callbackInput(current))
+  const file = path.join(root, '.spec-loop', 'connectors', 'feishu', 'actions', 'inbox.json')
+  const inbox = JSON.parse(await readFile(file, 'utf8'))
+  inbox.records[0].status = 'processing'
+  inbox.records[0].attempts = 1
+  inbox.records[0].claim_token = 'a0c1f841-55d7-4f2c-a2aa-b2de52fed002'
+  inbox.records[0].claim_pid = process.pid
+  inbox.records[0].claimed_at = '2026-08-05T00:00:00.000Z'
+  inbox.records[0].updated_at = '2026-08-05T00:00:00.000Z'
+  inbox.projection_hash = createHash('sha256').update(JSON.stringify(inbox.records)).digest('hex')
+  await writeFile(file, JSON.stringify(inbox))
+  const results = await reconcileFeishuActions(root, new FakeController(), new Date('2026-08-05T00:01:01.000Z'), 0)
+  assert.equal(results.length, 0)
+  assert.equal((await listFeishuActionInbox(root))[0].status, 'processing')
+})
+
 test('concurrent startup reconcile recovers a hard crash after the Controller persisted success', async () => {
   const { root, current } = await controlledProject()
   const accepted = await acceptLocalConfirmationAction(root, {
@@ -583,12 +602,34 @@ test('concurrent startup reconcile recovers a hard crash after the Controller pe
     runFeishuConnector(root, { transport: failingTransport(), confirmationController: controller }),
   ])
   assert.equal(startups.every((item) => item.status === 'rejected' && /preflight unavailable/.test(item.reason.message)), true)
-  assert.equal(executeCalls, 1)
+  assert.equal(executeCalls, 0)
   const recoveredInbox = (await listFeishuActionInbox(root))[0]
   assert.equal(recoveredInbox.status, 'succeeded', JSON.stringify(recoveredInbox))
   assert.equal((await listConfirmationRequests(root))[0].status, 'consumed')
   assert.equal((await listConfirmationDecisions(root)).filter((item) => item.command_id === accepted.record.controller_command_id).length, 1)
   assert.equal(await lstat(lock).catch(() => null), null)
+})
+
+test('startup reconcile restores a Controller success even after the confirmation TTL elapsed', async () => {
+  const { root, current } = await controlledProject()
+  const accepted = await acceptLocalConfirmationAction(root, {
+    eventId: 'local_expired_crash_001', projectId: project, actor, requestId: current.request_id,
+    action: 'authorize_verification', receivedAt: new Date(),
+  })
+  const marker = path.join(root, 'controller-expired-success.json')
+  const child = spawnSync(process.execPath, [
+    path.resolve('test/fixtures/feishu-hard-crash-child.mjs'), root, accepted.record.inbox_id, marker,
+  ], { encoding: 'utf8' })
+  assert.equal(child.status, 91, child.stderr)
+  const controller = createLocalSpecLoopConfirmationController(root)
+  const afterExpiry = new Date(Date.parse(current.expires_at) + 1_000)
+  const results = await reconcileFeishuActions(root, controller, afterExpiry, 0)
+  assert.equal(results.length, 1)
+  assert.equal(results[0].status, 'succeeded', JSON.stringify(results[0]))
+  const recovered = (await listConfirmationRequests(root))[0]
+  assert.equal(recovered.status, 'consumed')
+  assert.equal(Date.parse(recovered.consumed_at), Date.parse(results[0].controller_result.committed_at))
+  assert.equal(Date.parse(recovered.consumed_at) < Date.parse(recovered.expires_at), true)
 })
 
 test('running connector processes a real card action and updates its result card', async () => {

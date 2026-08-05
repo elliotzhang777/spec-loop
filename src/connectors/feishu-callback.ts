@@ -56,6 +56,7 @@ export type FeishuActionEnvelope = z.infer<typeof actionEnvelopeSchema>;
 const controllerResultSchema = z.object({
   status: z.enum(['applied', 'duplicate']),
   audit_id: safeId,
+  committed_at: z.iso.datetime().optional(),
 }).strict();
 
 export interface ConfirmationControllerCommand {
@@ -77,8 +78,8 @@ export interface ConfirmationControllerCommand {
 }
 
 export interface ConfirmationControllerAdapter {
-  execute(command: ConfirmationControllerCommand): Promise<{ status: 'applied' | 'duplicate'; audit_id: string }>;
-  lookup?(commandId: string): Promise<{ status: 'applied' | 'duplicate'; audit_id: string } | null>;
+  execute(command: ConfirmationControllerCommand): Promise<{ status: 'applied' | 'duplicate'; audit_id: string; committed_at?: string }>;
+  lookup?(commandId: string): Promise<{ status: 'applied' | 'duplicate'; audit_id: string; committed_at?: string } | null>;
 }
 
 const inboxRecordSchema = z.object({
@@ -312,10 +313,15 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
     if (!request) throw permanent('confirmation request does not exist');
     resolvedActor = await resolveActor(projectRoot, claimed.record.envelope, request);
     assertOption(request, claimed.record.envelope);
-    let executedResult: z.infer<typeof controllerResultSchema> | null = null;
+    const recovered = controller.lookup
+      ? controllerResultSchema.nullable().parse(await controller.lookup(claimed.record.controller_command_id))
+      : null;
+    if (recovered && !recovered.committed_at) throw new Error('recovered Controller result is missing its durable completion time');
+    let executedResult: z.infer<typeof controllerResultSchema> | null = recovered;
     const confirmation = await executeConfirmationRequest(
       projectRoot, request.request_id, claimed.record.envelope.action_id, resolvedActor,
       async (current) => {
+        if (executedResult) return;
         const result = await controller.execute({
           command_id: claimed.record.controller_command_id,
           idempotency_key: claimed.record.controller_command_id,
@@ -328,6 +334,7 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
         executedResult = controllerResultSchema.parse(result);
       },
       now,
+      recovered?.committed_at ? { committedAt: new Date(recovered.committed_at) } : {},
     );
     confirmationStatus = confirmation.status as FeishuActionInboxRecord['confirmation_status'];
     if (!executedResult) {
@@ -377,7 +384,7 @@ export async function reconcileFeishuActions(
         try { process.kill(record.claim_pid, 0); }
         catch (error) { ownerDead = (error as NodeJS.ErrnoException).code === 'ESRCH'; }
       }
-      if (!ownerDead && !stale) continue;
+      if (record.claim_pid ? !ownerDead : !stale) continue;
       record.status = 'pending'; record.claim_token = null; record.claimed_at = null; record.claim_pid = null;
       record.updated_at = now.toISOString(); record.reason = null; changed = true;
     }
