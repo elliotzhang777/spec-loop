@@ -212,15 +212,15 @@ node dist/cli.js connectors feishu disable <project-dir> --json
 | [TASK-022](../04-task/TASK-022-feishu-progress-outbox.md) | 进度投影、卡片渲染和可靠 Outbox | TASK-021 | 已完成 |
 | [TASK-023](../04-task/TASK-023-feishu-confirmation-contract.md) | 确认请求、卡片动作和候选绑定契约 | TASK-021 | 已完成 |
 | [TASK-024](../04-task/TASK-024-feishu-callback-identity.md) | 长连接回调、身份授权、幂等消费和 Controller 接入 | TASK-023 | 已完成 |
-| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 进行中 |
+| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 已完成 |
 | [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 真实机器人 Dogfood、独立 Verifier 和最终 Heavy | TASK-021～025 | 已批准 |
 
 ## 实际实现
 
-- 最终实现：TASK-021～024 已完成；已具备配置与 Secret Provider、进度 Outbox、确认契约、长连接回调、身份授权、幂等消费和结构化 Controller 接入。
-- 与设计差异：回调预授权使用带完整性哈希的无锁 Confirmation 投影；ActionInbox claim 记录进程所有者，并在远程 preflight 前执行启动恢复。
+- 最终实现：TASK-021～025 已完成；已具备配置与 Secret Provider、进度 Outbox、确认契约、长连接回调、身份授权、幂等消费、结构化 Controller、崩溃恢复、退避与 dead-letter 运维、集中脱敏和持续安全 Gate。
+- 与设计差异：回调预授权使用带完整性哈希的无锁 Confirmation 投影；Controller 持久化完成时间用于恢复 TTL 后已提交结果；ActionInbox claim 记录进程所有者，只有明确死亡才可回收，并在远程 preflight 前执行启动恢复。
 - 运维/迁移说明：实施前需要用户在飞书开放平台创建企业自建应用、开启机器人能力、配置最小权限并提供本机 Secret 引用和测试接收目标。
-- 关联完成工单：TASK-021、TASK-022、TASK-023、TASK-024。
+- 关联完成工单：TASK-021、TASK-022、TASK-023、TASK-024、TASK-025。
 
 ## 官方参考
 
