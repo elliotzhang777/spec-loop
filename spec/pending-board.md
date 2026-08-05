@@ -6,7 +6,7 @@
 
 | 工单 | 标题 | 优先级 | 状态 | 负责人 | 依赖/阻塞 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书正式机器人 Dogfood 与最终 Heavy | P0 | 已批准 | Codex | TASK-021～025、真实飞书配置 | 2026-08-04 |
+| [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书正式机器人 Dogfood 与最终 Heavy | P0 | 已批准 | Codex | TASK-021～025 已完成；等待真实飞书配置与启动授权 | 2026-08-06 |
 
 Phase 1–3 已正式完成；Phase 4 仅 FEAT-008 飞书专项获实施授权，其他 Feature 尚未授权。
 
