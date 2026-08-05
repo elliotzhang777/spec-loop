@@ -815,6 +815,8 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   let heartbeatWork: Promise<void> = Promise.resolve();
   let progressTimer: NodeJS.Timeout | undefined;
   let progressWork: Promise<void> = Promise.resolve();
+  const confirmationController = options.confirmationController;
+  let recoveredActions: FeishuActionInboxRecord[] = [];
   const heartbeatDelay = Math.max(500, Math.floor(ttlMs / 3));
   const scheduleHeartbeat = (): void => {
     heartbeatTimer = setTimeout(() => {
@@ -831,6 +833,11 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     }, heartbeatDelay);
   };
   try {
+    if (signal.aborted) return;
+    if (confirmationController) {
+      const callbacks = await import('./feishu-callback.js');
+      recoveredActions = await callbacks.reconcileFeishuActions(projectRoot, confirmationController);
+    }
     if (signal.aborted) return;
     transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
     if (signal.aborted) return;
@@ -855,7 +862,6 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     const progress = await import('./feishu-progress.js');
     await progress.reconcileFeishuOutbox(projectRoot);
     const callbacks = await import('./feishu-callback.js');
-    const confirmationController = options.confirmationController;
     const resultHandler = async (record: FeishuActionInboxRecord): Promise<void> => {
       if (record.envelope.message_id && transport) await transport.updateCard(record.envelope.message_id, confirmationResultCard(record));
       await options.onConfirmationResult?.(record);
@@ -868,6 +874,7 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
       })
       : null;
     if (confirmationController) {
+      for (const record of recoveredActions) await resultHandler(record);
       for (const record of await callbacks.reconcileFeishuActions(projectRoot, confirmationController)) await resultHandler(record);
     }
     const connectPromise = transport.connect(async (action) => {

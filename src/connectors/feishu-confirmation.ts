@@ -142,7 +142,7 @@ const authorityProjectionSchema = z.object({
   }).strict()),
 }).strict();
 
-function confirmationContentHash(input: {
+export function confirmationContentHash(input: {
   type: z.infer<typeof requestTypeSchema>;
   projectId: string;
   taskId: string;
@@ -448,6 +448,15 @@ export async function listConfirmationRequests(projectRoot: string): Promise<Con
     }
     return deriveRequests(events);
   });
+}
+
+export async function readConfirmationRequestSnapshot(projectRoot: string, requestId: string): Promise<ConfirmationRequest | null> {
+  const root = await confirmationRoot(projectRoot);
+  const file = path.join(root, 'projection.json'), info = await lstat(file).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink()) throw new Error('confirmation snapshot projection is unavailable');
+  const projection = projectionSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+  if (projection.projection_hash !== sha256(JSON.stringify(projection.requests))) throw new Error('confirmation snapshot projection integrity failure');
+  return projection.requests.find((item) => item.request_id === requestId) ?? null;
 }
 
 export async function rebuildConfirmationProjection(projectRoot: string): Promise<number> {

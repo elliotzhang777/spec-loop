@@ -1,5 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { z } from 'zod';
 import { atomicWriteMany, assertSubstantive, exists, readMarkdown, recoverTransactions, sha256, stringifyMarkdown } from './files.js';
 import type { Attempt, Criterion, DeliveryMapping, EvidenceRecord, HumanReviewRequirement, TaskLevel, TaskState, WebGateRequirement } from './model.js';
 import { LEGAL_TRANSITIONS } from './model.js';
@@ -21,6 +22,22 @@ async function stateHistoryWrite(root: string, state: TaskState): Promise<{ file
   const existing = await readFile(file, 'utf8');
   const record = { state_version: state.state_version, status: state.status, round: state.current_round, command: state.last_command, state_hash: sha256(JSON.stringify(state)) };
   return { file, content: `${existing.trimEnd()}\n${JSON.stringify(record)}\n` };
+}
+
+const userControlSchema = z.object({
+  schema_version: z.literal(1), task_id: z.string(), status: z.enum(['paused', 'resumed']),
+  command_id: z.string().uuid(), request_id: z.string().uuid(), actor: z.string().min(3),
+  action: z.enum(['choose_option', 'pause_task']), option_id: z.string().nullable(), decided_at: z.iso.datetime(),
+  decision_hash: z.string().length(64),
+}).strict();
+
+async function readUserControl(root: string): Promise<z.infer<typeof userControlSchema> | null> {
+  const file = path.join(root, 'user-decisions', 'current.json');
+  if (!(await exists(file))) return null;
+  const value = userControlSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+  const { decision_hash: _hash, ...facts } = value;
+  if (value.decision_hash !== sha256(JSON.stringify(facts))) throw new Error('needs_user current decision integrity failure');
+  return value;
 }
 
 export async function readState(root: string): Promise<TaskState> {
@@ -115,6 +132,7 @@ export async function planTask(root: string): Promise<TaskState> {
 
 export async function startRound(root: string): Promise<TaskState> {
   const { state } = await contracts(root);
+  if ((await readUserControl(root))?.status === 'paused') throw new Error('Task is paused by a structured user decision');
   if (state.status === 'iterating' && await exists(path.join(root, 'BUDGET.md'))) {
     const decision = guard(await readBudget(root), await readLedger(root, state));
     if (decision.decision !== 'continue') throw new Error(`Guard ${decision.decision}: ${decision.reason}`);
@@ -160,16 +178,24 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
   }
   const controls = { visual_reviews: [] as string[], web_gates: [] as string[] };
   let humanChecked=options.human;
-  if(state.level==='heavy'&&options.result==='pass'&&!humanChecked){
+  if(state.level==='heavy'&&options.result==='pass'){
     const decisions=await import('./confirmation-decisions.js'),projectRoot=decisions.managedProjectRoot(root);
     if(projectRoot){
       const canonical=await (await import('./review.js')).canonicalGitRevision(state.repository,revision);
-      const candidates=(await decisions.listConfirmationDecisions(projectRoot)).filter((item)=>item.status==='active'&&item.task_id===state.task_id&&item.request_type==='heavy_acceptance');
+      const candidates=(await decisions.listConfirmationDecisions(projectRoot)).filter((item)=>item.status==='active'&&item.task_id===state.task_id&&item.request_type==='heavy_acceptance'&&item.round===state.current_round);
       let remote=candidates.at(-1)??null;
-      if(remote&&await (await import('./review.js')).canonicalGitRevision(state.repository,remote.revision)!==canonical)remote=null;
+      if(remote){
+        const project=await (await import('./project.js')).readProject(projectRoot),gatePlan=(await readMarkdown(path.join(projectRoot,'.spec-loop','GATES.md'))).data;
+        const acceptancePlan=(await readMarkdown(path.join(root,'ACCEPTANCE.md'))).data;
+        const screenshots=(await (await import('./review.js')).readVisualReviews(root)).flatMap((review)=>review.artifacts.map((item)=>item.sha256)).sort();
+        if(!decisions.confirmationDecisionHasValidContent(remote)||remote.project_id!==project.project_id||remote.risk!==state.level
+          ||remote.facts.acceptance_hash!==sha256(JSON.stringify(acceptancePlan))||remote.facts.gate_plan_hash!==sha256(JSON.stringify(gatePlan))
+          ||JSON.stringify([...remote.facts.screenshot_hashes].sort())!==JSON.stringify(screenshots))throw new Error('structured Heavy decision authority is not current');
+        if(await (await import('./review.js')).canonicalGitRevision(state.repository,remote.revision)!==canonical)remote=null;
+      }
       if(remote?.action==='reject_heavy')throw new Error('current Heavy candidate was rejected by a structured user decision');
       if(remote?.action==='accept_heavy'){
-        await decisions.consumeConfirmationDecision(projectRoot,{taskId:state.task_id,requestType:'heavy_acceptance',revision:remote.revision,actions:['accept_heavy'],consumer:'task-verify'});
+        await decisions.consumeConfirmationDecision(projectRoot,{commandId:remote.command_id,contentHash:remote.content_hash,consumer:'task-verify'});
         humanChecked=true;
       }
     }
@@ -283,13 +309,41 @@ export async function applyNeedsUserDecision(root: string, input: {
   if (input.action === 'pause_task' && input.optionId !== null) throw new Error('pause decision may not contain an option id');
   const state = await readState(root);
   if (!['working', 'iterating'].includes(state.status)) throw new Error(`needs_user decision is illegal in ${state.status}`);
+  const previousControl = await readUserControl(root);
   const markerValue = {
     schema_version: 1, command_id: input.commandId, request_id: input.requestId, actor: input.actor,
     action: input.action, option_id: input.optionId, decided_at: new Date().toISOString(),
   };
-  const writes:Array<{file:string;content:string}>=[{file:marker,content:`${JSON.stringify(markerValue,null,2)}\n`}];
+  const currentFacts = {
+    schema_version: 1 as const, task_id: state.task_id, status: input.action === 'pause_task' ? 'paused' as const : 'resumed' as const,
+    command_id: input.commandId, request_id: input.requestId, actor: input.actor, action: input.action,
+    option_id: input.optionId, decided_at: markerValue.decided_at,
+  };
+  const currentControl = userControlSchema.parse({ ...currentFacts, decision_hash: sha256(JSON.stringify(currentFacts)) });
+  const writes:Array<{file:string;content:string}>=[
+    {file:marker,content:`${JSON.stringify(markerValue,null,2)}\n`},
+    {file:path.join(root,'user-decisions','current.json'),content:`${JSON.stringify(currentControl,null,2)}\n`},
+  ];
   let updated = state;
-  if (input.action === 'choose_option' && state.status === 'iterating') {
+  if (input.action === 'pause_task' && state.status === 'working') {
+    updated = stateSchema.parse({
+      ...state, status: 'iterating', state_version: state.state_version + 1,
+      updated_at: markerValue.decided_at, last_command: 'pause-by-user-decision',
+    }) as TaskState;
+    writes.push(
+      {file:path.join(root,'TASK_STATE.md'),content:stringifyMarkdown(updated,'# Task State\n\nLifecycle fields are CLI-managed.')},
+      await stateHistoryWrite(root,updated), ...await runtimeProjectionWrites(root,updated),
+    );
+  } else if (input.action === 'choose_option' && state.status === 'iterating' && previousControl?.status === 'paused') {
+    updated = stateSchema.parse({
+      ...state, status: 'working', state_version: state.state_version + 1,
+      updated_at: markerValue.decided_at, last_command: 'resume-paused-task-with-user-decision',
+    }) as TaskState;
+    writes.push(
+      {file:path.join(root,'TASK_STATE.md'),content:stringifyMarkdown(updated,'# Task State\n\nLifecycle fields are CLI-managed.')},
+      await stateHistoryWrite(root,updated), ...await runtimeProjectionWrites(root,updated),
+    );
+  } else if (input.action === 'choose_option' && state.status === 'iterating') {
     updated = stateSchema.parse({
       ...state, status: 'working', current_round: state.current_round + 1, state_version: state.state_version + 1,
       updated_at: markerValue.decided_at, last_command: 'resume-with-user-decision',

@@ -171,6 +171,7 @@ export async function approveProposal(root:string,id:string,by:string,ttlHours=2
   await atomicWriteMany(root,writes);return value.approval_id;
 }
 export async function verifyApproval(root:string,proposalId:string,scope:'create_task'|'execute_in_worktree',expectedRisk?:z.infer<typeof risk>):Promise<void>{
+  if(await (await import('./confirmation-decisions.js')).hasProposalRejection(root,proposalId))throw new Error('proposal approval was invalidated by a current structured rejection');
   const raw=await readFile(path.join(control(root),'proposals',`${proposalId}.json`),'utf8');
   const proposal=proposalSchema.parse(JSON.parse(raw));
   const files=(await readdir(path.join(control(root),'approvals'))).filter(x=>x.endsWith('.json'));

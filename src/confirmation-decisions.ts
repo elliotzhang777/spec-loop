@@ -3,6 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from './files.js';
 import type { ConfirmationControllerCommand } from './connectors/feishu-callback.js';
+import { confirmationContentHash, confirmationFactsSchema } from './connectors/feishu-confirmation.js';
 
 const actionSchema = z.enum([
   'approve_proposal', 'reject_proposal', 'choose_option', 'pause_task', 'approve_visual', 'reject_visual',
@@ -14,6 +15,7 @@ const decisionSchema = z.object({
   command_id: z.string().uuid(), request_id: z.string().uuid(),
   project_id: z.string(), task_id: z.string(), request_type: z.enum(['proposal', 'needs_user', 'visual_review', 'verification', 'heavy_acceptance']),
   round: z.number().int().positive(), revision: z.string(), content_hash: z.string().length(64),
+  risk: z.enum(['light', 'standard', 'heavy']), facts: confirmationFactsSchema,
   action: actionSchema, option_id: z.string().nullable(), actor: z.string(), source: z.enum(['feishu', 'local']),
   reference_ids: z.array(z.string()), status: z.enum(['active', 'consumed']),
   created_at: z.iso.datetime(), consumed_at: z.iso.datetime().nullable(), consumed_by: z.string().nullable(),
@@ -75,7 +77,7 @@ export async function recordConfirmationDecision(projectRoot: string, command: C
     const decision = decisionSchema.parse({
       schema_version: 1, command_id: command.command_id, request_id: command.request_id,
       project_id: command.project_id, task_id: command.task_id, request_type: command.request_type,
-      round: command.round, revision: command.revision, content_hash: command.content_hash,
+      round: command.round, revision: command.revision, content_hash: command.content_hash, risk: command.risk, facts: command.facts,
       action: command.action, option_id: command.option_id, actor: command.actor, source: command.source,
       reference_ids: command.facts.reference_ids, status: 'active', created_at: new Date().toISOString(),
       consumed_at: null, consumed_by: null,
@@ -94,23 +96,30 @@ export async function findConfirmationDecision(projectRoot: string, commandId: s
 }
 
 export async function latestActiveConfirmationDecision(projectRoot: string, input: {
-  taskId: string; requestType: ConfirmationDecision['request_type']; revision: string;
+  taskId: string; requestType: ConfirmationDecision['request_type']; round: number;
 }): Promise<ConfirmationDecision | null> {
   return [...await listConfirmationDecisions(projectRoot)].reverse().find((item) => item.status === 'active'
-    && item.task_id === input.taskId && item.request_type === input.requestType && item.revision === input.revision) ?? null;
+    && item.task_id === input.taskId && item.request_type === input.requestType && item.round === input.round) ?? null;
 }
 
 export async function consumeConfirmationDecision(projectRoot: string, input: {
-  taskId: string; requestType: ConfirmationDecision['request_type']; revision: string; actions: ConfirmationDecision['action'][]; consumer: string;
+  commandId: string; contentHash: string; consumer: string;
 }): Promise<ConfirmationDecision | null> {
   const root = await decisionRoot(projectRoot);
   return withDecisionLock(root, async () => {
     const decisions = await readDecisions(root);
-    const decision = [...decisions].reverse().find((item) => item.status === 'active' && item.task_id === input.taskId
-      && item.request_type === input.requestType && item.revision === input.revision && input.actions.includes(item.action));
+    const decision = decisions.find((item) => item.status === 'active' && item.command_id === input.commandId);
     if (!decision) return null;
+    if (decision.content_hash !== input.contentHash) throw new Error('confirmation decision authority changed before consumption');
     decision.status = 'consumed'; decision.consumed_at = new Date().toISOString(); decision.consumed_by = input.consumer;
     await writeDecisions(projectRoot, root, decisions); return decision;
+  });
+}
+
+export function confirmationDecisionHasValidContent(decision: ConfirmationDecision): boolean {
+  return decision.content_hash === confirmationContentHash({
+    type: decision.request_type, projectId: decision.project_id, taskId: decision.task_id,
+    round: decision.round, revision: decision.revision, risk: decision.risk, facts: decision.facts,
   });
 }
 

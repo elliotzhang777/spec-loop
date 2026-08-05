@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
 import {
   executeConfirmationRequest,
-  listConfirmationRequests,
+  listConfirmationRequests, readConfirmationRequestSnapshot,
   type ConfirmationAction,
   type ConfirmationRequest,
 } from './feishu-confirmation.js';
@@ -92,6 +92,7 @@ const inboxRecordSchema = z.object({
   attempts: z.number().int().nonnegative(),
   claim_token: z.string().uuid().nullable(),
   claimed_at: z.iso.datetime().nullable(),
+  claim_pid: z.number().int().positive().nullable().optional(),
   completed_at: z.iso.datetime().nullable(),
   resolved_actor: z.string().min(3).max(128).nullable(),
   confirmation_status: z.enum(['consumed', 'rejected', 'expired', 'invalidated']).nullable(),
@@ -101,7 +102,7 @@ const inboxRecordSchema = z.object({
   updated_at: z.iso.datetime(),
 }).strict().superRefine((value, ctx) => {
   if (value.status === 'processing' && (!value.claim_token || !value.claimed_at)) ctx.addIssue({ code: 'custom', message: 'processing inbox record requires claim facts' });
-  if (value.status !== 'processing' && (value.claim_token !== null || value.claimed_at !== null)) ctx.addIssue({ code: 'custom', message: 'non-processing inbox record may not retain claim facts' });
+  if (value.status !== 'processing' && (value.claim_token !== null || value.claimed_at !== null || value.claim_pid != null)) ctx.addIssue({ code: 'custom', message: 'non-processing inbox record may not retain claim facts' });
   if (['succeeded', 'rejected'].includes(value.status) && !value.completed_at) ctx.addIssue({ code: 'custom', message: 'terminal inbox record requires completion time' });
   if (value.status === 'succeeded' && (!value.confirmation_status || !value.controller_result)) ctx.addIssue({ code: 'custom', message: 'successful inbox record requires confirmation and controller results' });
   if (value.status === 'rejected' && !value.reason) ctx.addIssue({ code: 'custom', message: 'rejected inbox record requires a reason' });
@@ -188,7 +189,7 @@ export async function acceptLocalConfirmationAction(projectRoot: string, input: 
 
 async function preauthorizeAction(projectRoot: string, envelope: FeishuActionEnvelope): Promise<string | null> {
   try {
-    const request = (await listConfirmationRequests(projectRoot)).find((item) => item.request_id === envelope.request_id);
+    const request = await readConfirmationRequestSnapshot(projectRoot, envelope.request_id);
     if (!request) throw permanent('confirmation request does not exist');
     await resolveActor(projectRoot, envelope, request);
     if (!request.allowed_actions.includes(envelope.action_id)) throw permanent('action is not allowed for this confirmation request');
@@ -221,7 +222,7 @@ async function acceptAction(projectRoot: string, envelope: FeishuActionEnvelope,
     const record = inboxRecordSchema.parse({
       schema_version: 1, inbox_id: randomUUID(), event_ids: [envelope.event_id], envelope,
       request_action_key: key, controller_command_id: randomUUID(), status: rejected ? 'rejected' : 'pending', attempts: 0,
-      claim_token: null, claimed_at: null, completed_at: rejected ? envelope.received_at : null,
+      claim_token: null, claimed_at: null, claim_pid: null, completed_at: rejected ? envelope.received_at : null,
       resolved_actor: null, confirmation_status: null, controller_result: null,
       reason: rejection,
       created_at: envelope.received_at, updated_at: envelope.received_at,
@@ -263,7 +264,7 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
     const record = records.find((item) => item.inbox_id === inboxId);
     if (!record) throw new Error('feishu action inbox record does not exist');
     if (record.status !== 'pending') return { record, claimed: false };
-    record.status = 'processing'; record.attempts += 1; record.claim_token = randomUUID();
+    record.status = 'processing'; record.attempts += 1; record.claim_token = randomUUID(); record.claim_pid = process.pid;
     record.claimed_at = now.toISOString(); record.updated_at = now.toISOString();
     await writeInbox(projectRoot, root, records);
     return { record: inboxRecordSchema.parse(record), claimed: true };
@@ -326,7 +327,7 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
     const record = records.find((item) => item.inbox_id === inboxId);
     if (!record) throw new Error('feishu action inbox record disappeared');
     if (record.status !== 'processing' || record.claim_token !== claimed.record.claim_token) throw new Error('feishu action inbox claim was lost; reconcile is required');
-    record.status = finalStatus; record.claim_token = null; record.claimed_at = null;
+    record.status = finalStatus; record.claim_token = null; record.claimed_at = null; record.claim_pid = null;
     record.completed_at = finalStatus === 'failed' ? null : now.toISOString(); record.updated_at = now.toISOString();
     record.resolved_actor = resolvedActor; record.confirmation_status = confirmationStatus;
     record.controller_result = controllerResult; record.reason = reason;
@@ -348,10 +349,14 @@ export async function reconcileFeishuActions(
     let changed = false;
     for (const record of records) {
       if (record.status !== 'processing') continue;
-      const known = await controller.lookup?.(record.controller_command_id) ?? null;
       const stale = record.claimed_at !== null && now.getTime() - Date.parse(record.claimed_at) >= staleProcessingMs;
-      if (!known && !stale) continue;
-      record.status = 'pending'; record.claim_token = null; record.claimed_at = null;
+      let ownerDead = false;
+      if (record.claim_pid) {
+        try { process.kill(record.claim_pid, 0); }
+        catch (error) { ownerDead = (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }
+      if (!ownerDead && !stale) continue;
+      record.status = 'pending'; record.claim_token = null; record.claimed_at = null; record.claim_pid = null;
       record.updated_at = now.toISOString(); record.reason = null; changed = true;
     }
     if (changed) await writeInbox(projectRoot, root, records);

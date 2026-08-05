@@ -2,11 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { cli, fillContracts, fillRound, readMd, tempRoot } from './helpers.mjs'
-import { createConfirmationRequest, listConfirmationRequests } from '../dist/connectors/feishu-confirmation.js'
+import { cli, fillContracts, fillRound, readMd, tempRoot, writeMd } from './helpers.mjs'
+import { createConfirmationRequest, executeConfirmationRequest, listConfirmationRequests } from '../dist/connectors/feishu-confirmation.js'
 import {
   acceptFeishuAction,
   acceptLocalConfirmationAction,
@@ -178,6 +178,26 @@ test('long-connection handler persists and acknowledges before a slow Controller
   assert.equal(controller.calls.length, 1)
 })
 
+test('callback acceptance does not wait for a Confirmation lock held by a running Controller', async () => {
+  const root = await projectRoot()
+  const current = await request(root)
+  let releaseController
+  let controllerStarted
+  const started = new Promise((resolve) => { controllerStarted = resolve })
+  const release = new Promise((resolve) => { releaseController = resolve })
+  const running = executeConfirmationRequest(root, current.request_id, 'authorize_verification', actor, async () => {
+    controllerStarted()
+    await release
+  }, new Date('2026-08-05T00:01:00.000Z'))
+  await started
+  const startedAt = Date.now()
+  const accepted = await acceptFeishuAction(root, callbackInput(current, { event_id: 'evt_lock_independent' }))
+  assert.ok(Date.now() - startedAt < 500)
+  assert.equal(accepted.record.status, 'pending')
+  releaseController()
+  await running
+})
+
 test('tenant, project, open_id and request-type authorization fail closed and are audited', async () => {
   for (const overrides of [
     { tenant_key: 'ffffffffffffffff' },
@@ -308,6 +328,7 @@ test('production Controller rejection becomes a proposal-domain constraint', asy
   ])
   assert.equal(proposal.code, 0, proposal.stderr)
   const proposalId = proposal.stdout.trim()
+  assert.equal(cli(['triage', 'approve', root, proposalId, '--by', actor]).code, 0)
   const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
   const current = await createConfirmationRequest(root, {
     type: 'proposal', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
@@ -317,6 +338,9 @@ test('production Controller rejection becomes a proposal-domain constraint', asy
   const approval = cli(['triage', 'approve', root, proposalId, '--by', actor])
   assert.notEqual(approval.code, 0)
   assert.match(approval.stderr, /rejected by a current structured decision/i)
+  const task = cli(['triage', 'create-task', root, proposalId, '--id', 'TASK-REJECTED-1', '--title', 'Rejected proposal'])
+  assert.notEqual(task.code, 0)
+  assert.match(task.stderr, /approval was invalidated by a current structured rejection/i)
 })
 
 test('production Controller resumes an iterating task from a predefined needs-user choice', async () => {
@@ -339,6 +363,31 @@ test('production Controller resumes an iterating task from a predefined needs-us
   assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'active')
 })
 
+test('pause_task stops a working Task until a later structured choice resumes the same Round', async () => {
+  const { root, repository, taskRoot } = await controlledProject()
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const pause = await createConfirmationRequest(root, {
+    type: 'needs_user', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: await authorityFacts(root, taskRoot, ['AC-1'], [{ id: 'OPTION_A', label: '稍后继续' }]),
+    allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  await createLocalSpecLoopConfirmationController(root).execute(controllerCommand(pause, 'pause_task'))
+  assert.equal((await readMd(path.join(taskRoot, 'TASK_STATE.md'))).data.status, 'iterating')
+  const bypass = cli(['round', taskRoot])
+  assert.notEqual(bypass.code, 0)
+  assert.match(bypass.stderr, /paused by a structured user decision/i)
+
+  const resume = await createConfirmationRequest(root, {
+    type: 'needs_user', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: await authorityFacts(root, taskRoot, ['AC-1'], [{ id: 'OPTION_A', label: '继续当前 Round' }]),
+    allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  await createLocalSpecLoopConfirmationController(root).execute(controllerCommand(resume, 'choose_option', 'OPTION_A'))
+  const state = (await readMd(path.join(taskRoot, 'TASK_STATE.md'))).data
+  assert.equal(state.status, 'working')
+  assert.equal(state.current_round, 1)
+})
+
 test('structured Heavy acceptance is consumed by task verification as the local human check', async () => {
   const { root, repository, taskRoot } = await controlledProject({ level: 'heavy' })
   const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
@@ -354,6 +403,71 @@ test('structured Heavy acceptance is consumed by task verification as the local 
   assert.equal(verified.code, 0, verified.stderr)
   assert.equal((await readMd(path.join(taskRoot, 'VERIFY.md'))).data.human_checked, true)
   assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'consumed')
+})
+
+test('structured Heavy rejection cannot be bypassed with the local human-check flag', async () => {
+  const { root, repository, taskRoot } = await controlledProject({ level: 'heavy' })
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'heavy_acceptance', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'heavy',
+    facts: await authorityFacts(root, taskRoot, ['AC-1']), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  await createLocalSpecLoopConfirmationController(root).execute(controllerCommand(current, 'reject_heavy'))
+  const artifact = path.join(root, 'heavy-rejected.txt')
+  await writeFile(artifact, 'independent Heavy verification passed but the user rejected the candidate\n')
+  const verified = cli([
+    'verify', taskRoot, '--result', 'pass', '--evidence', artifact, '--verifier', 'independent-heavy',
+    '--independent', '--human-check', '--revision', revision,
+  ])
+  assert.notEqual(verified.code, 0)
+  assert.match(verified.stderr, /rejected by a structured user decision/i)
+})
+
+test('Heavy decision is rejected after its bound Gate Plan changes', async () => {
+  const { root, repository, taskRoot } = await controlledProject({ level: 'heavy' })
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'heavy_acceptance', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'heavy',
+    facts: await authorityFacts(root, taskRoot, ['AC-1']), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  await createLocalSpecLoopConfirmationController(root).execute(controllerCommand(current, 'accept_heavy'))
+  await writeMd(path.join(root, '.spec-loop', 'GATES.md'), {
+    schema_version: 1, scope_kind: 'task', coverage: 'targeted',
+    database: { lifecycle: 'persistent', reset: 'fixtures' },
+    gates: [{ id: 'changed-gate', ac: ['AC-1'], command: [process.execPath, '--version'], timeout_seconds: 30 }],
+  }, '# Gates\n\nChanged after the structured decision.')
+  const artifact = path.join(root, 'heavy-authority-drift.txt')
+  await writeFile(artifact, 'the bound Gate Plan changed\n')
+  const verified = cli([
+    'verify', taskRoot, '--result', 'pass', '--evidence', artifact, '--verifier', 'independent-heavy',
+    '--independent', '--human-check', '--revision', revision,
+  ])
+  assert.notEqual(verified.code, 0)
+  assert.match(verified.stderr, /structured Heavy decision authority is not current/i)
+})
+
+test('Heavy acceptance from an earlier Round is not consumed by a later Round with the same revision', async () => {
+  const { root, repository, taskRoot } = await controlledProject({ level: 'heavy' })
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'heavy_acceptance', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'heavy',
+    facts: await authorityFacts(root, taskRoot, ['AC-1']), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  const command = controllerCommand(current, 'accept_heavy')
+  await createLocalSpecLoopConfirmationController(root).execute(command)
+  const failedArtifact = path.join(root, 'round-one-failed.txt')
+  await writeFile(failedArtifact, 'round one failed independently\n')
+  assert.equal(cli(['verify', taskRoot, '--result', 'fail', '--evidence', failedArtifact, '--verifier', 'independent-heavy', '--independent', '--revision', revision]).code, 0)
+  assert.equal(cli(['round', taskRoot]).code, 0)
+  await fillRound(taskRoot, 2)
+  const passedArtifact = path.join(root, 'round-two-passed.txt')
+  await writeFile(passedArtifact, 'round two passed with a separate local human check\n')
+  const verified = cli([
+    'verify', taskRoot, '--result', 'pass', '--evidence', passedArtifact, '--verifier', 'independent-heavy',
+    '--independent', '--human-check', '--revision', revision,
+  ])
+  assert.equal(verified.code, 0, verified.stderr)
+  assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'active')
 })
 
 test('structured verification authorization is consumed when Harness prepares the exact candidate', async () => {
@@ -431,6 +545,49 @@ test('startup reconcile reclaims a stale processing action and completes it idem
   assert.equal(results.length, 1)
   assert.equal(results[0].status, 'succeeded')
   assert.equal(controller.calls.length, 1)
+})
+
+test('concurrent startup reconcile recovers a hard crash after the Controller persisted success', async () => {
+  const { root, current } = await controlledProject()
+  const accepted = await acceptLocalConfirmationAction(root, {
+    eventId: 'local_hard_crash_001', projectId: project, actor, requestId: current.request_id,
+    action: 'authorize_verification', receivedAt: new Date(),
+  })
+  const marker = path.join(root, 'controller-success.json')
+  const child = spawnSync(process.execPath, [
+    path.resolve('test/fixtures/feishu-hard-crash-child.mjs'), root, accepted.record.inbox_id, marker,
+  ], { encoding: 'utf8' })
+  assert.equal(child.status, 91, child.stderr)
+  const lock = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations', 'mutation.lock')
+  assert.equal((await lstat(lock)).isDirectory(), true)
+  assert.equal((await listFeishuActionInbox(root))[0].status, 'processing')
+
+  let executeCalls = 0
+  const productionController = createLocalSpecLoopConfirmationController(root)
+  const controller = {
+    lookup: (commandId) => productionController.lookup(commandId),
+    async execute(command) {
+      const persisted = JSON.parse(await readFile(marker, 'utf8'))
+      assert.equal(persisted.command_id, command.command_id)
+      executeCalls += 1
+      return productionController.execute(command)
+    },
+  }
+  const failingTransport = () => ({
+    async preflight() { throw new Error('simulated preflight unavailable') },
+    async connect() {}, async disconnect() {}, connectionState() { return 'idle' },
+    async sendCard() { throw new Error('not reached') }, async updateCard() { throw new Error('not reached') },
+  })
+  const startups = await Promise.allSettled([
+    runFeishuConnector(root, { transport: failingTransport(), confirmationController: controller }),
+    runFeishuConnector(root, { transport: failingTransport(), confirmationController: controller }),
+  ])
+  assert.equal(startups.every((item) => item.status === 'rejected' && /preflight unavailable/.test(item.reason.message)), true)
+  assert.equal(executeCalls, 1)
+  assert.equal((await listFeishuActionInbox(root))[0].status, 'succeeded')
+  assert.equal((await listConfirmationRequests(root))[0].status, 'consumed')
+  assert.equal((await listConfirmationDecisions(root)).filter((item) => item.command_id === accepted.record.controller_command_id).length, 1)
+  assert.equal(await lstat(lock).catch(() => null), null)
 })
 
 test('running connector processes a real card action and updates its result card', async () => {
