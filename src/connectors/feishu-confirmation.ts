@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
@@ -54,7 +54,7 @@ export const confirmationRequestSchema = z.object({
   risk: z.enum(['light', 'standard', 'heavy']),
   facts: confirmationFactsSchema,
   allowed_actions: z.array(actionSchema).min(2),
-  allowed_actor_ids: z.array(z.string().regex(/^ou_[A-Za-z0-9_-]{8,128}$/)).min(1),
+  allowed_actor_ids: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{2,127}$/)).min(1),
   created_at: z.iso.datetime(),
   expires_at: z.iso.datetime(),
   status: requestStatusSchema,
@@ -142,7 +142,7 @@ const authorityProjectionSchema = z.object({
   }).strict()),
 }).strict();
 
-function confirmationContentHash(input: {
+export function confirmationContentHash(input: {
   type: z.infer<typeof requestTypeSchema>;
   projectId: string;
   taskId: string;
@@ -173,13 +173,66 @@ async function confirmationRoot(projectRoot: string): Promise<string> {
 
 async function withConfirmationLock<T>(root: string, action: () => Promise<T>): Promise<T> {
   const lock = path.join(root, 'mutation.lock');
+  const recoveryLock = path.join(root, 'mutation-lock-recovery');
+  const token = randomUUID();
   let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await mkdir(lock, { mode: 0o700 }); acquired = true; break; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; await new Promise((resolve) => setTimeout(resolve, 10)); }
+  for (let attempt = 0; attempt < 700; attempt += 1) {
+    const activeRecovery = await lstat(recoveryLock).catch(() => null);
+    if (activeRecovery) {
+      if (!activeRecovery.isDirectory() || activeRecovery.isSymbolicLink()) throw new Error('confirmation lock recovery path is invalid');
+      if (Date.now() - activeRecovery.mtimeMs >= 5_000) await rm(recoveryLock, { recursive: true, force: true });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      continue;
+    }
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      try { await writeFile(path.join(lock, 'owner.json'), `${JSON.stringify({ schema_version: 1, pid: process.pid, token, acquired_at: new Date().toISOString() })}\n`, { flag: 'wx', mode: 0o600 }); }
+      catch (error) { await rm(lock, { recursive: true, force: true }); throw error; }
+      acquired = true; break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const info = await lstat(lock).catch(() => null);
+      if (!info || !info.isDirectory() || info.isSymbolicLink()) throw new Error('confirmation mutation lock is invalid');
+      let recoveryOwner = false;
+      try { await mkdir(recoveryLock, { mode: 0o700 }); recoveryOwner = true; }
+      catch (recoveryError) {
+        if ((recoveryError as NodeJS.ErrnoException).code !== 'EEXIST') throw recoveryError;
+        const recoveryInfo=await lstat(recoveryLock).catch(()=>null);
+        if(!recoveryInfo||!recoveryInfo.isDirectory()||recoveryInfo.isSymbolicLink())throw new Error('confirmation lock recovery path is invalid');
+        if(Date.now()-recoveryInfo.mtimeMs>=5_000)await rm(recoveryLock,{recursive:true,force:true});
+      }
+      if (recoveryOwner) {
+        try {
+          const currentInfo = await lstat(lock).catch(() => null);
+          if (currentInfo?.isDirectory() && !currentInfo.isSymbolicLink()) {
+            const ownerRaw = await readFile(path.join(lock, 'owner.json'), 'utf8').catch(() => null);
+            let owner: { pid: number; token: string } | null = null;
+            try {
+              const parsed = ownerRaw ? JSON.parse(ownerRaw) as { pid?: unknown; token?: unknown } : null;
+              owner = parsed && Number.isInteger(parsed.pid) && (parsed.pid as number) > 0 && typeof parsed.token === 'string'
+                ? { pid: parsed.pid as number, token: parsed.token }
+                : null;
+            } catch { owner = null; }
+            let alive = true;
+            if (owner) {
+              try { process.kill(owner.pid, 0); } catch (pidError) { alive = (pidError as NodeJS.ErrnoException).code !== 'ESRCH'; }
+            }
+            const missingOwnerStale = !owner && Date.now() - currentInfo.mtimeMs >= 5_000;
+            if ((owner && !alive) || missingOwnerStale) await rm(lock, { recursive: true, force: true });
+          }
+        } finally { await rmdir(recoveryLock).catch(() => undefined); }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   if (!acquired) throw new Error('confirmation store is busy; explicit recovery is required');
-  try { return await action(); } finally { await rmdir(lock); }
+  try { return await action(); }
+  finally {
+    const ownerRaw = await readFile(path.join(lock, 'owner.json'), 'utf8').catch(() => null);
+    const owner = ownerRaw ? JSON.parse(ownerRaw) as { token?: string } : null;
+    if (owner?.token !== token) throw new Error('confirmation mutation lock ownership was lost');
+    await rm(lock, { recursive: true });
+  }
 }
 
 function eventHash(value: Omit<HistoryEvent, 'event_hash'>): string {
@@ -397,6 +450,15 @@ export async function listConfirmationRequests(projectRoot: string): Promise<Con
   });
 }
 
+export async function readConfirmationRequestSnapshot(projectRoot: string, requestId: string): Promise<ConfirmationRequest | null> {
+  const root = await confirmationRoot(projectRoot);
+  const file = path.join(root, 'projection.json'), info = await lstat(file).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink()) throw new Error('confirmation snapshot projection is unavailable');
+  const projection = projectionSchema.parse(JSON.parse(await readFile(file, 'utf8')));
+  if (projection.projection_hash !== sha256(JSON.stringify(projection.requests))) throw new Error('confirmation snapshot projection integrity failure');
+  return projection.requests.find((item) => item.request_id === requestId) ?? null;
+}
+
 export async function rebuildConfirmationProjection(projectRoot: string): Promise<number> {
   const root = await confirmationRoot(projectRoot);
   return withConfirmationLock(root, async () => {
@@ -462,7 +524,14 @@ export async function invalidateIfConfirmationFactsChanged(projectRoot: string, 
   }, now);
 }
 
-export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+export async function executeConfirmationRequest(
+  projectRoot: string,
+  requestId: string,
+  action: ConfirmationAction,
+  actorId: string,
+  executor: (request: ConfirmationRequest) => Promise<void>,
+  now = new Date(),
+): Promise<ConfirmationRequest> {
   return mutateRequest(projectRoot, requestId, async (current, _now, _root, authority) => {
     if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
     if (Date.parse(current.expires_at) <= now.getTime()) {
@@ -481,6 +550,7 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
         request: confirmationRequestSchema.parse({ ...current, status: 'invalidated', invalidation_reason: '当前权威 revision、Acceptance、截图或 Gate Plan 与请求不一致' }),
       };
     }
+    await executor(current);
     const rejected = action.startsWith('reject_') || action === 'defer_verification' || action === 'pause_task';
     return {
       event: rejected ? 'rejected' : 'consumed',
@@ -493,6 +563,10 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
       }),
     };
   }, now);
+}
+
+export async function consumeConfirmationRequest(projectRoot: string, requestId: string, action: ConfirmationAction, actorId: string, now = new Date()): Promise<ConfirmationRequest> {
+  return executeConfirmationRequest(projectRoot, requestId, action, actorId, async () => undefined, now);
 }
 
 export async function expireConfirmationRequests(projectRoot: string, now = new Date()): Promise<number> {

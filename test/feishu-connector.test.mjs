@@ -153,6 +153,32 @@ test('fake and official transports share the lifecycle contract', async () => {
   assert.equal(official.connectionState(), 'idle')
 })
 
+test('official transport preserves Feishu event and tenant identity from normalized raw callbacks', async () => {
+  let cardActionHandler
+  const channel = {
+    rawClient: {
+      application: { v6: { scope: { list: async () => ({ code: 0, data: { scopes: [] } }) } } },
+      im: { v1: { message: { create: async () => ({ data: { message_id: 'om_identity' } }) } } },
+      request: async () => ({ code: 0, bot: { activate_status: 2, open_id: 'ou_bot' } }),
+    },
+    connect: async () => {}, disconnect: async () => {}, getConnectionStatus: () => ({ state: 'connected' }),
+    on: (_name, handler) => { cardActionHandler = handler; return () => { cardActionHandler = undefined } },
+    send: async () => ({ messageId: 'unused' }), updateCard: async () => {},
+  }
+  const received = []
+  const transport = new OfficialFeishuTransport({ appId: 'cli_test', appSecret: 'not-used' }, async () => channel)
+  await transport.connect(async (action) => received.push(action))
+  await cardActionHandler({
+    messageId: 'om_identity', chatId: 'oc_identity', operator: { openId: 'ou_identity_user' },
+    action: { tag: 'button', value: { request_id: 'test' } },
+    // 飞书 SDK 的 EventDispatcher.parse() 会把 v2 header 展开到该原始对象。
+    raw: { event_id: 'evt_identity_001', tenant_key: '736588c9260f175c' },
+  })
+  assert.equal(received[0].eventId, 'evt_identity_001')
+  assert.equal(received[0].tenantKey, '736588c9260f175c')
+  await transport.disconnect()
+})
+
 test('official transport sends with the configured receive id type', async () => {
   const calls = []
   const channel = {

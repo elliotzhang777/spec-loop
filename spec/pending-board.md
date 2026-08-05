@@ -6,7 +6,6 @@
 
 | 工单 | 标题 | 优先级 | 状态 | 负责人 | 依赖/阻塞 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-024](04-task/TASK-024-feishu-callback-identity.md) | 飞书长连接回调与身份授权 | P0 | 进行中 | Codex | TASK-023 已完成；以结构化 Controller Adapter 接入 | 2026-08-05 |
 | [TASK-025](04-task/TASK-025-feishu-recovery-security.md) | 飞书连接器恢复、安全与持续门禁 | P0 | 已批准 | Codex | TASK-022、TASK-024 | 2026-08-04 |
 | [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书正式机器人 Dogfood 与最终 Heavy | P0 | 已批准 | Codex | TASK-021～025、真实飞书配置 | 2026-08-04 |
 

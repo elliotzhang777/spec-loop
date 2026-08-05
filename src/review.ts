@@ -228,7 +228,7 @@ export async function requestVisualReview(root:string,reviewId:string,revision:s
   return record;
 }
 
-export async function decideVisualReview(root:string,reviewId:string,result:'approved'|'rejected',reviewer:string,note:string):Promise<HumanReviewRecord> {
+export async function decideVisualReview(root:string,reviewId:string,result:'approved'|'rejected',reviewer:string,note:string,controllerCommandId?:string):Promise<HumanReviewRecord> {
   const { state, requirements, acceptanceHash: contractHash } = await stateAndRequirements(root);
   requirement(requirements, reviewId);
   assertSubstantive(reviewer, 'visual reviewer'); assertSubstantive(note, 'visual review note');
@@ -237,6 +237,17 @@ export async function decideVisualReview(root:string,reviewId:string,result:'app
   if (!(await exists(file))) throw new Error(`${reviewId}: no pending visual review request`);
   const current = humanReviewSchema.parse((await readMarkdown(file)).data) as HumanReviewRecord;
   await validateRecordHistory(root,current);
+  const effectFile=controllerCommandId?path.join(root,'controller-effects',`${controllerCommandId}.json`):null;
+  if(effectFile){
+    const effectInfo=await lstat(effectFile).catch(()=>null);
+    if(effectInfo){
+      if(!effectInfo.isFile()||effectInfo.isSymbolicLink())throw new Error('visual review Controller effect marker is invalid');
+      const effect=JSON.parse(await readFile(effectFile,'utf8')) as {command_id?:string;review_id?:string;result?:string;decision_hash?:string};
+      if(effect.command_id!==controllerCommandId||effect.review_id!==reviewId||effect.result!==result||effect.decision_hash!==current.decision_hash)
+        throw new Error('visual review Controller effect marker differs from the command');
+      return current;
+    }
+  }
   if (current.status !== 'pending') throw new Error(`${reviewId}: visual review is already ${current.status}`);
   if (current.task_id !== state.task_id || current.round !== state.current_round || current.acceptance_hash !== contractHash) throw new Error(`${reviewId}: stale visual review request`);
   await canonicalGitRevision(state.repository,current.code_revision);
@@ -248,7 +259,9 @@ export async function decideVisualReview(root:string,reviewId:string,result:'app
   const record = humanReviewSchema.parse({
     ...current,status:result,reviewer,reviewed_at:reviewedAt,note,history_tail_hash:event.event_hash,decision_hash:event.event_hash,
   }) as HumanReviewRecord;
-  await atomicWriteMany(root,[{file,content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}]);
+  const writes:Array<{file:string;content:string}>=[{file,content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}];
+  if(effectFile)writes.push({file:effectFile,content:`${JSON.stringify({schema_version:1,command_id:controllerCommandId,review_id:reviewId,result,decision_hash:record.decision_hash},null,2)}\n`});
+  await atomicWriteMany(root,writes);
   return record;
 }
 

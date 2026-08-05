@@ -253,6 +253,21 @@ function runProcess(bin:string,args:string[],cwd:string,timeout:number,input?:st
 export async function prepareHarness(root:string,taskId:string,prompt:string){
   const m=await readWorkspace(root,taskId);const task=(await scanTasks(root)).find(t=>t.task_id===taskId);if(!task)throw new Error('task not found');const state=await readState(task.path);if(state.status!=='working')throw new Error(`harness prepare requires working task, got ${state.status}`);
   await verifyTaskExecutionApproval(root,taskId);const head=await git(m.worktree,['rev-parse','HEAD']);
+  const decisions=await import('./confirmation-decisions.js');
+  const remoteCandidates=(await decisions.listConfirmationDecisions(root)).filter((item)=>item.status==='active'&&item.task_id===taskId&&item.request_type==='verification'&&item.round===state.current_round);
+  let remote=remoteCandidates.at(-1)??null;
+  if(remote){
+    const canonical=await (await import('./review.js')).canonicalGitRevision(m.worktree,remote.revision);
+    const acceptance=(await readMarkdown(path.join(task.path,'ACCEPTANCE.md'))).data;
+    const gatePlan=(await readMarkdown(path.join(control(root),'GATES.md'))).data;
+    const screenshots=(await (await import('./review.js')).readVisualReviews(task.path)).flatMap((review)=>review.artifacts.map((item)=>item.sha256)).sort();
+    if(!decisions.confirmationDecisionHasValidContent(remote)||remote.project_id!==(await readProject(root)).project_id||remote.risk!==state.level
+      ||remote.facts.acceptance_hash!==sha256(JSON.stringify(acceptance))||remote.facts.gate_plan_hash!==sha256(JSON.stringify(gatePlan))
+      ||JSON.stringify([...remote.facts.screenshot_hashes].sort())!==JSON.stringify(screenshots))throw new Error('structured verification decision authority is not current');
+    if(canonical!==head)remote=null;
+  }
+  if(remote?.action==='defer_verification')throw new Error('current candidate verification was deferred by a structured user decision');
+  if(remote?.action==='authorize_verification')await decisions.consumeConfirmationDecision(root,{commandId:remote.command_id,contentHash:remote.content_hash,consumer:'harness-prepare'});
   const payload={schema_version:1,task_id:taskId,round:state.current_round,state:state.status,base_commit:m.base_commit,worktree:m.worktree,head,prompt_hash:sha256(prompt),prepared_at:new Date().toISOString()};
   const serialized=JSON.stringify(payload,null,2)+'\n',file=path.join(control(root),'output',`${taskId}-prepare.json`);await atomicWriteMany(root,[{file,content:serialized}]);await advance(root,taskId,null,'prepared',m,head,null,{prepare:sha256(serialized)});return file;
 }
