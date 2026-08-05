@@ -151,6 +151,7 @@ export async function scanTasks(root:string):Promise<TaskIndex[]>{const project=
 export async function createProposal(root:string,input:{source:string;goal:string;risk:z.infer<typeof risk>;priority:'P0'|'P1'|'P2'|'P3';reason:string;criteria:string[]}):Promise<string>{const p=await readProject(root);const dir=path.join(control(root),'proposals');const n=(await readdir(dir)).filter(x=>/^PROP-\d+\.json$/.test(x)).length+1;const value={schema_version:1 as const,proposal_id:`PROP-${n}`,project_id:p.project_id,source:input.source,suggested_goal:input.goal,risk_level:input.risk,priority:input.priority,reason:input.reason,initial_acceptance:input.criteria.map((text,i)=>({id:`AC-${i+1}`,text})),created_at:new Date().toISOString()};proposalSchema.parse(value);assertSubstantive(JSON.stringify(value),'proposal');await atomicWriteMany(root,[{file:path.join(dir,`${value.proposal_id}.json`),content:JSON.stringify(value,null,2)+'\n'}]);return value.proposal_id}
 export async function approveProposal(root:string,id:string,by:string,ttlHours=24,controllerCommandId?:string):Promise<string>{
   if(!Number.isFinite(ttlHours)||ttlHours<=0||ttlHours>168)throw new Error('approval ttl must be within 0–168 hours');
+  if(await (await import('./confirmation-decisions.js')).hasProposalRejection(root,id))throw new Error('proposal was rejected by a current structured decision');
   const effectFile=controllerCommandId?path.join(control(root),'controller-effects',`${controllerCommandId}.json`):null;
   if(effectFile){
     const effectInfo=await lstat(effectFile).catch(()=>null);

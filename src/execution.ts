@@ -253,6 +253,15 @@ function runProcess(bin:string,args:string[],cwd:string,timeout:number,input?:st
 export async function prepareHarness(root:string,taskId:string,prompt:string){
   const m=await readWorkspace(root,taskId);const task=(await scanTasks(root)).find(t=>t.task_id===taskId);if(!task)throw new Error('task not found');const state=await readState(task.path);if(state.status!=='working')throw new Error(`harness prepare requires working task, got ${state.status}`);
   await verifyTaskExecutionApproval(root,taskId);const head=await git(m.worktree,['rev-parse','HEAD']);
+  const decisions=await import('./confirmation-decisions.js');
+  const remoteCandidates=(await decisions.listConfirmationDecisions(root)).filter((item)=>item.status==='active'&&item.task_id===taskId&&item.request_type==='verification');
+  let remote=remoteCandidates.at(-1)??null;
+  if(remote){
+    const canonical=await (await import('./review.js')).canonicalGitRevision(m.worktree,remote.revision);
+    if(canonical!==head)remote=null;
+  }
+  if(remote?.action==='defer_verification')throw new Error('current candidate verification was deferred by a structured user decision');
+  if(remote?.action==='authorize_verification')await decisions.consumeConfirmationDecision(root,{taskId,requestType:'verification',revision:remote.revision,actions:['authorize_verification'],consumer:'harness-prepare'});
   const payload={schema_version:1,task_id:taskId,round:state.current_round,state:state.status,base_commit:m.base_commit,worktree:m.worktree,head,prompt_hash:sha256(prompt),prepared_at:new Date().toISOString()};
   const serialized=JSON.stringify(payload,null,2)+'\n',file=path.join(control(root),'output',`${taskId}-prepare.json`);await atomicWriteMany(root,[{file,content:serialized}]);await advance(root,taskId,null,'prepared',m,head,null,{prepare:sha256(serialized)});return file;
 }

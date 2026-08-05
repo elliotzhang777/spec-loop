@@ -138,6 +138,21 @@ test('requests are single-consumption, actor-bound, action-bound and expiry-boun
   assert.equal((await listConfirmationRequests(root)).find((item) => item.request_id === expired.request_id).status, 'expired')
 })
 
+test('confirmation store reclaims a lock left by a crashed process', async () => {
+  const root = await projectRoot()
+  await create(root)
+  const lock = path.join(root, '.spec-loop', 'connectors', 'feishu', 'confirmations', 'mutation.lock')
+  await mkdir(lock)
+  await writeFile(path.join(lock, 'owner.json'), JSON.stringify({
+    schema_version: 1,
+    pid: 2147483647,
+    token: 'crashed-process-token',
+    acquired_at: '2026-08-04T09:00:00.000Z',
+  }))
+  assert.equal((await listConfirmationRequests(root)).length, 1)
+  await assert.rejects(readFile(path.join(lock, 'owner.json')), /ENOENT/)
+})
+
 test('authority changes atomically invalidate the request before consumption', async () => {
   const root = await projectRoot()
   const request = await create(root)

@@ -3,10 +3,11 @@ import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, readMarkdown, sha256 } from '../files.js';
+import { findConfirmationDecision, recordConfirmationDecision } from '../confirmation-decisions.js';
 import { readWorkspace } from '../execution.js';
 import { approveProposal, readProject, scanTasks } from '../project.js';
 import { decideVisualReview, readVisualReviews, canonicalGitRevision } from '../review.js';
-import { readState } from '../task.js';
+import { applyNeedsUserDecision, readState } from '../task.js';
 import type { ConfirmationControllerAdapter, ConfirmationControllerCommand } from './feishu-callback.js';
 import { feishuConnectorRoot } from './feishu.js';
 
@@ -92,7 +93,7 @@ async function assertCurrentAuthority(projectRoot: string, command: Confirmation
   if (state.current_round !== command.round || state.level !== command.risk) throw new Error('Controller Round or risk authority changed');
   const allowedStatuses: Record<ConfirmationControllerCommand['request_type'], string[]> = {
     proposal: ['working', 'iterating'], needs_user: ['working', 'iterating'], visual_review: ['working', 'iterating'],
-    verification: ['working'], heavy_acceptance: ['verifying'],
+    verification: ['working'], heavy_acceptance: ['working', 'verifying'],
   };
   if (!allowedStatuses[command.request_type].includes(state.status)) throw new Error('Controller state transition is not allowed');
   const workspaceFile = path.join(projectRoot, '.spec-loop', 'output', `${command.task_id}-workspace.json`);
@@ -141,9 +142,13 @@ async function applyCommand(projectRoot: string, command: ConfirmationController
       );
       return;
     case 'needs_user':
+      await applyNeedsUserDecision(taskPath, {
+        commandId: command.command_id, requestId: command.request_id, actor: command.actor,
+        action: command.action as 'choose_option' | 'pause_task', optionId: command.option_id,
+      });
+      return;
     case 'verification':
     case 'heavy_acceptance':
-      // 这些动作本身就是 Controller 的结构化用户决定或授权；成功命令记录是本地事实源。
       return;
   }
 }
@@ -154,6 +159,10 @@ async function completedDomainEffect(projectRoot: string, command: ConfirmationC
   if (command.request_type === 'visual_review') {
     const task = (await scanTasks(projectRoot)).find((item) => item.task_id === command.task_id);
     if (task) file = path.join(task.path, 'controller-effects', `${command.command_id}.json`);
+  }
+  if (command.request_type === 'needs_user') {
+    const task = (await scanTasks(projectRoot)).find((item) => item.task_id === command.task_id);
+    if (task) file = path.join(task.path, 'user-decisions', `${command.command_id}.json`);
   }
   if (!file) return false;
   const info = await lstat(file).catch(() => null);
@@ -181,6 +190,9 @@ async function completedDomainEffect(projectRoot: string, command: ConfirmationC
       throw new Error('Controller visual review effect differs from the command');
     }
   }
+  if (command.request_type === 'needs_user') {
+    if (value.command_id !== command.command_id) throw new Error('Controller needs_user effect differs from the command');
+  }
   return true;
 }
 
@@ -203,7 +215,13 @@ export class LocalSpecLoopConfirmationController implements ConfirmationControll
       let current = commands.find((item) => item.command_id === command.command_id);
       if (current && current.command_hash !== hash) throw new Error('Controller idempotency key was reused with different authority facts');
       if (current?.status === 'succeeded') return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
+      if (current && await findConfirmationDecision(this.projectRoot, command.command_id)) {
+        current.status = 'succeeded'; current.completed_at = new Date().toISOString();
+        await writeCommands(this.projectRoot, root, commands);
+        return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
+      }
       if (current && await completedDomainEffect(this.projectRoot, command)) {
+        await recordConfirmationDecision(this.projectRoot, command);
         current.status = 'succeeded'; current.completed_at = new Date().toISOString();
         await writeCommands(this.projectRoot, root, commands);
         return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
@@ -219,6 +237,7 @@ export class LocalSpecLoopConfirmationController implements ConfirmationControll
         await writeCommands(this.projectRoot, root, commands);
       }
       await applyCommand(this.projectRoot, command, authority.taskPath);
+      await recordConfirmationDecision(this.projectRoot, command);
       current.status = 'succeeded'; current.completed_at = new Date().toISOString();
       await writeCommands(this.projectRoot, root, commands);
       return commandResultSchema.parse({ status: 'applied', audit_id: current.audit_id });

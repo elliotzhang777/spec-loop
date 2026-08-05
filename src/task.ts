@@ -159,7 +159,22 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
     revision = await canonicalGitRevision(state.repository, revision);
   }
   const controls = { visual_reviews: [] as string[], web_gates: [] as string[] };
-  if (state.level === 'heavy' && options.result === 'pass' && (!options.independent || !options.human)) throw new Error('Heavy pass requires independent verifier and human check');
+  let humanChecked=options.human;
+  if(state.level==='heavy'&&options.result==='pass'&&!humanChecked){
+    const decisions=await import('./confirmation-decisions.js'),projectRoot=decisions.managedProjectRoot(root);
+    if(projectRoot){
+      const canonical=await (await import('./review.js')).canonicalGitRevision(state.repository,revision);
+      const candidates=(await decisions.listConfirmationDecisions(projectRoot)).filter((item)=>item.status==='active'&&item.task_id===state.task_id&&item.request_type==='heavy_acceptance');
+      let remote=candidates.at(-1)??null;
+      if(remote&&await (await import('./review.js')).canonicalGitRevision(state.repository,remote.revision)!==canonical)remote=null;
+      if(remote?.action==='reject_heavy')throw new Error('current Heavy candidate was rejected by a structured user decision');
+      if(remote?.action==='accept_heavy'){
+        await decisions.consumeConfirmationDecision(projectRoot,{taskId:state.task_id,requestType:'heavy_acceptance',revision:remote.revision,actions:['accept_heavy'],consumer:'task-verify'});
+        humanChecked=true;
+      }
+    }
+  }
+  if (state.level === 'heavy' && options.result === 'pass' && (!options.independent || !humanChecked)) throw new Error('Heavy pass requires independent verifier and human check');
   if (options.result === 'pass') {
     controls.visual_reviews = await validateRequiredHumanReviews(root, state, revision);
     if (contract.webGates.length) {
@@ -178,7 +193,7 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
   };
   const command = options.result === 'pass' ? 'verify-pass' : 'verify-fail';
   state = { ...nextState({ ...state, code_revision: revision }, command), code_revision: revision };
-  const verify = { schema_version: 1 as const, task_id: state.task_id, round: state.current_round, result: options.result, verifier: options.verifier, independent: options.independent, human_checked: options.human, signed_round: state.current_round, evidence: [...existing.map((e) => e.id), evidenceId] };
+  const verify = { schema_version: 1 as const, task_id: state.task_id, round: state.current_round, result: options.result, verifier: options.verifier, independent: options.independent, human_checked: humanChecked, signed_round: state.current_round, evidence: [...existing.map((e) => e.id), evidenceId] };
   const roundData = { ...round.data, status: options.result === 'pass' ? 'verified_pass' as const : 'verified_fail' as const };
   await atomicWriteMany(root, [
     { file: path.join(root, artifactRel), content: artifact },
@@ -250,6 +265,43 @@ export async function deliverTask(root: string): Promise<TaskState> {
   await validateDelivery(root, state, criteria, humanReviews, webGates);
   const updated = nextState(state, 'deliver');
   await atomicWriteMany(root, [{ file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') }, await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated)]);
+  return updated;
+}
+
+export async function applyNeedsUserDecision(root: string, input: {
+  commandId: string; requestId: string; actor: string; action: 'choose_option' | 'pause_task'; optionId: string | null;
+}): Promise<TaskState> {
+  const marker = path.join(root, 'user-decisions', `${input.commandId}.json`);
+  if (await exists(marker)) {
+    const value = JSON.parse(await readFile(marker, 'utf8')) as { command_id?: string; request_id?: string; action?: string; option_id?: string | null };
+    if (value.command_id !== input.commandId || value.request_id !== input.requestId || value.action !== input.action || value.option_id !== input.optionId) {
+      throw new Error('needs_user decision marker differs from the command');
+    }
+    return readState(root);
+  }
+  if (input.action === 'choose_option' && !input.optionId) throw new Error('needs_user option decision requires an option id');
+  if (input.action === 'pause_task' && input.optionId !== null) throw new Error('pause decision may not contain an option id');
+  const state = await readState(root);
+  if (!['working', 'iterating'].includes(state.status)) throw new Error(`needs_user decision is illegal in ${state.status}`);
+  const markerValue = {
+    schema_version: 1, command_id: input.commandId, request_id: input.requestId, actor: input.actor,
+    action: input.action, option_id: input.optionId, decided_at: new Date().toISOString(),
+  };
+  const writes:Array<{file:string;content:string}>=[{file:marker,content:`${JSON.stringify(markerValue,null,2)}\n`}];
+  let updated = state;
+  if (input.action === 'choose_option' && state.status === 'iterating') {
+    updated = stateSchema.parse({
+      ...state, status: 'working', current_round: state.current_round + 1, state_version: state.state_version + 1,
+      updated_at: markerValue.decided_at, last_command: 'resume-with-user-decision',
+    }) as TaskState;
+    writes.push(
+      {file:path.join(root,'ROUNDS',`ROUND-${String(updated.current_round).padStart(4,'0')}.md`),content:roundTemplate(state.task_id,updated.current_round)},
+      {file:path.join(root,'TASK_STATE.md'),content:stringifyMarkdown(updated,'# Task State\n\nLifecycle fields are CLI-managed.')},
+      await stateHistoryWrite(root,updated),
+      ...await runtimeProjectionWrites(root,updated),
+    );
+  }
+  await atomicWriteMany(root,writes);
   return updated;
 }
 

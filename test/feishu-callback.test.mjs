@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { cli, fillContracts, readMd, tempRoot } from './helpers.mjs'
+import { cli, fillContracts, fillRound, readMd, tempRoot } from './helpers.mjs'
 import { createConfirmationRequest, listConfirmationRequests } from '../dist/connectors/feishu-confirmation.js'
 import {
   acceptFeishuAction,
@@ -16,6 +16,7 @@ import {
   reconcileFeishuActions,
 } from '../dist/connectors/feishu-callback.js'
 import { createLocalSpecLoopConfirmationController } from '../dist/connectors/feishu-controller.js'
+import { listConfirmationDecisions } from '../dist/confirmation-decisions.js'
 import { defaultFeishuConfig, FakeFeishuTransport, initFeishuConfig, runFeishuConnector } from '../dist/connectors/feishu.js'
 import { initGateConfig } from '../dist/execution.js'
 
@@ -80,7 +81,7 @@ class FakeController {
   }
 }
 
-async function controlledProject() {
+async function controlledProject({ level = 'standard' } = {}) {
   const root = await tempRoot('feishu-controlled-')
   const repository = path.join(root, 'repo')
   await mkdir(repository)
@@ -93,10 +94,11 @@ async function controlledProject() {
   assert.equal(cli(['project', 'init', root, '--id', project, '--name', 'Feishu fixture', '--repository', repository, '--branch', 'main', '--risk', 'standard']).code, 0)
   await initGateConfig(root)
   const taskRoot = path.join(root, '.spec-loop', 'tasks', 'task-024')
-  assert.equal(cli(['init', taskRoot, '--id', 'TASK-024', '--title', 'Feishu callback fixture', '--level', 'standard', '--repository', repository]).code, 0)
-  await fillContracts(taskRoot, { id: 'TASK-024', title: 'Feishu callback fixture', level: 'standard' })
+  assert.equal(cli(['init', taskRoot, '--id', 'TASK-024', '--title', 'Feishu callback fixture', '--level', level, '--repository', repository]).code, 0)
+  await fillContracts(taskRoot, { id: 'TASK-024', title: 'Feishu callback fixture', level })
   assert.equal(cli(['plan', taskRoot]).code, 0)
   assert.equal(cli(['round', taskRoot]).code, 0)
+  await fillRound(taskRoot, 1)
   const configFile = await initFeishuConfig(root)
   await writeFile(configFile, JSON.stringify({
     ...defaultFeishuConfig(), enabled: true, tenant_key: tenant,
@@ -107,7 +109,7 @@ async function controlledProject() {
   const acceptance = (await readMd(path.join(taskRoot, 'ACCEPTANCE.md'))).data
   const gates = (await readMd(path.join(root, '.spec-loop', 'GATES.md'))).data
   const current = await createConfirmationRequest(root, {
-    type: 'verification', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    type: 'verification', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: level,
     facts: {
       scope_summary: '授权当前候选执行正式验证', evidence_summary: ['定向回调证据'], invalidation_summary: '候选事实变化即失效',
       acceptance_hash: createHash('sha256').update(JSON.stringify(acceptance)).digest('hex'), screenshot_hashes: [],
@@ -116,6 +118,42 @@ async function controlledProject() {
     allowedActorIds: [actor], ttlSeconds: 3600,
   })
   return { root, repository, taskRoot, current }
+}
+
+async function authorityFacts(root, taskRoot, referenceIds, options = []) {
+  const acceptance = (await readMd(path.join(taskRoot, 'ACCEPTANCE.md'))).data
+  const gates = (await readMd(path.join(root, '.spec-loop', 'GATES.md'))).data
+  return {
+    scope_summary: '通过结构化领域命令处理当前确认决定',
+    evidence_summary: ['定向领域状态与消费链验证'],
+    invalidation_summary: '候选、验收标准或门禁变化即失效',
+    acceptance_hash: createHash('sha256').update(JSON.stringify(acceptance)).digest('hex'),
+    screenshot_hashes: [],
+    gate_plan_hash: createHash('sha256').update(JSON.stringify(gates)).digest('hex'),
+    reference_ids: referenceIds,
+    options,
+  }
+}
+
+function controllerCommand(request, action, optionId = null) {
+  const commandId = randomUUID()
+  return {
+    command_id: commandId,
+    idempotency_key: commandId,
+    project_id: request.project_id,
+    task_id: request.task_id,
+    request_id: request.request_id,
+    request_type: request.type,
+    round: request.round,
+    revision: request.revision,
+    content_hash: request.content_hash,
+    risk: request.risk,
+    facts: request.facts,
+    action,
+    option_id: optionId,
+    actor,
+    source: 'local',
+  }
 }
 
 test('long-connection handler persists and acknowledges before a slow Controller completes', async () => {
@@ -260,6 +298,92 @@ test('local CLI completes a current request through the production Controller', 
   assert.equal(result.code, 0, result.stderr)
   assert.equal(JSON.parse(result.stdout).record.status, 'succeeded')
   assert.equal((await listConfirmationRequests(root))[0].status, 'consumed')
+})
+
+test('production Controller rejection becomes a proposal-domain constraint', async () => {
+  const { root, repository, taskRoot } = await controlledProject()
+  const proposal = cli([
+    'triage', 'propose', root, '--source', '飞书确认', '--goal', '拒绝当前提案', '--risk', 'standard',
+    '--priority', 'P1', '--reason', '验证拒绝动作会约束后续领域命令', '--ac', '拒绝决定持续生效',
+  ])
+  assert.equal(proposal.code, 0, proposal.stderr)
+  const proposalId = proposal.stdout.trim()
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'proposal', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: await authorityFacts(root, taskRoot, [proposalId]), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  await createLocalSpecLoopConfirmationController(root).execute(controllerCommand(current, 'reject_proposal'))
+  const approval = cli(['triage', 'approve', root, proposalId, '--by', actor])
+  assert.notEqual(approval.code, 0)
+  assert.match(approval.stderr, /rejected by a current structured decision/i)
+})
+
+test('production Controller resumes an iterating task from a predefined needs-user choice', async () => {
+  const { root, repository, taskRoot } = await controlledProject()
+  const artifact = path.join(root, 'failed-check.txt')
+  await writeFile(artifact, 'targeted verifier requested a user choice\n')
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const failed = cli(['verify', taskRoot, '--result', 'fail', '--evidence', artifact, '--verifier', 'independent-test', '--independent', '--revision', revision])
+  assert.equal(failed.code, 0, failed.stderr)
+  const current = await createConfirmationRequest(root, {
+    type: 'needs_user', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: await authorityFacts(root, taskRoot, ['AC-1'], [{ id: 'OPTION_A', label: '采用方案 A' }]),
+    allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  const command = controllerCommand(current, 'choose_option', 'OPTION_A')
+  await createLocalSpecLoopConfirmationController(root).execute(command)
+  const state = (await readMd(path.join(taskRoot, 'TASK_STATE.md'))).data
+  assert.equal(state.status, 'working')
+  assert.equal(state.current_round, 2)
+  assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'active')
+})
+
+test('structured Heavy acceptance is consumed by task verification as the local human check', async () => {
+  const { root, repository, taskRoot } = await controlledProject({ level: 'heavy' })
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'heavy_acceptance', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'heavy',
+    facts: await authorityFacts(root, taskRoot, ['AC-1']), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  const command = controllerCommand(current, 'accept_heavy')
+  await createLocalSpecLoopConfirmationController(root).execute(command)
+  const artifact = path.join(root, 'heavy-pass.txt')
+  await writeFile(artifact, 'independent Heavy verification passed\n')
+  const verified = cli(['verify', taskRoot, '--result', 'pass', '--evidence', artifact, '--verifier', 'independent-heavy', '--independent', '--revision', revision])
+  assert.equal(verified.code, 0, verified.stderr)
+  assert.equal((await readMd(path.join(taskRoot, 'VERIFY.md'))).data.human_checked, true)
+  assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'consumed')
+})
+
+test('structured verification authorization is consumed when Harness prepares the exact candidate', async () => {
+  const { root, repository, taskRoot } = await controlledProject()
+  const proposal = cli([
+    'triage', 'propose', root, '--source', '飞书确认', '--goal', '验证当前候选', '--risk', 'standard',
+    '--priority', 'P1', '--reason', '为工作区执行建立有效授权', '--ac', '定向验证可以启动',
+  ])
+  assert.equal(proposal.code, 0, proposal.stderr)
+  const proposalId = proposal.stdout.trim()
+  assert.equal(cli(['triage', 'approve', root, proposalId, '--by', actor]).code, 0)
+  const spec = await readMd(path.join(taskRoot, 'SPEC.md'))
+  await writeFile(path.join(taskRoot, 'SPEC.md'), `---\n${[
+    'schema_version: 1', 'task_id: TASK-024', 'title: Feishu callback fixture', 'level: standard', `proposal_id: ${proposalId}`,
+  ].join('\n')}\n---\n\n${spec.body}\n`)
+  spawnSync('git', ['add', '.'], { cwd: repository })
+  spawnSync('git', ['commit', '-m', '补充目标规格'], { cwd: repository })
+  const workspace = cli(['workspace', 'create', root, 'TASK-024', '--json'])
+  assert.equal(workspace.code, 0, workspace.stderr)
+  const manifest = JSON.parse(workspace.stdout)
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: manifest.worktree, encoding: 'utf8' }).stdout.trim()
+  const current = await createConfirmationRequest(root, {
+    type: 'verification', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: await authorityFacts(root, taskRoot, ['AC-1']), allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  const command = controllerCommand(current, 'authorize_verification')
+  await createLocalSpecLoopConfirmationController(root).execute(command)
+  const prepared = cli(['harness', 'prepare', root, 'TASK-024', '--prompt', '只验证当前候选'])
+  assert.equal(prepared.code, 0, prepared.stderr)
+  assert.equal((await listConfirmationDecisions(root)).find((item) => item.command_id === command.command_id).status, 'consumed')
 })
 
 test('production Controller rejects a request after the actual repository HEAD changes', async () => {

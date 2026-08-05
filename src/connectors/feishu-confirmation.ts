@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
@@ -173,13 +173,66 @@ async function confirmationRoot(projectRoot: string): Promise<string> {
 
 async function withConfirmationLock<T>(root: string, action: () => Promise<T>): Promise<T> {
   const lock = path.join(root, 'mutation.lock');
+  const recoveryLock = path.join(root, 'mutation-lock-recovery');
+  const token = randomUUID();
   let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await mkdir(lock, { mode: 0o700 }); acquired = true; break; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; await new Promise((resolve) => setTimeout(resolve, 10)); }
+  for (let attempt = 0; attempt < 700; attempt += 1) {
+    const activeRecovery = await lstat(recoveryLock).catch(() => null);
+    if (activeRecovery) {
+      if (!activeRecovery.isDirectory() || activeRecovery.isSymbolicLink()) throw new Error('confirmation lock recovery path is invalid');
+      if (Date.now() - activeRecovery.mtimeMs >= 5_000) await rm(recoveryLock, { recursive: true, force: true });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      continue;
+    }
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      try { await writeFile(path.join(lock, 'owner.json'), `${JSON.stringify({ schema_version: 1, pid: process.pid, token, acquired_at: new Date().toISOString() })}\n`, { flag: 'wx', mode: 0o600 }); }
+      catch (error) { await rm(lock, { recursive: true, force: true }); throw error; }
+      acquired = true; break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const info = await lstat(lock).catch(() => null);
+      if (!info || !info.isDirectory() || info.isSymbolicLink()) throw new Error('confirmation mutation lock is invalid');
+      let recoveryOwner = false;
+      try { await mkdir(recoveryLock, { mode: 0o700 }); recoveryOwner = true; }
+      catch (recoveryError) {
+        if ((recoveryError as NodeJS.ErrnoException).code !== 'EEXIST') throw recoveryError;
+        const recoveryInfo=await lstat(recoveryLock).catch(()=>null);
+        if(!recoveryInfo||!recoveryInfo.isDirectory()||recoveryInfo.isSymbolicLink())throw new Error('confirmation lock recovery path is invalid');
+        if(Date.now()-recoveryInfo.mtimeMs>=5_000)await rm(recoveryLock,{recursive:true,force:true});
+      }
+      if (recoveryOwner) {
+        try {
+          const currentInfo = await lstat(lock).catch(() => null);
+          if (currentInfo?.isDirectory() && !currentInfo.isSymbolicLink()) {
+            const ownerRaw = await readFile(path.join(lock, 'owner.json'), 'utf8').catch(() => null);
+            let owner: { pid: number; token: string } | null = null;
+            try {
+              const parsed = ownerRaw ? JSON.parse(ownerRaw) as { pid?: unknown; token?: unknown } : null;
+              owner = parsed && Number.isInteger(parsed.pid) && (parsed.pid as number) > 0 && typeof parsed.token === 'string'
+                ? { pid: parsed.pid as number, token: parsed.token }
+                : null;
+            } catch { owner = null; }
+            let alive = true;
+            if (owner) {
+              try { process.kill(owner.pid, 0); } catch (pidError) { alive = (pidError as NodeJS.ErrnoException).code !== 'ESRCH'; }
+            }
+            const missingOwnerStale = !owner && Date.now() - currentInfo.mtimeMs >= 5_000;
+            if ((owner && !alive) || missingOwnerStale) await rm(lock, { recursive: true, force: true });
+          }
+        } finally { await rmdir(recoveryLock).catch(() => undefined); }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   if (!acquired) throw new Error('confirmation store is busy; explicit recovery is required');
-  try { return await action(); } finally { await rmdir(lock); }
+  try { return await action(); }
+  finally {
+    const ownerRaw = await readFile(path.join(lock, 'owner.json'), 'utf8').catch(() => null);
+    const owner = ownerRaw ? JSON.parse(ownerRaw) as { token?: string } : null;
+    if (owner?.token !== token) throw new Error('confirmation mutation lock ownership was lost');
+    await rm(lock, { recursive: true });
+  }
 }
 
 function eventHash(value: Omit<HistoryEvent, 'event_hash'>): string {
