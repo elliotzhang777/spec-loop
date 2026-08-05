@@ -60,10 +60,10 @@ Spec-Loop 把本地 Project、Task、Harness、Gate、Review 和 Delivery 事实
 
 ## 实际交付
 
-- 已实现行为：无。
-- 未实现/调整项：全部待实施。
-- 验证结论：待验证。
-- 关联完成工单：无。
+- 已实现行为：TASK-021～025 已完成，覆盖正式机器人连接基础、进度 Outbox、确认契约、长连接回调、身份授权、Controller 幂等消费、崩溃恢复、错误退避、隐私脱敏和持续安全 Gate。
+- 未实现/调整项：TASK-026 真实企业自建应用 Dogfood、独立 Verifier 组合复核和最终 Heavy。
+- 验证结论：TASK-025 独立 Verifier 与六个定向 Gate 通过；真实平台能力待 TASK-026 验证。
+- 关联完成工单：TASK-021、TASK-022、TASK-023、TASK-024、TASK-025。
 
 ## 变更记录
 

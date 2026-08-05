@@ -263,14 +263,15 @@ async function readHistory(root: string): Promise<HistoryEvent[]> {
       created: 'pending', consumed: 'consumed', rejected: 'rejected', expired: 'expired', invalidated: 'invalidated',
     };
     if (event.request.status !== expectedStatus[event.event_type]) throw new Error(`confirmation history semantic failure at sequence ${index + 1}`);
-    if ((event.event_type === 'consumed' || event.event_type === 'rejected') && event.request.consumed_at !== event.occurred_at) {
-      throw new Error(`confirmation history consumption time mismatch at sequence ${index + 1}`);
+    if ((event.event_type === 'consumed' || event.event_type === 'rejected')
+      && (!event.request.consumed_at || Date.parse(event.request.consumed_at) > Date.parse(event.occurred_at))) {
+      throw new Error(`confirmation history consumption time exceeds persistence time at sequence ${index + 1}`);
     }
     if (event.event_type === 'created' && event.occurred_at !== event.request.created_at) {
       throw new Error(`confirmation history creation time mismatch at sequence ${index + 1}`);
     }
     if ((event.event_type === 'consumed' || event.event_type === 'rejected')
-      && Date.parse(event.occurred_at) >= Date.parse(event.request.expires_at)) {
+      && Date.parse(event.request.consumed_at as string) >= Date.parse(event.request.expires_at)) {
       throw new Error(`confirmation history consumed after expiry at sequence ${index + 1}`);
     }
     if (event.event_type === 'expired' && Date.parse(event.occurred_at) < Date.parse(event.request.expires_at)) {
@@ -370,7 +371,11 @@ function appendEventValue(events: HistoryEvent[], eventType: HistoryEvent['event
     throw new Error('confirmation event time may not move backwards');
   }
   if (eventType === 'created' && now !== request.created_at) throw new Error('confirmation creation event must equal request creation time');
-  if ((eventType === 'consumed' || eventType === 'rejected') && Date.parse(now) >= Date.parse(request.expires_at)) throw new Error('confirmation consumption must be before expiry');
+  if ((eventType === 'consumed' || eventType === 'rejected')
+    && (!request.consumed_at || Date.parse(request.consumed_at) > Date.parse(now)
+      || Date.parse(request.consumed_at) >= Date.parse(request.expires_at))) {
+    throw new Error('confirmation consumption must be committed before expiry and no later than persistence');
+  }
   if (eventType === 'expired' && Date.parse(now) < Date.parse(request.expires_at)) throw new Error('confirmation expiry event may not precede deadline');
   const unsigned: Omit<HistoryEvent, 'event_hash'> = {
     schema_version: 1,
@@ -531,10 +536,17 @@ export async function executeConfirmationRequest(
   actorId: string,
   executor: (request: ConfirmationRequest) => Promise<void>,
   now = new Date(),
+  recovery: { committedAt?: Date } = {},
 ): Promise<ConfirmationRequest> {
   return mutateRequest(projectRoot, requestId, async (current, _now, _root, authority) => {
     if (current.status !== 'pending') throw new Error(`confirmation request is already ${current.status}`);
-    if (Date.parse(current.expires_at) <= now.getTime()) {
+    const committedAt = recovery.committedAt;
+    if (committedAt && (committedAt.getTime() < Date.parse(current.created_at)
+      || committedAt.getTime() >= Date.parse(current.expires_at)
+      || committedAt.getTime() > now.getTime())) {
+      throw new Error('recovered Controller completion time is outside the confirmation authority window');
+    }
+    if (!committedAt && Date.parse(current.expires_at) <= now.getTime()) {
       return { event: 'expired', request: confirmationRequestSchema.parse({ ...current, status: 'expired', invalidation_reason: '请求已过有效期' }) };
     }
     if (!current.allowed_actor_ids.includes(actorId)) throw new Error('actor is not allowed for this confirmation request');
@@ -557,7 +569,7 @@ export async function executeConfirmationRequest(
       request: confirmationRequestSchema.parse({
         ...current,
         status: rejected ? 'rejected' : 'consumed',
-        consumed_at: now.toISOString(),
+        consumed_at: (committedAt ?? now).toISOString(),
         consumed_action: action,
         consumed_actor_id: actorId,
       }),

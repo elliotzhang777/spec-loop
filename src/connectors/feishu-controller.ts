@@ -199,32 +199,32 @@ async function completedDomainEffect(projectRoot: string, command: ConfirmationC
 export class LocalSpecLoopConfirmationController implements ConfirmationControllerAdapter {
   constructor(private readonly projectRoot: string) {}
 
-  async lookup(commandId: string): Promise<{ status: 'applied' | 'duplicate'; audit_id: string } | null> {
+  async lookup(commandId: string): Promise<{ status: 'applied' | 'duplicate'; audit_id: string; committed_at: string } | null> {
     const root = await controllerRoot(this.projectRoot);
     return withControllerLock(root, async () => {
       const existing = (await readCommands(root)).find((item) => item.command_id === commandId && item.status === 'succeeded');
-      return existing ? commandResultSchema.parse({ status: 'duplicate', audit_id: existing.audit_id }) : null;
+      return existing ? { ...commandResultSchema.parse({ status: 'duplicate', audit_id: existing.audit_id }), committed_at: existing.completed_at as string } : null;
     });
   }
 
-  async execute(command: ConfirmationControllerCommand): Promise<{ status: 'applied' | 'duplicate'; audit_id: string }> {
+  async execute(command: ConfirmationControllerCommand): Promise<{ status: 'applied' | 'duplicate'; audit_id: string; committed_at?: string }> {
     const root = await controllerRoot(this.projectRoot);
     return withControllerLock(root, async () => {
       const commands = await readCommands(root);
       const hash = commandHash(command);
       let current = commands.find((item) => item.command_id === command.command_id);
       if (current && current.command_hash !== hash) throw new Error('Controller idempotency key was reused with different authority facts');
-      if (current?.status === 'succeeded') return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
+      if (current?.status === 'succeeded') return { ...commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id }), committed_at: current.completed_at as string };
       if (current && await findConfirmationDecision(this.projectRoot, command.command_id)) {
         current.status = 'succeeded'; current.completed_at = new Date().toISOString();
         await writeCommands(this.projectRoot, root, commands);
-        return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
+        return { ...commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id }), committed_at: current.completed_at as string };
       }
       if (current && await completedDomainEffect(this.projectRoot, command)) {
         await recordConfirmationDecision(this.projectRoot, command);
         current.status = 'succeeded'; current.completed_at = new Date().toISOString();
         await writeCommands(this.projectRoot, root, commands);
-        return commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id });
+        return { ...commandResultSchema.parse({ status: 'duplicate', audit_id: current.audit_id }), committed_at: current.completed_at as string };
       }
       const authority = await assertCurrentAuthority(this.projectRoot, command);
       if (!current) {
@@ -240,7 +240,7 @@ export class LocalSpecLoopConfirmationController implements ConfirmationControll
       await recordConfirmationDecision(this.projectRoot, command);
       current.status = 'succeeded'; current.completed_at = new Date().toISOString();
       await writeCommands(this.projectRoot, root, commands);
-      return commandResultSchema.parse({ status: 'applied', audit_id: current.audit_id });
+      return { ...commandResultSchema.parse({ status: 'applied', audit_id: current.audit_id }), committed_at: current.completed_at as string };
     });
   }
 }

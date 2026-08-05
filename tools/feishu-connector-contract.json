@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "action_ids": [
+    "accept_heavy",
+    "approve_proposal",
+    "approve_visual",
+    "authorize_verification",
+    "choose_option",
+    "defer_verification",
+    "pause_task",
+    "reject_heavy",
+    "reject_proposal",
+    "reject_visual"
+  ],
+  "controller_adapters": [
+    "src/connectors/feishu-controller.ts"
+  ],
+  "remote_write_entrypoints": [
+    "src/connectors/feishu-callback.ts#acceptFeishuAction",
+    "src/connectors/feishu-callback.ts#acceptLocalConfirmationAction",
+    "src/connectors/feishu-callback.ts#createFeishuCardActionHandler",
+    "src/connectors/feishu-callback.ts#processFeishuAction",
+    "src/connectors/feishu-callback.ts#reconcileFeishuActions"
+  ]
+}

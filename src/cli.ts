@@ -10,7 +10,7 @@ import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
 import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
-import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig, runFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
+import { disableFeishuConnector, feishuConnectorStatus, initFeishuConfig, readFeishuConfig, superviseFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
 import { acceptLocalConfirmationAction, listFeishuActionInbox, processFeishuAction } from './connectors/feishu-callback.js';
 import { createLocalSpecLoopConfirmationController } from './connectors/feishu-controller.js';
 
@@ -158,9 +158,18 @@ feishu.command('status').argument('<project-dir>').option('--json').action((dir,
 feishu.command('start').argument('<project-dir>').option('--holder <identity>').action((dir,o)=>action(async()=>{
   console.log('starting feishu connector; press Ctrl+C to stop');
   const projectRoot=root(dir);
-  await runFeishuConnector(projectRoot,{holder:o.holder,confirmationController:createLocalSpecLoopConfirmationController(projectRoot)});
+  await superviseFeishuConnector(projectRoot,{holder:o.holder,confirmationController:createLocalSpecLoopConfirmationController(projectRoot)});
 }));
 feishu.command('stop').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await stopFeishuConnector(root(dir)),o.json)));
+feishu.command('disable').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await disableFeishuConnector(root(dir)),o.json)));
+feishu.command('reconcile').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
+  const projectRoot=root(dir),{reconcileFeishuConnector}=await import('./connectors/feishu-operations.js');
+  print(await reconcileFeishuConnector(projectRoot,createLocalSpecLoopConfirmationController(projectRoot)),o.json);
+}));
+feishu.command('retry-dead-letter').argument('<project-dir>').option('--record <record-id...>').option('--json').action((dir,o)=>action(async()=>{
+  const {retryFeishuDeadLetters}=await import('./connectors/feishu-progress.js');
+  const retried=await retryFeishuDeadLetters(root(dir),o.record??[]);print(o.json?{retried}:`retried ${retried} Feishu dead-letter record(s)`,o.json);
+}));
 feishu.command('confirm-local').argument('<project-dir>').requiredOption('--request <request-id>')
   .addOption(new Option('--action <action-id>').choices([
     'approve_proposal','reject_proposal','choose_option','pause_task','approve_visual','reject_visual',

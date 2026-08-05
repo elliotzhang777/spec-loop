@@ -144,6 +144,32 @@ Outbox 状态为 `pending → sending → sent | retry_wait | dead_letter`，记
 
 审计事件包含 connector、project、task、request、event、actor 映射、动作、决策、拒绝原因、时间和相关本地 revision。个人标识默认哈希化展示，原始 open_id 仅保存在本机受限配置/状态中。卡片摘要不得包含源码 diff、完整日志、Secret、Token、客户数据或未显式允许的 Evidence 内容。
 
+### 恢复、安全与运行手册
+
+连接器启动时必须先回收 ActionInbox 死亡 claim 并幂等恢复已经落地的 Controller 结果，再执行 ConfirmationRequest 投影校验与剩余请求过期处理、Outbox 不明发送恢复，之后才允许执行凭据解析、远程 preflight 和长连接建连。该顺序避免“领域命令已成功、确认投影尚未落盘”的请求在重启边界被提前判为过期。运行状态只保存脱敏摘要，至少区分 `starting`、`connected`、`retry_wait`、`blocked`、`stopped` 和 `disabled`，并展示最近连接时间、心跳、Outbox/Inbox 堆积、dead-letter 和本地修复建议。
+
+常用运维命令：
+
+```bash
+# 查看脱敏后的连接状态、积压和修复建议
+node dist/cli.js connectors feishu status <project-dir> --json
+
+# 无需联网地重新核对本地 Confirmation、Outbox 和 Inbox
+node dist/cli.js connectors feishu reconcile <project-dir> --json
+
+# 修复目标或权限后，由人工显式重试 dead-letter；可用 --record 限定记录
+node dist/cli.js connectors feishu retry-dead-letter <project-dir> --json
+
+# 关闭连接器并请求当前持有者协作停止；本地闭环不受影响
+node dist/cli.js connectors feishu disable <project-dir> --json
+```
+
+- 429、网络和 5xx：连接器监督器按配置执行有上限的指数退避；Outbox 保持稳定平台幂等键。
+- 401/403、目标不可用、配置或凭据错误：进入 `blocked`/`dead_letter`，不盲目重试；修复后由运维命令继续。
+- 凭据泄漏或权限吊销：先在飞书开放平台吊销/轮换凭据，再执行 `disable`；Secret 仍只由环境变量或 macOS Keychain 提供。
+- 飞书不可用：不得修改或删除本地 Task、History、Evidence、Review 和 Delivery；使用 `confirm-local` 处理同一个 ConfirmationRequest。
+- 状态文件、投影或清单完整性校验失败：保持 fail closed，不从卡片或日志反推权威事实；先保留现场，再执行 `reconcile` 或本地修复。
+
 ## 方案取舍
 
 | 方案 | 优点 | 缺点 | 结论 |
@@ -186,15 +212,15 @@ Outbox 状态为 `pending → sending → sent | retry_wait | dead_letter`，记
 | [TASK-022](../04-task/TASK-022-feishu-progress-outbox.md) | 进度投影、卡片渲染和可靠 Outbox | TASK-021 | 已完成 |
 | [TASK-023](../04-task/TASK-023-feishu-confirmation-contract.md) | 确认请求、卡片动作和候选绑定契约 | TASK-021 | 已完成 |
 | [TASK-024](../04-task/TASK-024-feishu-callback-identity.md) | 长连接回调、身份授权、幂等消费和 Controller 接入 | TASK-023 | 已完成 |
-| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 已批准 |
+| [TASK-025](../04-task/TASK-025-feishu-recovery-security.md) | 重试、reconcile、审计、隐私和对抗 Gate | TASK-022、TASK-024 | 已完成 |
 | [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 真实机器人 Dogfood、独立 Verifier 和最终 Heavy | TASK-021～025 | 已批准 |
 
 ## 实际实现
 
-- 最终实现：TASK-021～024 已完成；已具备配置与 Secret Provider、进度 Outbox、确认契约、长连接回调、身份授权、幂等消费和结构化 Controller 接入。
-- 与设计差异：回调预授权使用带完整性哈希的无锁 Confirmation 投影；ActionInbox claim 记录进程所有者，并在远程 preflight 前执行启动恢复。
+- 最终实现：TASK-021～025 已完成；已具备配置与 Secret Provider、进度 Outbox、确认契约、长连接回调、身份授权、幂等消费、结构化 Controller、崩溃恢复、退避与 dead-letter 运维、集中脱敏和持续安全 Gate。
+- 与设计差异：回调预授权使用带完整性哈希的无锁 Confirmation 投影；Controller 持久化完成时间用于恢复 TTL 后已提交结果；ActionInbox claim 记录进程所有者，只有明确死亡才可回收，并在远程 preflight 前执行启动恢复。
 - 运维/迁移说明：实施前需要用户在飞书开放平台创建企业自建应用、开启机器人能力、配置最小权限并提供本机 Secret 引用和测试接收目标。
-- 关联完成工单：TASK-021、TASK-022、TASK-023、TASK-024。
+- 关联完成工单：TASK-021、TASK-022、TASK-023、TASK-024、TASK-025。
 
 ## 官方参考
 

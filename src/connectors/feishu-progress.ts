@@ -347,6 +347,22 @@ export async function readFeishuOutboxRecords(projectRoot: string): Promise<Feis
   return outbox.records.map((record) => outboxRecordSchema.parse(record));
 }
 
+export async function retryFeishuDeadLetters(projectRoot: string, recordIds: string[] = [], now = new Date()): Promise<number> {
+  const root = await outboxRoot(projectRoot), selected = new Set(recordIds.map((item) => z.string().uuid().parse(item)));
+  return withOutboxLock(root, async () => {
+    const outbox = await readOutboxAt(root); let retried = 0;
+    for (const record of outbox.records) {
+      if (record.status !== 'dead_letter' || (selected.size > 0 && !selected.has(record.id))) continue;
+      record.status = 'retry_wait'; record.attempts = 0; record.next_attempt_at = now.toISOString();
+      record.last_error = null; record.delivery_token = null; record.updated_at = now.toISOString();
+      retried += 1;
+    }
+    if (selected.size > 0 && retried !== selected.size) throw new Error('one or more Feishu dead-letter records do not exist or are not retryable');
+    if (retried) await writeOutbox(projectRoot, root, outbox);
+    return retried;
+  });
+}
+
 const harnessFactSchema = z.object({
   task_id: z.string(), head: z.string().regex(/^[a-f0-9]{40,64}$/), stage: z.enum(['prepared', 'executed', 'collected', 'verified', 'reported']),
   evidence_hashes: z.object({

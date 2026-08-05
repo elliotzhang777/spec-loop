@@ -1,10 +1,10 @@
 # TASK-025：飞书连接器恢复、安全与持续门禁
 
-- 状态：已批准
+- 状态：已完成
 - 优先级：P0
-- 负责人：待定
+- 负责人：Codex
 - 创建日期：2026-08-04
-- 最后更新：2026-08-04
+- 最后更新：2026-08-06
 - 所属设计：[DES-008](../03-design/DES-008-feishu-bot-connector.md)
 - 所属特性：[FEAT-008](../02-feature/FEAT-008-feishu-progress-approval-connector.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -32,12 +32,12 @@
 
 ## 验收标准
 
-- [ ] AC-1：任意步骤崩溃重启后可从本地事实恢复，不丢失有效确认，也不重复推进状态。
-- [ ] AC-2：断线、429、5xx、权限撤销和目标不可用有明确状态、退避、告警和人工修复入口。
-- [ ] AC-3：Secret canary、Token、Authorization header、原始个人标识和敏感 Evidence 不出现在输出与卡片中。
-- [ ] AC-4：重放、伪造、篡改、并发和未知远程写入口对抗测试全部 fail closed。
-- [ ] AC-5：标准质量 Profile 自动运行飞书 Connector Gate；新增未登记远程动作、卡片动作或 Controller Adapter 时门禁失败。
-- [ ] AC-6：禁用或吊销连接器后，本地 Task、History、Evidence 和 Delivery 可继续正常使用。
+- [x] AC-1：任意步骤崩溃重启后可从本地事实恢复，不丢失有效确认，也不重复推进状态。
+- [x] AC-2：断线、429、5xx、权限撤销和目标不可用有明确状态、退避、告警和人工修复入口。
+- [x] AC-3：Secret canary、Token、Authorization header、原始个人标识和敏感 Evidence 不出现在输出与卡片中。
+- [x] AC-4：重放、伪造、篡改、并发和未知远程写入口对抗测试全部 fail closed。
+- [x] AC-5：标准质量 Profile 自动运行飞书 Connector Gate；新增未登记远程动作、卡片动作或 Controller Adapter 时门禁失败。
+- [x] AC-6：禁用或吊销连接器后，本地 Task、History、Evidence 和 Delivery 可继续正常使用。
 
 ## 验证计划
 
@@ -56,8 +56,8 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施（草稿阶段）
-- 变更文件/交付物：实施完成后按实际结果记录
-- 关键实现与决策：可重建状态、fail-closed 自动发现门禁和本地降级。
+- 完成日期：2026-08-06
+- 变更文件/交付物：飞书运行状态与恢复编排、ActionInbox/Confirmation/Outbox 恢复、安全脱敏、dead-letter 运维入口、自动发现持续 Gate 及 98 项定向测试。
+- 关键实现与决策：Controller 成功结果携带持久化提交时间；启动先恢复领域成功再处理剩余确认过期；活跃 PID claim 不按静态超时抢占；运行状态使用独立原子快照，避免与 Controller 事务竞争。
 - 与原设计的差异：无
-- 遗留风险：真实平台行为在 TASK-026 最终验证。
+- 遗留风险：真实平台投递、身份映射、断线恢复和卡片确认行为在 TASK-026 最终 Dogfood 验证。
