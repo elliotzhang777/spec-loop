@@ -584,7 +584,8 @@ test('concurrent startup reconcile recovers a hard crash after the Controller pe
   ])
   assert.equal(startups.every((item) => item.status === 'rejected' && /preflight unavailable/.test(item.reason.message)), true)
   assert.equal(executeCalls, 1)
-  assert.equal((await listFeishuActionInbox(root))[0].status, 'succeeded')
+  const recoveredInbox = (await listFeishuActionInbox(root))[0]
+  assert.equal(recoveredInbox.status, 'succeeded', JSON.stringify(recoveredInbox))
   assert.equal((await listConfirmationRequests(root))[0].status, 'consumed')
   assert.equal((await listConfirmationDecisions(root)).filter((item) => item.command_id === accepted.record.controller_command_id).length, 1)
   assert.equal(await lstat(lock).catch(() => null), null)

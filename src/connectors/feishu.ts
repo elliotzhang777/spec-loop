@@ -128,13 +128,19 @@ const sensitiveKey = '(?:app[_-]?secret|client[_-]?secret|secret|token|[a-z][a-z
 const sensitiveJsonAssignment = new RegExp(`(["'])(${sensitiveKey})\\1\\s*:\\s*(["'])[^\\r\\n]*?\\3`, 'gi');
 const sensitiveAssignment = new RegExp(`\\b(${sensitiveKey})\\b\\s*[:=]\\s*([^\\s,;]+)`, 'gi');
 const bearerToken = /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}/gi;
+const platformIdentity = /\b(?:ou|on|oc)_[A-Za-z0-9_-]{8,128}\b/g;
+const emailIdentity = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const credentialCanary = /\b(?:AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|glpat-[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[0-9A-Za-z-]{10,}|sk_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
 
 export function redactFeishuText(value: string, secrets: string[] = []): string {
   let redacted = value
     .replace(sensitiveJsonAssignment, '$1$2$1:$3[REDACTED]$3')
     .replace(authorizationHeader, 'Authorization=[REDACTED]')
     .replace(sensitiveAssignment, '$1=[REDACTED]')
-    .replace(bearerToken, 'Bearer [REDACTED]');
+    .replace(bearerToken, 'Bearer [REDACTED]')
+    .replace(credentialCanary, '[CREDENTIAL_REDACTED]')
+    .replace(platformIdentity, (identity) => `${identity.slice(0, 3)}[HASH:${sha256(identity).slice(0, 8)}]`)
+    .replace(emailIdentity, (identity) => `[EMAIL:${sha256(identity.toLowerCase()).slice(0, 8)}]`);
   for (const secret of secrets.filter(Boolean).sort((a, b) => b.length - a.length)) redacted = redacted.split(secret).join('[REDACTED]');
   return redacted;
 }
@@ -222,6 +228,19 @@ export async function readFeishuConfig(projectRoot: string): Promise<FeishuConne
   try { parsed = JSON.parse(raw); }
   catch (error) { throw new Error(`feishu connector config is invalid JSON: ${(error as Error).message}`); }
   return feishuConnectorConfigSchema.parse(parsed);
+}
+
+export async function disableFeishuConnector(projectRoot: string): Promise<{ disabled: true; stop_requested: boolean }> {
+  const config = await readFeishuConfig(projectRoot);
+  const stop = await stopFeishuConnector(projectRoot);
+  const root = await feishuConnectorRoot(projectRoot), disabled = feishuConnectorConfigSchema.parse({ ...config, enabled: false });
+  await atomicWriteMany(projectRoot, [{ file: path.join(root, 'config.json'), content: `${JSON.stringify(disabled, null, 2)}\n` }]);
+  const previous = await import('./feishu-operations.js').then(({ readFeishuOperationalState }) => readFeishuOperationalState(projectRoot)).catch(() => null);
+  await import('./feishu-operations.js').then(({ writeFeishuOperationalState }) => writeFeishuOperationalState(projectRoot, {
+    status: 'disabled', attempt: 0, last_transition_at: new Date().toISOString(), last_connected_at: previous?.last_connected_at ?? null,
+    next_retry_at: null, failure_category: null, error_summary: null,
+  }));
+  return { disabled: true, stop_requested: stop.stopped };
 }
 
 export interface FeishuCardAction {
@@ -646,7 +665,7 @@ const leaseSchema = z.object({
 }).strict();
 
 const leaseHeartbeatSchema = z.object({
-  schema_version: z.literal(1), token: z.uuid(), expires_at: z.iso.datetime(),
+  schema_version: z.literal(1), token: z.uuid(), expires_at: z.iso.datetime(), renewed_at: z.iso.datetime().optional(),
 }).strict();
 
 function leaseHeartbeatFile(root: string, token: string): string {
@@ -735,6 +754,15 @@ export async function readFeishuLease(projectRoot: string): Promise<ConnectorLea
     : lease;
 }
 
+async function readFeishuHeartbeatAt(projectRoot: string, lease: ConnectorLease | null): Promise<string | null> {
+  if (!lease) return null;
+  const root = await feishuConnectorRoot(projectRoot);
+  const raw = await readRegularJson(leaseHeartbeatFile(root, lease.token), 'feishu connector lease heartbeat');
+  if (!raw) return lease.acquired_at;
+  const heartbeat = leaseHeartbeatSchema.parse(raw);
+  return heartbeat.renewed_at ?? lease.acquired_at;
+}
+
 export async function releaseFeishuLease(projectRoot: string, token: string): Promise<void> {
   const root = await feishuConnectorRoot(projectRoot);
   const file = path.join(root, 'lease.json');
@@ -755,7 +783,7 @@ export async function renewFeishuLease(projectRoot: string, token: string, ttlMs
     const current = await readFeishuLease(projectRoot);
     if (!current || current.token !== token || Date.parse(current.expires_at) <= Date.now()) throw new Error('feishu connector lease was lost');
     const renewed: ConnectorLease = { ...current, expires_at: new Date(Date.now() + ttlMs).toISOString() };
-    const heartbeat = { schema_version: 1, token, expires_at: renewed.expires_at };
+    const heartbeat = { schema_version: 1, token, expires_at: renewed.expires_at, renewed_at: new Date().toISOString() };
     await atomicWriteMany(root, [{ file: leaseHeartbeatFile(root, token), content: `${JSON.stringify(heartbeat, null, 2)}\n` }]);
     return renewed;
   });
@@ -794,6 +822,8 @@ function confirmationResultCard(record: FeishuActionInboxRecord): object {
 export async function runFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
   const config = await readFeishuConfig(projectRoot);
   if (!config.enabled) throw new Error('feishu connector is disabled');
+  const operations = await import('./feishu-operations.js');
+  const previousOperation = await operations.readFeishuOperationalState(projectRoot).catch(() => null);
   const holder = options.holder ?? `spec-loop-feishu-${process.pid}`;
   const ttlMs = options.leaseTtlMs ?? 60_000;
   const controller = new AbortController();
@@ -818,6 +848,7 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   const confirmationController = options.confirmationController;
   let recoveredActions: FeishuActionInboxRecord[] = [];
   const heartbeatDelay = Math.max(500, Math.floor(ttlMs / 3));
+  let runFailure: unknown = null;
   const scheduleHeartbeat = (): void => {
     heartbeatTimer = setTimeout(() => {
       heartbeatWork = (async () => {
@@ -834,10 +865,19 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
   };
   try {
     if (signal.aborted) return;
+    await operations.writeFeishuOperationalState(projectRoot, {
+      status: 'starting', attempt: (previousOperation?.attempt ?? 0) + 1, last_transition_at: new Date().toISOString(),
+      last_connected_at: previousOperation?.last_connected_at ?? null, next_retry_at: null, failure_category: null, error_summary: null,
+    }).catch(() => undefined);
     if (confirmationController) {
       const callbacks = await import('./feishu-callback.js');
       recoveredActions = await callbacks.reconcileFeishuActions(projectRoot, confirmationController);
     }
+    const confirmations = await import('./feishu-confirmation.js');
+    const requests = await confirmations.listConfirmationRequests(projectRoot);
+    if (requests.some((item) => item.status === 'pending')) await confirmations.expireConfirmationRequests(projectRoot);
+    const progress = await import('./feishu-progress.js');
+    await progress.reconcileFeishuOutbox(projectRoot);
     if (signal.aborted) return;
     transport = options.transport ?? new OfficialFeishuTransport(await resolveFeishuCredentials(config, options.secretProvider));
     if (signal.aborted) return;
@@ -859,8 +899,6 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     lease = await acquireFeishuLease(projectRoot, holder, ttlMs);
     if (signal.aborted) return;
     scheduleHeartbeat();
-    const progress = await import('./feishu-progress.js');
-    await progress.reconcileFeishuOutbox(projectRoot);
     const callbacks = await import('./feishu-callback.js');
     const resultHandler = async (record: FeishuActionInboxRecord): Promise<void> => {
       if (record.envelope.message_id && transport) await transport.updateCard(record.envelope.message_id, confirmationResultCard(record));
@@ -900,6 +938,10 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     if (!connected || signal.aborted) return;
     await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
     acceptingActions = !signal.aborted;
+    if (acceptingActions) await operations.writeFeishuOperationalState(projectRoot, {
+      status: 'connected', attempt: 0, last_transition_at: new Date().toISOString(), last_connected_at: new Date().toISOString(),
+      next_retry_at: null, failure_category: null, error_summary: null,
+    }).catch(() => undefined);
     const outboxPollMs = options.outboxPollMs ?? 1_000;
     if (!Number.isInteger(outboxPollMs) || outboxPollMs < 10 || outboxPollMs > 60_000) throw new Error('invalid feishu outbox poll interval');
     const aggregateWindowMs = options.progressAggregateWindowMs ?? config.notifications.aggregate_window_seconds * 1_000;
@@ -923,6 +965,16 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     if (!signal.aborted) {
       await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }
+  } catch (error) {
+    runFailure = error;
+    const classified = operations.classifyFeishuOperationalError(error);
+    await operations.writeFeishuOperationalState(projectRoot, {
+      status: classified.retryable ? 'retry_wait' : 'blocked', attempt: (previousOperation?.attempt ?? 0) + 1,
+      last_transition_at: new Date().toISOString(), last_connected_at: previousOperation?.last_connected_at ?? null,
+      next_retry_at: classified.retryable ? new Date(Date.now() + classified.retryAfterMs).toISOString() : null,
+      failure_category: classified.category, error_summary: classified.summary,
+    }).catch(() => undefined);
+    throw error;
   } finally {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     if (progressTimer) clearTimeout(progressTimer);
@@ -936,6 +988,53 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     }
     await transport?.disconnect().catch(() => undefined);
     if (lease) await releaseFeishuLease(projectRoot, lease.token).catch(() => undefined);
+    if (!runFailure && signal.aborted) await operations.writeFeishuOperationalState(projectRoot, {
+      status: 'stopped', attempt: 0, last_transition_at: new Date().toISOString(),
+      last_connected_at: (await operations.readFeishuOperationalState(projectRoot).catch(() => null))?.last_connected_at ?? null,
+      next_retry_at: null, failure_category: null, error_summary: null,
+    }).catch(() => undefined);
+  }
+}
+
+export async function superviseFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
+  const config = await readFeishuConfig(projectRoot);
+  const controller = new AbortController();
+  const stop = (): void => controller.abort();
+  const forwardAbort = (): void => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', forwardAbort, { once: true });
+  if (!options.signal) {
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  }
+  let attempt = 0;
+  try {
+    while (!controller.signal.aborted) {
+      try {
+        await runFeishuConnector(projectRoot, { ...options, signal: controller.signal });
+        return;
+      } catch (error) {
+        attempt += 1;
+        const operations = await import('./feishu-operations.js'), classified = operations.classifyFeishuOperationalError(error);
+        if (!classified.retryable || attempt >= config.retry.max_attempts) throw error;
+        const delay = operations.retryDelayMs(attempt, config.retry.base_delay_ms, config.retry.max_delay_ms, classified.retryAfterMs);
+        const previous = await operations.readFeishuOperationalState(projectRoot).catch(() => null);
+        await operations.writeFeishuOperationalState(projectRoot, {
+          status: 'retry_wait', attempt, last_transition_at: new Date().toISOString(), last_connected_at: previous?.last_connected_at ?? null,
+          next_retry_at: new Date(Date.now() + delay).toISOString(), failure_category: classified.category, error_summary: classified.summary,
+        });
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, delay);
+          controller.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
+      }
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', forwardAbort);
+    if (!options.signal) {
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+    }
   }
 }
 
@@ -966,6 +1065,16 @@ export async function feishuConnectorStatus(projectRoot: string, provider: Secre
       last_sent_at: null,
       error: redactFeishuText((error as Error).message),
     }));
+  const operations = await import('./feishu-operations.js').then(({ readFeishuOperationalState }) => readFeishuOperationalState(projectRoot)).catch((error: unknown) => ({ error: redactFeishuText((error as Error).message) }));
+  const inbox = await import('./feishu-callback.js').then(({ readFeishuActionInboxSummary }) => readFeishuActionInboxSummary(projectRoot)).catch((error: unknown) => ({ error: redactFeishuText((error as Error).message) }));
+  const confirmations = await import('./feishu-confirmation.js').then(async ({ listConfirmationRequests }) => {
+    const requests = await listConfirmationRequests(projectRoot);
+    return { pending: requests.filter((item) => item.status === 'pending').length, expired: requests.filter((item) => item.status === 'expired').length };
+  }).catch((error: unknown) => ({ error: redactFeishuText((error as Error).message) }));
+  const remediation: string[] = [];
+  if (!config.enabled) remediation.push('连接器已关闭；本地 Task、Evidence 和 Delivery 可继续使用');
+  if (outbox && 'dead_letter' in outbox && typeof outbox.dead_letter === 'number' && outbox.dead_letter > 0) remediation.push('修复目标或权限后执行 connectors feishu retry-dead-letter');
+  if (operations && 'status' in operations && operations.status === 'blocked') remediation.push('检查凭据、权限或目标配置后重新启动连接器');
   return {
     enabled: config.enabled,
     tenant_configured: isValidTenantKey(config.tenant_key),
@@ -974,6 +1083,13 @@ export async function feishuConnectorStatus(projectRoot: string, provider: Secre
     credentials_available: credentialsAvailable,
     credential_error: credentialError,
     outbox,
-    lease: lease ? { holder: lease.holder, pid: lease.pid, expires_at: lease.expires_at, expired: Date.parse(lease.expires_at) <= Date.now() } : null,
+    inbox,
+    confirmations,
+    operations,
+    remediation,
+    lease: lease ? {
+      holder: lease.holder, pid: lease.pid, expires_at: lease.expires_at, expired: Date.parse(lease.expires_at) <= Date.now(),
+      last_heartbeat_at: await readFeishuHeartbeatAt(projectRoot, lease),
+    } : null,
   };
 }

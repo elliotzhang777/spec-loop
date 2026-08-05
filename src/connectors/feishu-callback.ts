@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
@@ -130,16 +130,34 @@ async function actionRoot(projectRoot: string): Promise<string> {
 
 async function withInboxLock<T>(root: string, action: () => Promise<T>): Promise<T> {
   const lock = path.join(root, 'mutation.lock');
+  const ownerFile = path.join(lock, 'owner.json');
   let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await mkdir(lock, { mode: 0o700 }); acquired = true; break; }
+  for (let attempt = 0; attempt < 700; attempt += 1) {
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      await writeFile(ownerFile, `${JSON.stringify({ schema_version: 1, pid: process.pid, created_at: new Date().toISOString() })}\n`, { flag: 'wx', mode: 0o600 });
+      acquired = true; break;
+    }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const info = await lstat(lock).catch(() => null);
+      if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('feishu action inbox lock is invalid');
+      const owner = await readFile(ownerFile, 'utf8').then((value) => JSON.parse(value) as { pid?: number; created_at?: string }).catch(() => null);
+      let ownerDead = false;
+      if (owner?.pid) {
+        try { process.kill(owner.pid, 0); }
+        catch (pidError) { ownerDead = (pidError as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }
+      const missingOwnerStale = !owner && Date.now() - info.mtimeMs >= 5_000;
+      if (ownerDead || missingOwnerStale) {
+        await rm(lock, { recursive: true, force: true });
+        continue;
+      }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
   if (!acquired) throw new Error('feishu action inbox is busy; explicit recovery is required');
-  try { return await action(); } finally { await rmdir(lock); }
+  try { return await action(); } finally { await rm(lock, { recursive: true, force: true }); }
 }
 
 async function readInbox(root: string): Promise<FeishuActionInboxRecord[]> {
@@ -163,12 +181,14 @@ function actionKey(envelope: Pick<FeishuActionEnvelope, 'source' | 'request_id' 
   }));
 }
 
+/** @feishu-remote-write */
 export async function acceptFeishuAction(projectRoot: string, input: Omit<FeishuActionEnvelope, 'source' | 'local_actor' | 'received_at'> & { receivedAt?: Date }): Promise<{ record: FeishuActionInboxRecord; duplicate: boolean }> {
   const { receivedAt, ...envelope } = input;
   const parsed = actionEnvelopeSchema.parse({ ...envelope, source: 'feishu', local_actor: null, received_at: (receivedAt ?? new Date()).toISOString() });
   return acceptAction(projectRoot, parsed, await preauthorizeAction(projectRoot, parsed));
 }
 
+/** @feishu-remote-write */
 export async function acceptLocalConfirmationAction(projectRoot: string, input: {
   eventId?: string;
   projectId: string;
@@ -257,6 +277,7 @@ function assertOption(request: ConfirmationRequest, envelope: FeishuActionEnvelo
   if (!request.facts.options.some((item) => item.id === envelope.option_id)) throw permanent('selected option is not allowed for this confirmation request');
 }
 
+/** @feishu-remote-write */
 export async function processFeishuAction(projectRoot: string, inboxId: string, controller: ConfirmationControllerAdapter, now = new Date()): Promise<FeishuActionInboxRecord> {
   const root = await actionRoot(projectRoot);
   const claimed = await withInboxLock(root, async () => {
@@ -336,6 +357,7 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
   });
 }
 
+/** @feishu-remote-write */
 export async function reconcileFeishuActions(
   projectRoot: string,
   controller: ConfirmationControllerAdapter,
@@ -372,6 +394,25 @@ export async function listFeishuActionInbox(projectRoot: string): Promise<Feishu
   return withInboxLock(root, () => readInbox(root));
 }
 
+export async function readFeishuActionInboxSummary(projectRoot: string): Promise<{
+  pending: number;
+  processing: number;
+  failed: number;
+  rejected: number;
+  last_rejection: string | null;
+}> {
+  const records = await listFeishuActionInbox(projectRoot);
+  const rejected = records.filter((item) => item.status === 'rejected').sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  return {
+    pending: records.filter((item) => item.status === 'pending').length,
+    processing: records.filter((item) => item.status === 'processing').length,
+    failed: records.filter((item) => item.status === 'failed').length,
+    rejected: rejected.length,
+    last_rejection: rejected[0]?.reason ? redactFeishuText(rejected[0].reason) : null,
+  };
+}
+
+/** @feishu-remote-write */
 export function createFeishuCardActionHandler(projectRoot: string, input: {
   projectId: string;
   controller: ConfirmationControllerAdapter;

@@ -12,7 +12,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test test/*.test.mjs",
+    "check:feishu-contracts": "node tools/check-feishu-connector-contracts.mjs",
+    "quality:standard": "npm run build && npm run check:feishu-contracts && node --test test/*.test.mjs",
+    "test": "npm run quality:standard",
     "check": "npm run build && node dist/cli.js --help"
   },
   "engines": {
