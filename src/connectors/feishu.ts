@@ -782,6 +782,15 @@ export interface RunFeishuConnectorOptions {
   onConfirmationResult?: (record: FeishuActionInboxRecord) => Promise<void> | void;
 }
 
+function confirmationResultCard(record: FeishuActionInboxRecord): object {
+  const succeeded = record.status === 'succeeded';
+  return {
+    schema: '2.0',
+    header: { title: { tag: 'plain_text', content: succeeded ? '确认已处理' : '确认未执行' }, template: succeeded ? 'green' : 'red' },
+    body: { elements: [{ tag: 'markdown', content: succeeded ? '该决定已写入本地 Controller 审计。' : `处理结果：${record.reason ?? record.status}` }] },
+  };
+}
+
 export async function runFeishuConnector(projectRoot: string, options: RunFeishuConnectorOptions = {}): Promise<void> {
   const config = await readFeishuConfig(projectRoot);
   if (!config.enabled) throw new Error('feishu connector is disabled');
@@ -845,13 +854,22 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     scheduleHeartbeat();
     const progress = await import('./feishu-progress.js');
     await progress.reconcileFeishuOutbox(projectRoot);
-    const actionHandler = options.confirmationController
-      ? (await import('./feishu-callback.js')).createFeishuCardActionHandler(projectRoot, {
+    const callbacks = await import('./feishu-callback.js');
+    const confirmationController = options.confirmationController;
+    const resultHandler = async (record: FeishuActionInboxRecord): Promise<void> => {
+      if (record.envelope.message_id && transport) await transport.updateCard(record.envelope.message_id, confirmationResultCard(record));
+      await options.onConfirmationResult?.(record);
+    };
+    const actionHandler = confirmationController
+      ? callbacks.createFeishuCardActionHandler(projectRoot, {
         projectId: (await (await import('../project.js')).readProject(projectRoot)).project_id,
-        controller: options.confirmationController,
-        onResult: options.onConfirmationResult,
+        controller: confirmationController,
+        onResult: resultHandler,
       })
       : null;
+    if (confirmationController) {
+      for (const record of await callbacks.reconcileFeishuActions(projectRoot, confirmationController)) await resultHandler(record);
+    }
     const connectPromise = transport.connect(async (action) => {
       if (signal.aborted || !acceptingActions || !lease) return;
       try {

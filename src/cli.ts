@@ -11,7 +11,8 @@ import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFrom
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
 import { feishuConnectorStatus, initFeishuConfig, readFeishuConfig, runFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
-import { acceptLocalConfirmationAction, listFeishuActionInbox } from './connectors/feishu-callback.js';
+import { acceptLocalConfirmationAction, listFeishuActionInbox, processFeishuAction } from './connectors/feishu-callback.js';
+import { createLocalSpecLoopConfirmationController } from './connectors/feishu-controller.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -156,7 +157,8 @@ feishu.command('check').argument('<project-dir>').option('--json').action((dir,o
 feishu.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await feishuConnectorStatus(root(dir)),o.json)));
 feishu.command('start').argument('<project-dir>').option('--holder <identity>').action((dir,o)=>action(async()=>{
   console.log('starting feishu connector; press Ctrl+C to stop');
-  await runFeishuConnector(root(dir),{holder:o.holder});
+  const projectRoot=root(dir);
+  await runFeishuConnector(projectRoot,{holder:o.holder,confirmationController:createLocalSpecLoopConfirmationController(projectRoot)});
 }));
 feishu.command('stop').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await stopFeishuConnector(root(dir)),o.json)));
 feishu.command('confirm-local').argument('<project-dir>').requiredOption('--request <request-id>')
@@ -170,7 +172,8 @@ feishu.command('confirm-local').argument('<project-dir>').requiredOption('--requ
     const result=await acceptLocalConfirmationAction(projectRoot,{
       eventId:o.event,projectId:project.project_id,actor:o.actor,requestId:o.request,action:o.action,optionId:o.option,
     });
-    print(o.json?result:`accepted local confirmation ${result.record.inbox_id} (${result.record.status})`,o.json);
+    const record=await processFeishuAction(projectRoot,result.record.inbox_id,createLocalSpecLoopConfirmationController(projectRoot));
+    print(o.json?{...result,record}:`processed local confirmation ${record.inbox_id} (${record.status})`,o.json);
   }));
 feishu.command('inbox').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
   const records=await listFeishuActionInbox(root(dir));

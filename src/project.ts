@@ -149,7 +149,26 @@ export interface TaskIndex {task_id:string;path:string;project_id:string;status:
 export async function scanTasks(root:string):Promise<TaskIndex[]>{const project=await readProject(root);const dir=path.resolve(root,project.tasks_root);const out:TaskIndex[]=[];for(const entry of (await readdir(dir,{withFileTypes:true}))){if(!entry.isDirectory())continue;const taskRoot=path.join(dir,entry.name);if(!(await exists(path.join(taskRoot,'TASK_STATE.md'))))continue;const s=await readState(taskRoot);out.push({task_id:s.task_id,path:taskRoot,project_id:project.project_id,status:s.status,level:s.level,round:s.current_round,state_version:s.state_version,resumable:['planned','working','verifying','iterating'].includes(s.status)})}const ids=out.map(x=>x.task_id);if(new Set(ids).size!==ids.length)throw new Error('duplicate task ID in project');return out.sort((a,b)=>a.task_id.localeCompare(b.task_id))}
 
 export async function createProposal(root:string,input:{source:string;goal:string;risk:z.infer<typeof risk>;priority:'P0'|'P1'|'P2'|'P3';reason:string;criteria:string[]}):Promise<string>{const p=await readProject(root);const dir=path.join(control(root),'proposals');const n=(await readdir(dir)).filter(x=>/^PROP-\d+\.json$/.test(x)).length+1;const value={schema_version:1 as const,proposal_id:`PROP-${n}`,project_id:p.project_id,source:input.source,suggested_goal:input.goal,risk_level:input.risk,priority:input.priority,reason:input.reason,initial_acceptance:input.criteria.map((text,i)=>({id:`AC-${i+1}`,text})),created_at:new Date().toISOString()};proposalSchema.parse(value);assertSubstantive(JSON.stringify(value),'proposal');await atomicWriteMany(root,[{file:path.join(dir,`${value.proposal_id}.json`),content:JSON.stringify(value,null,2)+'\n'}]);return value.proposal_id}
-export async function approveProposal(root:string,id:string,by:string,ttlHours=24):Promise<string>{if(!Number.isFinite(ttlHours)||ttlHours<=0||ttlHours>168)throw new Error('approval ttl must be within 0–168 hours');const file=path.join(control(root),'proposals',`${id}.json`),raw=await readFile(file,'utf8'),p=proposalSchema.parse(JSON.parse(raw)),dir=path.join(control(root),'approvals'),n=(await readdir(dir)).filter(x=>/^APR-\d+\.json$/.test(x)).length+1,approvedAt=new Date(),value={schema_version:1 as const,approval_id:`APR-${n}`,proposal_id:id,proposal_hash:sha256(raw),approved_by:by,approved_at:approvedAt.toISOString(),expires_at:new Date(approvedAt.getTime()+ttlHours*3600_000).toISOString(),approved_scope:['create_task','execute_in_worktree'] as Array<'create_task'|'execute_in_worktree'>,risk_level:p.risk_level};approvalSchema.parse(value);await atomicWriteMany(root,[{file:path.join(dir,`${value.approval_id}.json`),content:JSON.stringify(value,null,2)+'\n'}]);return value.approval_id}
+export async function approveProposal(root:string,id:string,by:string,ttlHours=24,controllerCommandId?:string):Promise<string>{
+  if(!Number.isFinite(ttlHours)||ttlHours<=0||ttlHours>168)throw new Error('approval ttl must be within 0–168 hours');
+  const effectFile=controllerCommandId?path.join(control(root),'controller-effects',`${controllerCommandId}.json`):null;
+  if(effectFile){
+    const effectInfo=await lstat(effectFile).catch(()=>null);
+    if(effectInfo){
+      if(!effectInfo.isFile()||effectInfo.isSymbolicLink())throw new Error('proposal Controller effect marker is invalid');
+      const effect=JSON.parse(await readFile(effectFile,'utf8')) as {command_id?:string;proposal_id?:string;approval_id?:string};
+      if(effect.command_id!==controllerCommandId||effect.proposal_id!==id||!effect.approval_id)throw new Error('proposal Controller effect marker differs from the command');
+      return effect.approval_id;
+    }
+  }
+  const file=path.join(control(root),'proposals',`${id}.json`),raw=await readFile(file,'utf8'),p=proposalSchema.parse(JSON.parse(raw));
+  const dir=path.join(control(root),'approvals'),n=(await readdir(dir)).filter(x=>/^APR-\d+\.json$/.test(x)).length+1,approvedAt=new Date();
+  const value={schema_version:1 as const,approval_id:`APR-${n}`,proposal_id:id,proposal_hash:sha256(raw),approved_by:by,approved_at:approvedAt.toISOString(),expires_at:new Date(approvedAt.getTime()+ttlHours*3600_000).toISOString(),approved_scope:['create_task','execute_in_worktree'] as Array<'create_task'|'execute_in_worktree'>,risk_level:p.risk_level};
+  approvalSchema.parse(value);
+  const writes:Array<{file:string;content:string}>=[{file:path.join(dir,`${value.approval_id}.json`),content:JSON.stringify(value,null,2)+'\n'}];
+  if(effectFile)writes.push({file:effectFile,content:`${JSON.stringify({schema_version:1,command_id:controllerCommandId,proposal_id:id,approval_id:value.approval_id},null,2)}\n`});
+  await atomicWriteMany(root,writes);return value.approval_id;
+}
 export async function verifyApproval(root:string,proposalId:string,scope:'create_task'|'execute_in_worktree',expectedRisk?:z.infer<typeof risk>):Promise<void>{
   const raw=await readFile(path.join(control(root),'proposals',`${proposalId}.json`),'utf8');
   const proposal=proposalSchema.parse(JSON.parse(raw));

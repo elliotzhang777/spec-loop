@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { tempRoot } from './helpers.mjs'
+import { cli, fillContracts, readMd, tempRoot } from './helpers.mjs'
 import { createConfirmationRequest, listConfirmationRequests } from '../dist/connectors/feishu-confirmation.js'
 import {
   acceptFeishuAction,
@@ -12,8 +13,11 @@ import {
   createFeishuCardActionHandler,
   listFeishuActionInbox,
   processFeishuAction,
+  reconcileFeishuActions,
 } from '../dist/connectors/feishu-callback.js'
-import { defaultFeishuConfig, initFeishuConfig } from '../dist/connectors/feishu.js'
+import { createLocalSpecLoopConfirmationController } from '../dist/connectors/feishu-controller.js'
+import { defaultFeishuConfig, FakeFeishuTransport, initFeishuConfig, runFeishuConnector } from '../dist/connectors/feishu.js'
+import { initGateConfig } from '../dist/execution.js'
 
 const tenant = '736588c9260f175c'
 const project = 'PROJ-TEST'
@@ -74,6 +78,44 @@ class FakeController {
     this.results.set(command.idempotency_key, audit)
     return { status: 'applied', audit_id: audit }
   }
+}
+
+async function controlledProject() {
+  const root = await tempRoot('feishu-controlled-')
+  const repository = path.join(root, 'repo')
+  await mkdir(repository)
+  spawnSync('git', ['init', '-b', 'main'], { cwd: repository })
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repository })
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repository })
+  await writeFile(path.join(repository, 'README.md'), 'controlled fixture\n')
+  spawnSync('git', ['add', 'README.md'], { cwd: repository })
+  spawnSync('git', ['commit', '-m', 'fixture'], { cwd: repository })
+  assert.equal(cli(['project', 'init', root, '--id', project, '--name', 'Feishu fixture', '--repository', repository, '--branch', 'main', '--risk', 'standard']).code, 0)
+  await initGateConfig(root)
+  const taskRoot = path.join(root, '.spec-loop', 'tasks', 'task-024')
+  assert.equal(cli(['init', taskRoot, '--id', 'TASK-024', '--title', 'Feishu callback fixture', '--level', 'standard', '--repository', repository]).code, 0)
+  await fillContracts(taskRoot, { id: 'TASK-024', title: 'Feishu callback fixture', level: 'standard' })
+  assert.equal(cli(['plan', taskRoot]).code, 0)
+  assert.equal(cli(['round', taskRoot]).code, 0)
+  const configFile = await initFeishuConfig(root)
+  await writeFile(configFile, JSON.stringify({
+    ...defaultFeishuConfig(), enabled: true, tenant_key: tenant,
+    targets: [{ project_id: project, receive_id_type: 'chat_id', receive_id: 'oc_test_chat' }],
+    approvers: [{ project_id: project, open_id: openId, local_actor: actor, request_types: ['verification'] }],
+  }))
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).stdout.trim()
+  const acceptance = (await readMd(path.join(taskRoot, 'ACCEPTANCE.md'))).data
+  const gates = (await readMd(path.join(root, '.spec-loop', 'GATES.md'))).data
+  const current = await createConfirmationRequest(root, {
+    type: 'verification', projectId: project, taskId: 'TASK-024', round: 1, revision, risk: 'standard',
+    facts: {
+      scope_summary: '授权当前候选执行正式验证', evidence_summary: ['定向回调证据'], invalidation_summary: '候选事实变化即失效',
+      acceptance_hash: createHash('sha256').update(JSON.stringify(acceptance)).digest('hex'), screenshot_hashes: [],
+      gate_plan_hash: createHash('sha256').update(JSON.stringify(gates)).digest('hex'), reference_ids: ['AC-1'], options: [],
+    },
+    allowedActorIds: [actor], ttlSeconds: 3600,
+  })
+  return { root, repository, taskRoot, current }
 }
 
 test('long-connection handler persists and acknowledges before a slow Controller completes', async () => {
@@ -209,9 +251,92 @@ test('disabled Feishu connector still allows the same request through the local 
   assert.equal(controller.calls[0].source, 'local')
 })
 
+test('local CLI completes a current request through the production Controller', async () => {
+  const { root, current } = await controlledProject()
+  const result = cli([
+    'connectors', 'feishu', 'confirm-local', root,
+    '--request', current.request_id, '--action', 'authorize_verification', '--actor', actor, '--json',
+  ])
+  assert.equal(result.code, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).record.status, 'succeeded')
+  assert.equal((await listConfirmationRequests(root))[0].status, 'consumed')
+})
+
+test('production Controller rejects a request after the actual repository HEAD changes', async () => {
+  const { root, repository, current } = await controlledProject()
+  await writeFile(path.join(repository, 'changed.txt'), 'new candidate\n')
+  spawnSync('git', ['add', 'changed.txt'], { cwd: repository })
+  spawnSync('git', ['commit', '-m', 'change candidate'], { cwd: repository })
+  const accepted = await acceptLocalConfirmationAction(root, {
+    eventId: 'local_stale_001', projectId: project, actor, requestId: current.request_id,
+    action: 'authorize_verification', receivedAt: new Date(),
+  })
+  const result = await processFeishuAction(root, accepted.record.inbox_id, createLocalSpecLoopConfirmationController(root))
+  assert.equal(result.status, 'failed')
+  assert.match(result.reason, /revision changed/i)
+  assert.equal((await listConfirmationRequests(root))[0].status, 'pending')
+})
+
+test('an unauthorized click cannot poison the authorized actor action key', async () => {
+  const root = await projectRoot()
+  const current = await request(root)
+  const unauthorized = await acceptFeishuAction(root, callbackInput(current, { operator_open_id: 'ou_other_user' }))
+  assert.equal(unauthorized.record.status, 'rejected')
+  const authorized = await acceptFeishuAction(root, callbackInput(current, { event_id: 'evt_authorized_2' }))
+  assert.equal(authorized.duplicate, false)
+  assert.equal(authorized.record.status, 'pending')
+  const result = await processFeishuAction(root, authorized.record.inbox_id, new FakeController(), new Date('2026-08-05T00:01:01.000Z'))
+  assert.equal(result.status, 'succeeded')
+})
+
+test('startup reconcile reclaims a stale processing action and completes it idempotently', async () => {
+  const root = await projectRoot()
+  const current = await request(root)
+  const accepted = await acceptFeishuAction(root, callbackInput(current))
+  const file = path.join(root, '.spec-loop', 'connectors', 'feishu', 'actions', 'inbox.json')
+  const inbox = JSON.parse(await readFile(file, 'utf8'))
+  inbox.records[0].status = 'processing'
+  inbox.records[0].attempts = 1
+  inbox.records[0].claim_token = 'a0c1f841-55d7-4f2c-a2aa-b2de52fed001'
+  inbox.records[0].claimed_at = '2026-08-05T00:00:00.000Z'
+  inbox.records[0].updated_at = '2026-08-05T00:00:00.000Z'
+  inbox.projection_hash = createHash('sha256').update(JSON.stringify(inbox.records)).digest('hex')
+  await writeFile(file, JSON.stringify(inbox))
+  const controller = new FakeController()
+  const results = await reconcileFeishuActions(root, controller, new Date('2026-08-05T00:01:01.000Z'), 0)
+  assert.equal(results.length, 1)
+  assert.equal(results[0].status, 'succeeded')
+  assert.equal(controller.calls.length, 1)
+})
+
+test('running connector processes a real card action and updates its result card', async () => {
+  const { root, current } = await controlledProject()
+  const transport = new FakeFeishuTransport()
+  const abort = new AbortController()
+  let resolveResult
+  const completed = new Promise((resolve) => { resolveResult = resolve })
+  const running = runFeishuConnector(root, {
+    transport, signal: abort.signal, leaseTtlMs: 1000, outboxPollMs: 100,
+    confirmationController: createLocalSpecLoopConfirmationController(root),
+    onConfirmationResult: resolveResult,
+  })
+  while (transport.connectionState() !== 'connected') await new Promise((resolve) => setTimeout(resolve, 10))
+  await transport.emitCardAction({
+    eventId: 'evt_runtime_001', tenantKey: tenant, messageId: 'om_runtime', chatId: 'oc_test_chat', operatorOpenId: openId,
+    action: { tag: 'button', value: { request_id: current.request_id, action_id: 'authorize_verification' } },
+  })
+  const result = await completed
+  assert.equal(result.status, 'succeeded')
+  assert.equal(transport.updated.length, 1)
+  abort.abort()
+  await running
+})
+
 test('Connector writes only its inbox and calls a structured Controller Adapter', async () => {
   const source = await readFile(new URL('../src/connectors/feishu-callback.ts', import.meta.url), 'utf8')
+  const cliSource = await readFile(new URL('../src/cli.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /TASK_STATE\.md|APPROVAL\.md|DELIVERY\.md|reviews\//)
   assert.match(source, /controller\.execute\(\{/)
   assert.match(source, /executeConfirmationRequest\(/)
+  assert.match(cliSource, /confirmationController:createLocalSpecLoopConfirmationController\(projectRoot\)/)
 })

@@ -69,6 +69,7 @@ export interface ConfirmationControllerCommand {
   revision: string;
   content_hash: string;
   risk: ConfirmationRequest['risk'];
+  facts: ConfirmationRequest['facts'];
   action: ConfirmationAction;
   option_id: string | null;
   actor: string;
@@ -77,6 +78,7 @@ export interface ConfirmationControllerCommand {
 
 export interface ConfirmationControllerAdapter {
   execute(command: ConfirmationControllerCommand): Promise<{ status: 'applied' | 'duplicate'; audit_id: string }>;
+  lookup?(commandId: string): Promise<{ status: 'applied' | 'duplicate'; audit_id: string } | null>;
 }
 
 const inboxRecordSchema = z.object({
@@ -153,13 +155,17 @@ async function writeInbox(projectRoot: string, root: string, records: FeishuActi
   await atomicWriteMany(projectRoot, [{ file: path.join(root, 'inbox.json'), content: `${JSON.stringify(projection(records), null, 2)}\n` }]);
 }
 
-function actionKey(envelope: Pick<FeishuActionEnvelope, 'request_id' | 'action_id' | 'option_id'>): string {
-  return sha256(JSON.stringify({ request_id: envelope.request_id, action_id: envelope.action_id, option_id: envelope.option_id }));
+function actionKey(envelope: Pick<FeishuActionEnvelope, 'source' | 'request_id' | 'action_id' | 'option_id' | 'tenant_key' | 'operator_open_id' | 'local_actor'>): string {
+  return sha256(JSON.stringify({
+    source: envelope.source, request_id: envelope.request_id, action_id: envelope.action_id, option_id: envelope.option_id,
+    tenant_key: envelope.tenant_key, operator_open_id: envelope.operator_open_id, local_actor: envelope.local_actor,
+  }));
 }
 
 export async function acceptFeishuAction(projectRoot: string, input: Omit<FeishuActionEnvelope, 'source' | 'local_actor' | 'received_at'> & { receivedAt?: Date }): Promise<{ record: FeishuActionInboxRecord; duplicate: boolean }> {
   const { receivedAt, ...envelope } = input;
-  return acceptAction(projectRoot, actionEnvelopeSchema.parse({ ...envelope, source: 'feishu', local_actor: null, received_at: (receivedAt ?? new Date()).toISOString() }));
+  const parsed = actionEnvelopeSchema.parse({ ...envelope, source: 'feishu', local_actor: null, received_at: (receivedAt ?? new Date()).toISOString() });
+  return acceptAction(projectRoot, parsed, await preauthorizeAction(projectRoot, parsed));
 }
 
 export async function acceptLocalConfirmationAction(projectRoot: string, input: {
@@ -171,15 +177,31 @@ export async function acceptLocalConfirmationAction(projectRoot: string, input: 
   optionId?: string;
   receivedAt?: Date;
 }): Promise<{ record: FeishuActionInboxRecord; duplicate: boolean }> {
-  return acceptAction(projectRoot, actionEnvelopeSchema.parse({
+  const envelope = actionEnvelopeSchema.parse({
     source: 'local', event_id: input.eventId ?? `local_${randomUUID().replaceAll('-', '')}`,
     tenant_key: null, project_id: input.projectId, operator_open_id: null, local_actor: input.actor,
     request_id: input.requestId, action_id: input.action, option_id: input.optionId ?? null,
     message_id: null, received_at: (input.receivedAt ?? new Date()).toISOString(),
-  }));
+  });
+  return acceptAction(projectRoot, envelope, await preauthorizeAction(projectRoot, envelope));
 }
 
-async function acceptAction(projectRoot: string, envelope: FeishuActionEnvelope): Promise<{ record: FeishuActionInboxRecord; duplicate: boolean }> {
+async function preauthorizeAction(projectRoot: string, envelope: FeishuActionEnvelope): Promise<string | null> {
+  try {
+    const request = (await listConfirmationRequests(projectRoot)).find((item) => item.request_id === envelope.request_id);
+    if (!request) throw permanent('confirmation request does not exist');
+    await resolveActor(projectRoot, envelope, request);
+    if (!request.allowed_actions.includes(envelope.action_id)) throw permanent('action is not allowed for this confirmation request');
+    assertOption(request, envelope);
+    return null;
+  } catch (error) {
+    const value = error as Error & { permanent?: boolean };
+    if (value.permanent !== true) throw error;
+    return redactFeishuText(value.message).slice(0, 300) || 'action identity preauthorization failed';
+  }
+}
+
+async function acceptAction(projectRoot: string, envelope: FeishuActionEnvelope, preRejection: string | null): Promise<{ record: FeishuActionInboxRecord; duplicate: boolean }> {
   const root = await actionRoot(projectRoot);
   return withInboxLock(root, async () => {
     const records = await readInbox(root);
@@ -194,13 +216,14 @@ async function acceptAction(projectRoot: string, envelope: FeishuActionEnvelope)
       return { record: inboxRecordSchema.parse(byAction), duplicate: true };
     }
     const requestClaim = records.find((item) => item.envelope.request_id === envelope.request_id && item.status !== 'rejected');
-    const rejected = Boolean(requestClaim);
+    const rejection = preRejection ?? (requestClaim ? 'confirmation request is already claimed by another action' : null);
+    const rejected = rejection !== null;
     const record = inboxRecordSchema.parse({
       schema_version: 1, inbox_id: randomUUID(), event_ids: [envelope.event_id], envelope,
       request_action_key: key, controller_command_id: randomUUID(), status: rejected ? 'rejected' : 'pending', attempts: 0,
       claim_token: null, claimed_at: null, completed_at: rejected ? envelope.received_at : null,
       resolved_actor: null, confirmation_status: null, controller_result: null,
-      reason: rejected ? 'confirmation request is already claimed by another action' : null,
+      reason: rejection,
       created_at: envelope.received_at, updated_at: envelope.received_at,
     });
     records.push(record);
@@ -276,7 +299,7 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
           idempotency_key: claimed.record.controller_command_id,
           project_id: current.project_id, task_id: current.task_id, request_id: current.request_id,
           request_type: current.type, round: current.round, revision: current.revision,
-          content_hash: current.content_hash, risk: current.risk,
+          content_hash: current.content_hash, risk: current.risk, facts: current.facts,
           action: claimed.record.envelope.action_id, option_id: claimed.record.envelope.option_id,
           actor: resolvedActor as string, source: claimed.record.envelope.source,
         });
@@ -310,6 +333,33 @@ export async function processFeishuAction(projectRoot: string, inboxId: string, 
     await writeInbox(projectRoot, root, records);
     return inboxRecordSchema.parse(record);
   });
+}
+
+export async function reconcileFeishuActions(
+  projectRoot: string,
+  controller: ConfirmationControllerAdapter,
+  now = new Date(),
+  staleProcessingMs = 30_000,
+): Promise<FeishuActionInboxRecord[]> {
+  if (!Number.isInteger(staleProcessingMs) || staleProcessingMs < 0) throw new Error('invalid Feishu action reconcile threshold');
+  const root = await actionRoot(projectRoot);
+  const pendingIds = await withInboxLock(root, async () => {
+    const records = await readInbox(root);
+    let changed = false;
+    for (const record of records) {
+      if (record.status !== 'processing') continue;
+      const known = await controller.lookup?.(record.controller_command_id) ?? null;
+      const stale = record.claimed_at !== null && now.getTime() - Date.parse(record.claimed_at) >= staleProcessingMs;
+      if (!known && !stale) continue;
+      record.status = 'pending'; record.claim_token = null; record.claimed_at = null;
+      record.updated_at = now.toISOString(); record.reason = null; changed = true;
+    }
+    if (changed) await writeInbox(projectRoot, root, records);
+    return records.filter((item) => item.status === 'pending').map((item) => item.inbox_id);
+  });
+  const results: FeishuActionInboxRecord[] = [];
+  for (const inboxId of pendingIds) results.push(await processFeishuAction(projectRoot, inboxId, controller, now));
+  return results;
 }
 
 export async function listFeishuActionInbox(projectRoot: string): Promise<FeishuActionInboxRecord[]> {
