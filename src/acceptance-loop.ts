@@ -1,0 +1,640 @@
+import { execFile } from 'node:child_process';
+import { readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { z } from 'zod';
+import { atomicWriteMany, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
+import { readGateConfig, readWorkspace, runGates, type GateResult } from './execution.js';
+import { readProject, scanTasks, verifyTaskExecutionApproval } from './project.js';
+import { readState } from './task.js';
+
+const exec = promisify(execFile);
+const control = (root: string) => path.join(root, '.spec-loop');
+const taskIdSchema = z.string().regex(/^(?:WEB-)?TASK-[A-Z0-9][A-Z0-9-]*$/);
+const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const acIdSchema = z.string().regex(/^AC-[1-9]\d*$/);
+const riskTagSchema = z.enum(['functional', 'security', 'privacy', 'authorization', 'data_integrity', 'critical_path']);
+const protectedRiskTags = new Set(['security', 'privacy', 'authorization', 'data_integrity', 'critical_path']);
+
+const criterionSchema = z.object({
+  id: acIdSchema,
+  text: z.string().min(3),
+  risk_tags: z.array(riskTagSchema).min(1),
+  waivable: z.boolean(),
+}).strict();
+
+const useCaseSchema = z.object({
+  id: z.string().regex(/^UC-[1-9]\d*$/),
+  ac: z.array(acIdSchema).min(1),
+  scenario: z.string().min(3),
+}).strict();
+
+const toolSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  kind: z.enum(['command', 'unit', 'api', 'playwright']),
+  gate_id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  command: z.array(z.string().min(1)).min(1).nullable(),
+  playwright: z.object({
+    config: z.string().nullable(), tests: z.array(z.string()), projects: z.array(z.string()), grep: z.string().nullable(), require_screenshots: z.boolean(),
+  }).strict().nullable(),
+}).strict().superRefine((value, ctx) => {
+  if (value.kind === 'playwright' && (!value.playwright || value.command)) ctx.addIssue({ code: 'custom', message: `${value.id}: Playwright tool requires playwright config and no command` });
+  if (value.kind !== 'playwright' && (!value.command || value.playwright)) ctx.addIssue({ code: 'custom', message: `${value.id}: command/unit/api tool requires command and no playwright config` });
+});
+
+const assertionSchema = z.object({
+  id: z.string().regex(/^AS-[1-9]\d*$/),
+  ac: z.array(acIdSchema).min(1),
+  tool_id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  operator: z.enum(['exit_code_zero', 'playwright_clean', 'json_match', 'human_judgement']),
+  expected: z.string().min(1),
+}).strict();
+
+const evidenceRequirementSchema = z.object({
+  id: z.string().regex(/^ER-[1-9]\d*$/),
+  ac: z.array(acIdSchema).min(1),
+  tool_id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  kind: z.enum(['command_log', 'test_report', 'api_transcript', 'screenshot', 'review_report']),
+  required: z.literal(true),
+}).strict();
+
+export const acceptanceContractInputSchema = z.object({
+  schema_version: z.literal(2),
+  task_id: taskIdSchema,
+  version: z.number().int().positive(),
+  risk: z.enum(['light', 'standard', 'heavy']),
+  critical_path: z.boolean(),
+  depends_on: z.array(taskIdSchema),
+  criteria: z.array(criterionSchema).min(1),
+  use_cases: z.array(useCaseSchema).min(1),
+  tools: z.array(toolSchema).min(1),
+  assertions: z.array(assertionSchema).min(1),
+  evidence_requirements: z.array(evidenceRequirementSchema).min(1),
+  budgets: z.object({
+    max_semantic_reworks: z.literal(2),
+    max_infrastructure_retries_per_stage: z.number().int().min(0).max(5),
+    repeated_failure_limit: z.number().int().min(1).max(3),
+  }).strict(),
+}).strict().superRefine((value, ctx) => {
+  const ac = new Set(value.criteria.map((item) => item.id));
+  const tools = new Set(value.tools.map((item) => item.id));
+  const checkCoverage = (items: Array<{ id: string; ac: string[] }>, label: string) => {
+    for (const item of items) for (const id of item.ac) if (!ac.has(id)) ctx.addIssue({ code: 'custom', message: `${label} ${item.id} references unknown ${id}` });
+    for (const id of ac) if (!items.some((item) => item.ac.includes(id))) ctx.addIssue({ code: 'custom', message: `${label} does not cover ${id}` });
+  };
+  checkCoverage(value.use_cases, 'use_cases');
+  checkCoverage(value.assertions, 'assertions');
+  checkCoverage(value.evidence_requirements, 'evidence_requirements');
+  for (const item of [...value.assertions, ...value.evidence_requirements]) if (!tools.has(item.tool_id)) ctx.addIssue({ code: 'custom', message: `${item.id} references unknown tool ${item.tool_id}` });
+  for (const item of value.criteria) if (item.waivable && item.risk_tags.some((tag) => protectedRiskTags.has(tag))) ctx.addIssue({ code: 'custom', message: `${item.id} has a protected risk tag and may not be waivable` });
+  const ids = value.criteria.map((item) => item.id);
+  if (new Set(ids).size !== ids.length || ids.some((id, index) => id !== `AC-${index + 1}`)) ctx.addIssue({ code: 'custom', message: 'criterion IDs must be unique and continuous from AC-1' });
+  for (const [label, idsToCheck] of [
+    ['use case', value.use_cases.map((item) => item.id)],
+    ['assertion', value.assertions.map((item) => item.id)],
+    ['evidence requirement', value.evidence_requirements.map((item) => item.id)],
+    ['tool', value.tools.map((item) => item.id)],
+  ] as const) if (new Set(idsToCheck).size !== idsToCheck.length) ctx.addIssue({ code: 'custom', message: `${label} IDs must be unique` });
+});
+
+const approvedContractSchema = z.object({
+  ...acceptanceContractInputSchema.shape,
+  contract_hash: hashSchema,
+  approval: z.object({ approved_by: z.string().min(2), approved_at: z.iso.datetime(), contract_hash: hashSchema }).strict(),
+}).strict();
+
+export type AcceptanceContractV2 = z.infer<typeof approvedContractSchema>;
+export type AcceptanceStage = z.infer<typeof acceptanceStageSchema>;
+
+const acceptanceStageSchema = z.enum([
+  'm_working', 'm_submitted', 'plan_compiled', 'v_passed', 'candidate',
+  'waiting_human_review', 'blocked_external', 'cancelled',
+]);
+
+const historySchema = z.object({
+  sequence: z.number().int().positive(),
+  stage: acceptanceStageSchema,
+  action: z.string().min(2),
+  actor: z.enum(['P', 'M', 'V', 'R', 'controller', 'human']),
+  occurred_at: z.iso.datetime(),
+  artifact: z.string().nullable(),
+}).strict();
+
+const runSchema = z.object({
+  schema_version: z.literal(2),
+  protocol_version: z.literal(2),
+  task_id: taskIdSchema,
+  contract_version: z.number().int().positive(),
+  contract_hash: hashSchema,
+  stage: acceptanceStageSchema,
+  run_id: z.string().regex(/^RUN-[A-Z0-9-]+-\d+$/),
+  semantic_reworks_used: z.number().int().nonnegative(),
+  infrastructure_retries: z.object({ V: z.number().int().nonnegative(), R: z.number().int().nonnegative() }).strict(),
+  current_head: z.string().nullable(),
+  last_m_head: z.string().nullable(),
+  plan_hash: hashSchema.nullable(),
+  last_v_invocation: z.string().nullable(),
+  last_v_evidence_set_hash: hashSchema.nullable(),
+  last_r_invocation: z.string().nullable(),
+  last_r_evidence_set_hash: hashSchema.nullable(),
+  last_failure_fingerprint: hashSchema.nullable(),
+  repeated_failure_count: z.number().int().nonnegative(),
+  active_conflict_id: z.string().nullable(),
+  candidate_id: z.string().nullable(),
+  created_at: z.iso.datetime(),
+  updated_at: z.iso.datetime(),
+  history: z.array(historySchema).min(1),
+}).strict();
+
+export type AcceptanceRun = z.infer<typeof runSchema>;
+
+export function approvedAcceptanceContractValue(inputValue: unknown, approvedBy: string, approvedAt = new Date().toISOString()): AcceptanceContractV2 {
+  const input = acceptanceContractInputSchema.parse(inputValue), contractHash = sha256(JSON.stringify(input));
+  return approvedContractSchema.parse({ ...input, contract_hash: contractHash, approval: { approved_by: approvedBy, approved_at: approvedAt, contract_hash: contractHash } });
+}
+
+const evidenceInputSchema = z.object({
+  file: z.string().min(1),
+  ac: z.array(acIdSchema).min(1),
+  requirement_ids: z.array(z.string().regex(/^ER-[1-9]\d*$/)).min(1),
+}).strict();
+
+const vInputSchema = z.object({
+  task_id: taskIdSchema,
+  contract_hash: hashSchema,
+  plan_hash: hashSchema,
+  head: z.string().min(7),
+  invocation_id: z.string().min(3),
+  verdict: z.enum(['pass', 'fail']),
+  classification: z.enum(['implementation_problem', 'infrastructure_problem', 'spec_ambiguity', 'high_risk']).nullable(),
+  failed_ac: z.array(acIdSchema),
+  message: z.string().min(3),
+  evidence: z.array(evidenceInputSchema).min(1),
+}).strict().superRefine((value, ctx) => {
+  if (value.verdict === 'pass' && (value.classification !== null || value.failed_ac.length)) ctx.addIssue({ code: 'custom', message: 'V pass may not contain a failure classification or failed AC' });
+  if (value.verdict === 'fail' && !value.classification) ctx.addIssue({ code: 'custom', message: 'V fail requires a classification' });
+});
+
+const rInputSchema = z.object({
+  task_id: taskIdSchema,
+  contract_hash: hashSchema,
+  plan_hash: hashSchema,
+  head: z.string().min(7),
+  v_evidence_set_hash: hashSchema,
+  invocation_id: z.string().min(3),
+  verdict: z.enum(['pass', 'fail']),
+  classification: z.enum(['implementation_problem', 'evidence_problem', 'spec_problem']).nullable(),
+  failed_ac: z.array(acIdSchema),
+  message: z.string().min(3),
+  evidence: z.array(evidenceInputSchema).min(1),
+}).strict().superRefine((value, ctx) => {
+  if (value.verdict === 'pass' && (value.classification !== null || value.failed_ac.length)) ctx.addIssue({ code: 'custom', message: 'R pass may not contain a failure classification or failed AC' });
+  if (value.verdict === 'fail' && !value.classification) ctx.addIssue({ code: 'custom', message: 'R fail requires a classification' });
+});
+
+const executionPlanSchema = z.object({
+  schema_version: z.literal(2),
+  task_id: taskIdSchema,
+  run_id: z.string(),
+  contract_version: z.number().int().positive(),
+  contract_hash: hashSchema,
+  head: z.string().min(7),
+  base_commit: z.string().min(7),
+  diff_hash: hashSchema,
+  worktree_fingerprint: hashSchema,
+  gate_plan_hash: hashSchema,
+  toolchain: z.array(z.object({ file: z.string(), sha256: hashSchema }).strict()),
+  environment: z.object({ platform: z.string(), arch: z.string(), node: z.string(), ci: z.boolean() }).strict(),
+  mappings: z.array(z.object({
+    ac: acIdSchema,
+    use_cases: z.array(z.string()).min(1),
+    tools: z.array(z.string()).min(1),
+    assertions: z.array(z.string()).min(1),
+    evidence_requirements: z.array(z.string()).min(1),
+  }).strict()).min(1),
+  compiled_at: z.iso.datetime(),
+  plan_hash: hashSchema,
+}).strict();
+
+type ExecutionPlan = z.infer<typeof executionPlanSchema>;
+
+const conflictSchema = z.object({
+  schema_version: z.literal(2),
+  conflict_id: z.string().regex(/^CONFLICT-[A-Z0-9-]+-\d+$/),
+  task_id: taskIdSchema,
+  run_id: z.string(),
+  stage: z.enum(['V', 'R', 'controller']),
+  reason: z.string().min(3),
+  failure_fingerprint: hashSchema,
+  head: z.string().nullable(),
+  contract_hash: hashSchema,
+  semantic_reworks_used: z.number().int().nonnegative(),
+  requires_immediate_attention: z.boolean(),
+  status: z.enum(['active', 'resolved']),
+  created_at: z.iso.datetime(),
+  resolved_at: z.iso.datetime().nullable(),
+  resolution: z.string().nullable(),
+}).strict();
+
+const humanActionSchema = z.object({
+  action: z.enum(['revise_spec_and_reauthorize', 'change_approach', 'split_task', 'waive_noncritical', 'mark_external_block', 'cancel']),
+  actor: z.string().min(2),
+  note: z.string().min(3),
+  ac: z.array(acIdSchema).default([]),
+  contract_file: z.string().min(1).nullable().default(null),
+  reauthorize_budget: z.boolean().default(false),
+}).strict();
+
+function contractFile(taskRoot: string): string { return path.join(taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'); }
+function runFile(taskRoot: string): string { return path.join(taskRoot, 'ACCEPTANCE_RUN.json'); }
+function outputDir(root: string, taskId: string): string { return path.join(control(root), 'output', `${taskId}-acceptance-v2`); }
+function planFile(root: string, taskId: string): string { return path.join(outputDir(root, taskId), 'EXECUTION_PLAN.json'); }
+
+async function findTask(root: string, taskId: string) {
+  const task = (await scanTasks(root)).find((item) => item.task_id === taskId);
+  if (!task) throw new Error(`task not found: ${taskId}`);
+  return task;
+}
+
+async function unfinishedAcceptanceDependencies(root: string, contract: AcceptanceContractV2): Promise<string[]> {
+  const tasks = await scanTasks(root), byId = new Map(tasks.map((item) => [item.task_id, item]));
+  const unfinished: string[] = [];
+  for (const id of contract.depends_on) {
+    const task = byId.get(id);
+    if (!task) { unfinished.push(id); continue; }
+    if (await exists(runFile(task.path))) {
+      if ((await readRun(task.path)).stage !== 'candidate') unfinished.push(id);
+    } else if (task.status !== 'delivered') unfinished.push(id);
+  }
+  return unfinished;
+}
+
+async function readContract(taskRoot: string): Promise<AcceptanceContractV2> {
+  const data = approvedContractSchema.parse((await readMarkdown(contractFile(taskRoot))).data);
+  const { contract_hash: _stored, approval: _approval, ...input } = data;
+  const expected = sha256(JSON.stringify(acceptanceContractInputSchema.parse(input)));
+  if (data.contract_hash !== expected || data.approval.contract_hash !== expected) throw new Error('v2 Acceptance Contract integrity failure');
+  return data;
+}
+
+async function readRun(taskRoot: string): Promise<AcceptanceRun> {
+  return runSchema.parse(JSON.parse(await readFile(runFile(taskRoot), 'utf8')));
+}
+
+function history(run: AcceptanceRun, stage: AcceptanceStage, action: string, actor: z.infer<typeof historySchema>['actor'], artifact: string | null): AcceptanceRun {
+  const now = new Date().toISOString();
+  return runSchema.parse({ ...run, stage, updated_at: now, history: [...run.history, { sequence: run.history.length + 1, stage, action, actor, occurred_at: now, artifact }] });
+}
+
+async function writeRun(root: string, taskRoot: string, run: AcceptanceRun, extra: Array<{ file: string; content: string | Buffer }> = []): Promise<void> {
+  await atomicWriteMany(root, [{ file: runFile(taskRoot), content: `${JSON.stringify(runSchema.parse(run), null, 2)}\n` }, ...extra]);
+}
+
+export async function approveAcceptanceContract(root: string, taskId: string, sourceFile: string, approvedBy: string): Promise<AcceptanceContractV2> {
+  const task = await findTask(root, taskId);
+  const state = await readState(task.path);
+  if (!['draft', 'planned'].includes(state.status)) throw new Error(`P approval is illegal after M starts (${state.status})`);
+  const input = acceptanceContractInputSchema.parse(JSON.parse(await readFile(path.resolve(sourceFile), 'utf8')));
+  if (input.task_id !== taskId || input.risk !== state.level) throw new Error('v2 contract identity or risk differs from Task');
+  if (await exists(runFile(task.path))) throw new Error('an Acceptance Run already exists; revise the contract through human resolution');
+  const now = new Date().toISOString();
+  const approved = approvedAcceptanceContractValue(input, approvedBy, now);
+  await atomicWriteMany(root, [{ file: contractFile(task.path), content: stringifyMarkdown(approved, '# Acceptance Contract v2\n\nP prepared this complete contract and a human approved its exact hash before M started.') }]);
+  return approved;
+}
+
+export async function startAcceptanceRun(root: string, taskId: string): Promise<AcceptanceRun> {
+  const task = await findTask(root, taskId);
+  if (await exists(runFile(task.path))) throw new Error('v2 Acceptance Run already exists');
+  const contract = await readContract(task.path);
+  const state = await readState(task.path);
+  if (state.status === 'delivered') throw new Error('cannot start v2 for a delivered v1 Task');
+  await verifyTaskExecutionApproval(root, taskId);
+  const now = new Date().toISOString();
+  const run = runSchema.parse({
+    schema_version: 2, protocol_version: 2, task_id: taskId, contract_version: contract.version, contract_hash: contract.contract_hash,
+    stage: 'm_working', run_id: `RUN-${taskId}-${Date.now()}`, semantic_reworks_used: 0, infrastructure_retries: { V: 0, R: 0 },
+    current_head: null, last_m_head: null, plan_hash: null, last_v_invocation: null, last_v_evidence_set_hash: null,
+    last_r_invocation: null, last_r_evidence_set_hash: null, last_failure_fingerprint: null, repeated_failure_count: 0,
+    active_conflict_id: null, candidate_id: null, created_at: now, updated_at: now,
+    history: [{ sequence: 1, stage: 'm_working', action: 'start v2 run from approved P contract', actor: 'controller', occurred_at: now, artifact: path.relative(root, contractFile(task.path)) }],
+  });
+  await writeRun(root, task.path, run);
+  return run;
+}
+
+async function git(cwd: string, args: string[]): Promise<string> { return (await exec('git', args, { cwd, maxBuffer: 20_000_000 })).stdout.trim(); }
+
+async function stableCandidate(root: string, taskId: string) {
+  const workspace = await readWorkspace(root, taskId);
+  const head = await git(workspace.worktree, ['rev-parse', 'HEAD']);
+  if ((await git(workspace.worktree, ['status', '--porcelain=v1', '--untracked-files=all'])).trim()) throw new Error('M submission requires a clean, committed worktree');
+  const diff = await git(workspace.worktree, ['diff', '--binary', `${workspace.base_commit}...${head}`]);
+  const tree = await git(workspace.worktree, ['ls-tree', '-r', '--full-tree', head]);
+  return { workspace, head, diff_hash: sha256(diff), worktree_fingerprint: sha256(tree) };
+}
+
+async function hashEvidenceFiles(root: string, values: z.infer<typeof evidenceInputSchema>[], contract: AcceptanceContractV2) {
+  const allowedAc = new Set(contract.criteria.map((item) => item.id));
+  const requirements = new Map(contract.evidence_requirements.map((item) => [item.id, item]));
+  const records = [] as Array<{ file: string; sha256: string; ac: string[]; requirement_ids: string[] }>;
+  for (const value of values) {
+    if (value.ac.some((id) => !allowedAc.has(id))) throw new Error(`evidence references an unknown AC: ${value.ac.join(', ')}`);
+    for (const id of value.requirement_ids) {
+      const requirement = requirements.get(id);
+      if (!requirement || value.ac.some((ac) => !requirement.ac.includes(ac))) throw new Error(`evidence requirement ${id} does not cover the declared AC`);
+    }
+    const target = path.resolve(value.file);
+    if (!(target === path.resolve(root) || target.startsWith(path.resolve(root) + path.sep))) throw new Error('Evidence file escapes Project root');
+    const content = await readFile(target);
+    if (!content.length) throw new Error('Evidence file is empty');
+    records.push({ file: path.relative(root, target), sha256: sha256(content), ac: [...new Set(value.ac)].sort(), requirement_ids: [...new Set(value.requirement_ids)].sort() });
+  }
+  return records.sort((left, right) => left.file.localeCompare(right.file));
+}
+
+function evidenceSetHash(records: Array<{ sha256: string; ac: string[]; requirement_ids: string[] }>): string {
+  return sha256(JSON.stringify(records.map(({ sha256: digest, ac, requirement_ids }) => ({ sha256: digest, ac, requirement_ids }))));
+}
+
+export async function submitMakerCandidate(root: string, taskId: string, selfTestFiles: string[]): Promise<AcceptanceRun> {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'm_working') throw new Error(`M submission is illegal from ${run.stage}`);
+  const blockedBy = await unfinishedAcceptanceDependencies(root, contract);
+  if (blockedBy.length) throw new Error(`${taskId}: blocked by unfinished v2 dependencies: ${blockedBy.join(', ')}`);
+  if (!selfTestFiles.length) throw new Error('M submission requires self-test Evidence');
+  const candidate = await stableCandidate(root, taskId);
+  if (run.last_m_head === candidate.head) throw new Error('M rework must produce a new HEAD');
+  const evidence = await Promise.all(selfTestFiles.map(async (file) => {
+    const target = path.resolve(file);
+    if (!target.startsWith(path.resolve(root) + path.sep)) throw new Error('M self-test Evidence escapes Project root');
+    return { file: path.relative(root, target), sha256: sha256(await readFile(target)) };
+  }));
+  const artifact = { schema_version: 2, task_id: taskId, run_id: run.run_id, head: candidate.head, base_commit: candidate.workspace.base_commit, diff_hash: candidate.diff_hash, worktree_fingerprint: candidate.worktree_fingerprint, self_test_evidence: evidence, submitted_at: new Date().toISOString() };
+  const artifactFile = path.join(outputDir(root, taskId), `M-${candidate.head.slice(0, 12)}.json`);
+  let updated = history({ ...run, current_head: candidate.head, last_m_head: candidate.head, plan_hash: null }, 'm_submitted', 'M submitted a clean stable HEAD with self-test Evidence', 'M', path.relative(root, artifactFile));
+  await writeRun(root, task.path, updated, [{ file: artifactFile, content: `${JSON.stringify(artifact, null, 2)}\n` }]);
+  return updated;
+}
+
+async function toolchainFacts(worktree: string) {
+  const names = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Package.swift', 'Podfile.lock'];
+  const facts: Array<{ file: string; sha256: string }> = [];
+  for (const name of names) {
+    const file = path.join(worktree, name);
+    if (await exists(file)) facts.push({ file: name, sha256: sha256(await readFile(file)) });
+  }
+  return facts;
+}
+
+export async function compileAcceptancePlan(root: string, taskId: string): Promise<ExecutionPlan> {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'm_submitted' || !run.current_head) throw new Error(`plan compilation is illegal from ${run.stage}`);
+  const candidate = await stableCandidate(root, taskId);
+  if (candidate.head !== run.current_head) throw new Error('candidate HEAD changed after M submission');
+  const gatePlan = await readGateConfig(root), gates = new Map(gatePlan.gates.map((item) => [item.id, item]));
+  for (const tool of contract.tools) {
+    const gate = gates.get(tool.gate_id);
+    if (!gate) throw new Error(`${tool.id}: Gate ${tool.gate_id} is not configured`);
+    if (tool.kind === 'playwright') {
+      if (gate.kind !== 'playwright') throw new Error(`${tool.id}: approved Playwright tool differs from Gate kind`);
+      const observed = { config: gate.config ?? null, tests: gate.tests, projects: gate.projects, grep: gate.grep ?? null, require_screenshots: gate.require_screenshots };
+      if (JSON.stringify(observed) !== JSON.stringify(tool.playwright)) throw new Error(`${tool.id}: Playwright Gate differs from the P-approved tool configuration`);
+    } else {
+      if (gate.kind === 'playwright' || JSON.stringify(gate.command) !== JSON.stringify(tool.command)) throw new Error(`${tool.id}: Gate command differs from the P-approved tool command`);
+    }
+  }
+  const mappings = contract.criteria.map((criterion) => ({
+    ac: criterion.id,
+    use_cases: contract.use_cases.filter((item) => item.ac.includes(criterion.id)).map((item) => item.id),
+    tools: [...new Set(contract.assertions.filter((item) => item.ac.includes(criterion.id)).map((item) => item.tool_id))],
+    assertions: contract.assertions.filter((item) => item.ac.includes(criterion.id)).map((item) => item.id),
+    evidence_requirements: contract.evidence_requirements.filter((item) => item.ac.includes(criterion.id)).map((item) => item.id),
+  }));
+  if (mappings.some((item) => !item.use_cases.length || !item.tools.length || !item.assertions.length || !item.evidence_requirements.length)) throw new Error('compiled plan would shrink Acceptance Contract coverage');
+  const withoutHash = {
+    schema_version: 2 as const, task_id: taskId, run_id: run.run_id, contract_version: contract.version, contract_hash: contract.contract_hash,
+    head: candidate.head, base_commit: candidate.workspace.base_commit, diff_hash: candidate.diff_hash, worktree_fingerprint: candidate.worktree_fingerprint,
+    gate_plan_hash: sha256(JSON.stringify(gatePlan)), toolchain: await toolchainFacts(candidate.workspace.worktree),
+    environment: { platform: process.platform, arch: process.arch, node: process.version, ci: Boolean(process.env.CI) }, mappings, compiled_at: new Date().toISOString(),
+  };
+  const plan = executionPlanSchema.parse({ ...withoutHash, plan_hash: sha256(JSON.stringify(withoutHash)) });
+  const updated = history({ ...run, plan_hash: plan.plan_hash }, 'plan_compiled', 'compiled immutable V execution plan', 'controller', path.relative(root, planFile(root, taskId)));
+  await writeRun(root, task.path, updated, [{ file: planFile(root, taskId), content: `${JSON.stringify(plan, null, 2)}\n` }]);
+  return plan;
+}
+
+async function readPlan(root: string, taskId: string, run: AcceptanceRun): Promise<ExecutionPlan> {
+  const raw = await readFile(planFile(root, taskId), 'utf8'), plan = executionPlanSchema.parse(JSON.parse(raw));
+  const { plan_hash: _hash, ...withoutHash } = plan;
+  if (plan.plan_hash !== sha256(JSON.stringify(withoutHash)) || run.plan_hash !== plan.plan_hash || run.current_head !== plan.head || run.contract_hash !== plan.contract_hash) throw new Error('Execution Plan integrity or binding failure');
+  return plan;
+}
+
+function failureFingerprint(stage: 'V' | 'R', classification: string, failedAc: string[], message: string, _evidenceSetHash: string): string {
+  const normalized = message.trim().toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
+  return sha256(JSON.stringify({ stage, classification, failed_ac: [...failedAc].sort(), message: normalized }));
+}
+
+function applyFailure(run: AcceptanceRun, fingerprint: string): AcceptanceRun {
+  return { ...run, last_failure_fingerprint: fingerprint, repeated_failure_count: run.last_failure_fingerprint === fingerprint ? run.repeated_failure_count + 1 : 1 };
+}
+
+async function createConflict(root: string, taskRoot: string, run: AcceptanceRun, contract: AcceptanceContractV2, stage: 'V' | 'R' | 'controller', reason: string, fingerprint: string): Promise<AcceptanceRun> {
+  const now = new Date(), id = `CONFLICT-${run.task_id}-${now.getTime()}`;
+  const conflict = conflictSchema.parse({
+    schema_version: 2, conflict_id: id, task_id: run.task_id, run_id: run.run_id, stage, reason, failure_fingerprint: fingerprint,
+    head: run.current_head, contract_hash: run.contract_hash, semantic_reworks_used: run.semantic_reworks_used,
+    requires_immediate_attention: contract.risk === 'heavy' || contract.critical_path || stage === 'controller', status: 'active',
+    created_at: now.toISOString(), resolved_at: null, resolution: null,
+  });
+  const file = path.join(control(root), 'conflicts', `${id}.json`);
+  const updated = history({ ...run, active_conflict_id: id }, 'waiting_human_review', reason, 'controller', path.relative(root, file));
+  await writeRun(root, taskRoot, updated, [{ file, content: `${JSON.stringify(conflict, null, 2)}\n` }]);
+  await rebuildReviewInbox(root);
+  return updated;
+}
+
+async function consumeSemanticRework(root: string, taskRoot: string, run: AcceptanceRun, contract: AcceptanceContractV2, destination: 'm_working' | 'plan_compiled', reason: string, fingerprint: string, actor: 'V' | 'R'): Promise<AcceptanceRun> {
+  const failed = applyFailure(run, fingerprint), next = failed.semantic_reworks_used + 1;
+  if (failed.repeated_failure_count >= contract.budgets.repeated_failure_limit) return createConflict(root, taskRoot, failed, contract, actor, `repeated failure fingerprint: ${reason}`, fingerprint);
+  if (next > contract.budgets.max_semantic_reworks) return createConflict(root, taskRoot, failed, contract, actor, `semantic rework budget exhausted: ${reason}`, fingerprint);
+  const updated = history({ ...failed, semantic_reworks_used: next }, destination, reason, actor, null);
+  await writeRun(root, taskRoot, updated);
+  return updated;
+}
+
+async function assertCandidateStillCurrent(root: string, taskId: string, plan: ExecutionPlan): Promise<void> {
+  const candidate = await stableCandidate(root, taskId);
+  if (candidate.head !== plan.head || candidate.diff_hash !== plan.diff_hash || candidate.worktree_fingerprint !== plan.worktree_fingerprint) throw new Error('candidate changed after execution plan compilation');
+  const gatePlan = await readGateConfig(root);
+  if (sha256(JSON.stringify(gatePlan)) !== plan.gate_plan_hash) throw new Error('Gate Plan changed after execution plan compilation');
+  if (JSON.stringify(await toolchainFacts(candidate.workspace.worktree)) !== JSON.stringify(plan.toolchain)) throw new Error('toolchain changed after execution plan compilation');
+  const environment = { platform: process.platform, arch: process.arch, node: process.version, ci: Boolean(process.env.CI) };
+  if (JSON.stringify(environment) !== JSON.stringify(plan.environment)) throw new Error('verification environment changed after execution plan compilation');
+}
+
+export async function recordVResult(root: string, taskId: string, sourceFile: string): Promise<AcceptanceRun> {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'plan_compiled') throw new Error(`V is illegal from ${run.stage}`);
+  const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);
+  const input = vInputSchema.parse(JSON.parse(await readFile(path.resolve(sourceFile), 'utf8')));
+  if (input.task_id !== taskId || input.contract_hash !== contract.contract_hash || input.plan_hash !== plan.plan_hash || input.head !== plan.head) throw new Error('V result is not bound to the current Task, Contract, Plan and HEAD');
+  if (input.invocation_id === run.last_r_invocation) throw new Error('V invocation must be independent from R');
+  const evidence = await hashEvidenceFiles(root, input.evidence, contract), currentEvidenceSetHash = evidenceSetHash(evidence);
+  if (run.last_v_evidence_set_hash === currentEvidenceSetHash) throw new Error('V retry must produce new Evidence content');
+  if (input.verdict === 'pass') {
+    const covered = new Set(evidence.flatMap((item) => item.ac));
+    const requirements = new Set(evidence.flatMap((item) => item.requirement_ids));
+    if (contract.criteria.some((item) => !covered.has(item.id)) || contract.evidence_requirements.some((item) => !requirements.has(item.id))) throw new Error('V PASS Evidence does not cover the complete contract');
+  }
+  const record = { schema_version: 2, role: 'V', run_id: run.run_id, ...input, evidence, evidence_set_hash: currentEvidenceSetHash, recorded_at: new Date().toISOString() };
+  const file = path.join(outputDir(root, taskId), 'V', `${Date.now()}-${input.invocation_id.replace(/[^a-zA-Z0-9-]/g, '_')}.json`);
+  let base = { ...run, last_v_invocation: input.invocation_id, last_v_evidence_set_hash: currentEvidenceSetHash };
+  if (input.verdict === 'pass') {
+    const updated = history({ ...base, last_failure_fingerprint: null, repeated_failure_count: 0 }, 'v_passed', 'V independently passed the complete Acceptance Contract', 'V', path.relative(root, file));
+    await writeRun(root, task.path, updated, [{ file, content: `${JSON.stringify(record, null, 2)}\n` }]);
+    return updated;
+  }
+  const fingerprint = failureFingerprint('V', input.classification!, input.failed_ac, input.message, currentEvidenceSetHash);
+  await atomicWriteMany(root, [{ file, content: `${JSON.stringify(record, null, 2)}\n` }]);
+  if (input.classification === 'implementation_problem') return consumeSemanticRework(root, task.path, base, contract, 'm_working', input.message, fingerprint, 'V');
+  if (input.classification === 'infrastructure_problem') {
+    const failed = applyFailure(base, fingerprint), retries = failed.infrastructure_retries.V + 1;
+    if (failed.repeated_failure_count >= contract.budgets.repeated_failure_limit || retries > contract.budgets.max_infrastructure_retries_per_stage) return createConflict(root, task.path, failed, contract, 'V', `V infrastructure retry exhausted: ${input.message}`, fingerprint);
+    const updated = history({ ...failed, infrastructure_retries: { ...failed.infrastructure_retries, V: retries } }, 'plan_compiled', input.message, 'V', path.relative(root, file));
+    await writeRun(root, task.path, updated); return updated;
+  }
+  return createConflict(root, task.path, applyFailure(base, fingerprint), contract, 'V', input.message, fingerprint);
+}
+
+export async function runControlledV(root: string, taskId: string, invocationId: string): Promise<{ gates: GateResult[]; run: AcceptanceRun }> {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'plan_compiled') throw new Error(`V is illegal from ${run.stage}`);
+  const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);
+  const gates = await runGates(root, taskId);
+  const gateFile = path.join(control(root), 'output', `${taskId}-gates.json`);
+  const input = vInputSchema.parse({
+    task_id: taskId, contract_hash: contract.contract_hash, plan_hash: plan.plan_hash, head: plan.head,
+    invocation_id: invocationId,
+    verdict: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'pass' : 'fail',
+    classification: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? null : 'implementation_problem',
+    failed_ac: [...new Set(gates.filter((item) => item.exit_code !== 0 || item.timed_out).flatMap((item) => item.ac ?? []))],
+    message: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'all controlled Gates passed' : 'one or more controlled Gates failed',
+    evidence: contract.evidence_requirements.map((item) => ({ file: gateFile, ac: item.ac, requirement_ids: [item.id] })),
+  });
+  const temp = path.join(outputDir(root, taskId), 'V', `controlled-input-${Date.now()}.json`);
+  await atomicWriteMany(root, [{ file: temp, content: `${JSON.stringify(input, null, 2)}\n` }]);
+  return { gates, run: await recordVResult(root, taskId, temp) };
+}
+
+export async function recordRResult(root: string, taskId: string, sourceFile: string): Promise<AcceptanceRun> {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'v_passed') throw new Error(`R is illegal from ${run.stage}`);
+  const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);
+  const input = rInputSchema.parse(JSON.parse(await readFile(path.resolve(sourceFile), 'utf8')));
+  if (input.task_id !== taskId || input.contract_hash !== contract.contract_hash || input.plan_hash !== plan.plan_hash || input.head !== plan.head || input.v_evidence_set_hash !== run.last_v_evidence_set_hash) throw new Error('R result is not bound to the current Task, Contract, Plan, HEAD and V Evidence');
+  if (input.invocation_id === run.last_v_invocation) throw new Error('R invocation must differ from V invocation');
+  const evidence = await hashEvidenceFiles(root, input.evidence, contract), currentEvidenceSetHash = evidenceSetHash(evidence);
+  if (run.last_r_evidence_set_hash === currentEvidenceSetHash) throw new Error('R retry must produce new Evidence content');
+  const record = { schema_version: 2, role: 'R', run_id: run.run_id, ...input, evidence, evidence_set_hash: currentEvidenceSetHash, recorded_at: new Date().toISOString() };
+  const file = path.join(outputDir(root, taskId), 'R', `${Date.now()}-${input.invocation_id.replace(/[^a-zA-Z0-9-]/g, '_')}.json`);
+  let base = { ...run, last_r_invocation: input.invocation_id, last_r_evidence_set_hash: currentEvidenceSetHash };
+  await atomicWriteMany(root, [{ file, content: `${JSON.stringify(record, null, 2)}\n` }]);
+  if (input.verdict === 'pass') {
+    if (!run.last_v_evidence_set_hash) throw new Error('R PASS requires current V Evidence');
+    const reviewedAc = new Set(evidence.flatMap((item) => item.ac));
+    if (contract.criteria.some((item) => !reviewedAc.has(item.id))) throw new Error('R PASS Evidence does not review every AC');
+    const currentV = await newestRoleRecord(root, taskId, 'V');
+    if (!currentV || currentV.evidence_set_hash !== run.last_v_evidence_set_hash || currentV.head !== plan.head || currentV.verdict !== 'pass') throw new Error('R evidence gate rejected stale or failing V result');
+    for (const item of currentV.evidence as Array<{ file: string; sha256: string }>) if (sha256(await readFile(path.join(root, item.file))) !== item.sha256) throw new Error('R evidence gate detected tampered V Evidence');
+    const candidateId = `CANDIDATE-${taskId}-${Date.now()}`;
+    const candidate = { schema_version: 2, candidate_id: candidateId, task_id: taskId, run_id: run.run_id, contract_hash: run.contract_hash, plan_hash: plan.plan_hash, head: plan.head, v_evidence_set_hash: run.last_v_evidence_set_hash, r_evidence_set_hash: currentEvidenceSetHash, created_at: new Date().toISOString() };
+    const candidateFile = path.join(outputDir(root, taskId), 'CANDIDATE.json');
+    const updated = history({ ...base, candidate_id: candidateId, last_failure_fingerprint: null, repeated_failure_count: 0 }, 'candidate', 'R passed and Evidence Gate created Candidate', 'R', path.relative(root, candidateFile));
+    await writeRun(root, task.path, updated, [{ file: candidateFile, content: `${JSON.stringify(candidate, null, 2)}\n` }]);
+    return updated;
+  }
+  const fingerprint = failureFingerprint('R', input.classification!, input.failed_ac, input.message, currentEvidenceSetHash);
+  if (input.classification === 'implementation_problem') return consumeSemanticRework(root, task.path, base, contract, 'm_working', input.message, fingerprint, 'R');
+  if (input.classification === 'evidence_problem') return consumeSemanticRework(root, task.path, base, contract, 'plan_compiled', input.message, fingerprint, 'R');
+  return createConflict(root, task.path, applyFailure(base, fingerprint), contract, 'R', input.message, fingerprint);
+}
+
+async function newestRoleRecord(root: string, taskId: string, role: 'V' | 'R'): Promise<Record<string, any> | null> {
+  const dir = path.join(outputDir(root, taskId), role);
+  if (!(await exists(dir))) return null;
+  const files = (await readdir(dir)).filter((name) => name.endsWith('.json') && !name.startsWith('controlled-input-')).sort();
+  return files.length ? JSON.parse(await readFile(path.join(dir, files.at(-1)!), 'utf8')) : null;
+}
+
+export async function rebuildReviewInbox(root: string) {
+  const dir = path.join(control(root), 'conflicts'), conflicts: Array<z.infer<typeof conflictSchema>> = [];
+  if (await exists(dir)) for (const name of (await readdir(dir)).filter((item) => item.endsWith('.json')).sort()) {
+    const conflict = conflictSchema.parse(JSON.parse(await readFile(path.join(dir, name), 'utf8')));
+    if (conflict.status === 'active') conflicts.push(conflict);
+  }
+  const inbox = { schema_version: 2, rebuilt_at: new Date().toISOString(), items: conflicts.map((item) => ({ conflict_id: item.conflict_id, task_id: item.task_id, reason: item.reason, requires_immediate_attention: item.requires_immediate_attention, created_at: item.created_at })) };
+  await atomicWriteMany(root, [{ file: path.join(control(root), 'REVIEW_INBOX.json'), content: `${JSON.stringify(inbox, null, 2)}\n` }]);
+  return inbox;
+}
+
+export async function resolveAcceptanceConflict(root: string, taskId: string, inputValue: unknown): Promise<AcceptanceRun> {
+  const input = humanActionSchema.parse(inputValue), task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
+  if (run.stage !== 'waiting_human_review' || !run.active_conflict_id) throw new Error('Task has no active Acceptance Conflict');
+  if (input.action === 'waive_noncritical') {
+    if (!input.ac.length) throw new Error('waive_noncritical requires AC IDs');
+    for (const id of input.ac) {
+      const criterion = contract.criteria.find((item) => item.id === id);
+      if (!criterion || !criterion.waivable || criterion.risk_tags.some((tag) => protectedRiskTags.has(tag))) throw new Error(`${id} may not be waived`);
+    }
+    if (!input.contract_file) throw new Error('waive_noncritical requires a replacement contract_file');
+  } else if (input.ac.length) throw new Error(`${input.action} may not contain AC IDs`);
+  if (input.action === 'revise_spec_and_reauthorize' && (!input.contract_file || !input.reauthorize_budget)) throw new Error('revise_spec_and_reauthorize requires contract_file and reauthorize_budget=true');
+  if (!['revise_spec_and_reauthorize', 'waive_noncritical'].includes(input.action) && input.contract_file) throw new Error(`${input.action} may not contain contract_file`);
+  const conflictFile = path.join(control(root), 'conflicts', `${run.active_conflict_id}.json`), conflict = conflictSchema.parse(JSON.parse(await readFile(conflictFile, 'utf8')));
+  const now = new Date().toISOString(), resolved = conflictSchema.parse({ ...conflict, status: 'resolved', resolved_at: now, resolution: `${input.action}: ${input.note}` });
+  let destination: AcceptanceStage, replacement: AcceptanceContractV2 | null = null;
+  if (input.contract_file) {
+    const nextInput = acceptanceContractInputSchema.parse(JSON.parse(await readFile(path.resolve(input.contract_file), 'utf8')));
+    if (nextInput.task_id !== taskId || nextInput.risk !== contract.risk || nextInput.version <= contract.version) throw new Error('replacement contract must preserve Task/risk and increase version');
+    if (input.action === 'waive_noncritical') for (const id of input.ac) if (nextInput.criteria.some((item) => item.id === id)) throw new Error(`${id} is still present in the replacement contract`);
+    const contractHash = sha256(JSON.stringify(nextInput));
+    replacement = approvedContractSchema.parse({ ...nextInput, contract_hash: contractHash, approval: { approved_by: input.actor, approved_at: now, contract_hash: contractHash } });
+  }
+  if (input.action === 'mark_external_block') destination = 'blocked_external';
+  else if (input.action === 'cancel' || input.action === 'split_task') destination = 'cancelled';
+  else destination = 'm_working';
+  let updated = history({
+    ...run, active_conflict_id: null,
+    ...(replacement ? { contract_version: replacement.version, contract_hash: replacement.contract_hash, current_head: null, last_m_head: null, plan_hash: null, last_v_invocation: null, last_v_evidence_set_hash: null, last_r_invocation: null, last_r_evidence_set_hash: null } : {}),
+    ...(input.reauthorize_budget ? { semantic_reworks_used: 0, infrastructure_retries: { V: 0, R: 0 }, last_failure_fingerprint: null, repeated_failure_count: 0 } : {}),
+  }, destination, `${input.action}: ${input.note}`, 'human', path.relative(root, conflictFile));
+  await writeRun(root, task.path, updated, [
+    { file: conflictFile, content: `${JSON.stringify(resolved, null, 2)}\n` },
+    ...(replacement ? [{ file: contractFile(task.path), content: stringifyMarkdown(replacement, '# Acceptance Contract v2\n\nHuman-approved replacement created while resolving an Acceptance Conflict.') }] : []),
+  ]);
+  await rebuildReviewInbox(root);
+  return updated;
+}
+
+export async function buildAcceptanceSchedule(root: string) {
+  const tasks = await scanTasks(root), entries = [] as Array<{ task_id: string; stage: string; ready: boolean; blocked_by: string[]; suspended: boolean; immediate: boolean }>;
+  const runs = new Map<string, AcceptanceRun>(), contracts = new Map<string, AcceptanceContractV2>();
+  for (const task of tasks) if (await exists(runFile(task.path))) { runs.set(task.task_id, await readRun(task.path)); contracts.set(task.task_id, await readContract(task.path)); }
+  for (const task of tasks) {
+    const run = runs.get(task.task_id), contract = contracts.get(task.task_id);
+    if (!run || !contract) continue;
+    const blockedBy = contract.depends_on.filter((id) => {
+      const dependencyRun = runs.get(id), dependencyTask = tasks.find((item) => item.task_id === id);
+      return dependencyRun ? dependencyRun.stage !== 'candidate' : dependencyTask?.status !== 'delivered';
+    });
+    const waiting = run.stage === 'waiting_human_review', immediate = waiting && (contract.critical_path || contract.risk === 'heavy');
+    entries.push({ task_id: task.task_id, stage: run.stage, ready: run.stage === 'm_working' && !blockedBy.length && !immediate, blocked_by: blockedBy, suspended: waiting && !immediate, immediate });
+  }
+  return { project_id: (await readProject(root)).project_id, ready: entries.filter((item) => item.ready).map((item) => item.task_id), suspended: entries.filter((item) => item.suspended).map((item) => item.task_id), immediate_attention: entries.filter((item) => item.immediate).map((item) => item.task_id), tasks: entries };
+}
+
+export async function readAcceptanceRun(root: string, taskId: string): Promise<AcceptanceRun> {
+  return readRun((await findTask(root, taskId)).path);
+}

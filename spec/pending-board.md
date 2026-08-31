@@ -7,8 +7,10 @@
 | 工单 | 标题 | 优先级 | 状态 | 负责人 | 依赖/阻塞 | 更新时间 |
 |---|---|---|---|---|---|---|
 | [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书正式机器人 Dogfood 与最终 Heavy | P0 | 已批准 | Codex | TASK-021～025 已完成；等待真实飞书配置与启动授权 | 2026-08-06 |
+| [TASK-027](04-task/TASK-027-execution-events.md) | 执行事件协议与全入口埋点 | P1 | 进行中 | Codex | TASK-013、TASK-025 已完成 | 2026-08-12 |
+| [TASK-028](04-task/TASK-028-execution-view.md) | 可重建投影与本地执行 Web UI | P1 | 进行中 | Codex | TASK-027 核心协议已实现，等待当前页面反馈 | 2026-08-12 |
 
-Phase 1–3 已正式完成；Phase 4 仅 FEAT-008 飞书专项获实施授权，其他 Feature 尚未授权。
+Phase 1–3 已正式完成；Phase 4 的 FEAT-008 飞书专项、FEAT-009 可重建执行可视化核心实现，以及 FEAT-004 的 TASK-030 P/M/V/R 旁路内核已获授权。TASK-030 的 M 实现已完成并移入验证看板；默认协议切换、完整 Scheduler 和最终 Heavy 仍需单独授权。
 
 ## 使用规则
 

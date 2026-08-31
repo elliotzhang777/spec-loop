@@ -26,10 +26,11 @@ Spec-Loop 不是新的编码模型，也不替代目标工程的代码和规格�
 
 | 模块 | 核心职责 | 不负责什么 |
 |---|---|---|
-| Controller | 读取目标、状态和反馈，决定下一步是执行、修复、重规划、重试、找人或交付 | 不直接用自述替代测试和验证 |
-| Maker | 在批准范围和受控 Worktree 中修改代码、补充测试 | 不修改 Approval、验收标准、Gate 配置或最终结论 |
+| P / Controller | 在规格与 Task 创建时形成 AC、用例、工具、断言和证据契约；获人批准后编译计划、路由失败和控制预算 | 不在实现后降低验收语义，不直接用自述替代验证 |
+| M / Maker | 在批准范围和受控 Worktree 中修改代码、自测并提交稳定 HEAD | 不修改 Approval、验收契约、Gate 配置或最终结论 |
 | Gate | 执行确定性的构建、测试和检查，记录退出码、超时、artifact 和 HEAD | 不判断产品体验或自行修改代码 |
-| Verifier | 独立检查实现、测试和 Evidence 是否满足规格，主动寻找遗漏和越权 | 原则上不直接修复实现，不与 Maker 共用结论上下文 |
+| V / Verifier | 按绑定 contract/HEAD/diff/toolchain/environment 的计划独立验收并分类失败 | 不修改候选，不与 M 共用结论上下文 |
+| R / Reviewer | 在 V PASS 后独立复核 V 结论、覆盖和证据链，并决定是否形成 Candidate | 不替 V 跑测试，不修改候选或 V Evidence |
 | Guard | 根据预算、连续失败、重复错误和无进展情况决定 continue、needs_user 或 stop | 不决定产品范围和高风险授权 |
 | Spec/AC | 定义目标、范围、非目标和可验证验收标准 | 不随实现结果任意降低标准 |
 | Evidence | 保存绑定 Task、Round、revision 和 artifact 哈希的验证事实 | 不接受 Agent 自述作为完成证明 |
@@ -39,28 +40,27 @@ Spec-Loop 不是新的编码模型，也不替代目标工程的代码和规格�
 ## 主控制链
 
 ```text
-目标与已批准规格
+P：规格 + Task + 完整验收契约 → 人批准
         ↓
-    Controller
+M：实现 + 自测 → 稳定 HEAD
         ↓
-      Maker
+Controller：按 contract + HEAD + diff + toolchain + environment 编译计划
         ↓
-  Git Collect + Gate
-        ↓
-  Visual Review（按 AC 要求）
-        ↓
-     Verifier
-        ↓
-    Controller
-    ├─ repair       进入下一轮修复
-    ├─ replan       更新计划后重新执行
-    ├─ retry        Provider 或环境重试
-    ├─ needs_user   请求用户决策
-    ├─ stop         达到安全或预算边界
-    └─ delivery     Evidence 满足 AC 后交付
+V：独立工具验收
+    ├─ implementation → M
+    ├─ infrastructure → 有界重试
+    └─ spec/high-risk → human
+        ↓ PASS only
+R：独立复核 V 结论与 Evidence
+    ├─ implementation → M
+    ├─ evidence       → V
+    ├─ spec           → human
+    └─ pass           → Evidence Gate → Candidate
+        ↓ 预算耗尽/重复失败
+waiting_human_review + Conflict Record + Review Inbox
 ```
 
-Loop 不是同一个 Agent 反复尝试并自行宣布完成，而是 Controller 根据独立反馈持续纠正偏差。Maker、Gate、Verifier 和 Guard 的职责分离，是避免自我验收的核心条件。
+Loop 不是同一个 Agent 反复尝试并自行宣布完成，而是 Controller 根据 V/R 独立反馈持续纠正偏差。M、Gate、V、R 和 Guard 的职责分离，是避免自我验收的核心条件。协议 v2 使用旁路运行工件；已开始的 v1 Task 不自动迁移、不重启，旧 `VERIFY.md` 生命周期继续可读。
 
 ## 验证范围与运行时机
 
@@ -153,6 +153,7 @@ Worktree 只隔离代码目录和 Git 分支，不隔离用户权限、网络、
 | 当前任务状态 | `TASK_STATE.md` | CLI 管理的唯一生命周期状态 |
 | 状态完整性轨迹 | `STATE_HISTORY.jsonl` | 用于检测非法状态跳转和手工分歧 |
 | Attempt 历史 | `LOOP_LEDGER.jsonl` | Run Log 和 Summary 都由它重建 |
+| 执行时间与步骤观测事实 | `EXECUTION_EVENTS.jsonl` | 追加式时间事件；不覆盖 Task/Harness/Evidence 的结果事实 |
 | 当前执行现场 | Workspace Manifest、Worktree、Harness State | 绑定 Task、base、branch、cwd 和 HEAD |
 | 验证事实 | Evidence artifact 与 metadata | 绑定 Round、revision、退出码和哈希 |
 | 项目和任务列表 | Project metadata 与可重建 Registry | Registry 不是第二状态源 |
@@ -228,6 +229,7 @@ Phase 5：增加多项目 Portfolio 治理和受控持续优化
 | [DES-004](03-design/DES-004-controlled-automation-controller.md) | 自动单任务 Controller、Maker/Checker 和失败分类 |
 | [DES-005](03-design/DES-005-scheduling-worktree-coordination.md) | Scheduling、Lease、并发、Pause/Kill 和 Connector |
 | [DES-006](03-design/DES-006-engineering-toolchain-adapters.md) | 通用命令和平台 Toolchain Adapter |
+| [DES-009](03-design/DES-009-execution-visualization.md) | 执行事件、可重建投影与本地只读观察面 |
 | [DES-007](03-design/DES-007-portfolio-capability-governance.md) | Portfolio、能力资产、指标与持续优化治理 |
 | [DES-008](03-design/DES-008-feishu-bot-connector.md) | 飞书正式机器人、进度投影、交互确认、身份、恢复与审计 |
 

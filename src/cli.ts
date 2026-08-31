@@ -13,6 +13,15 @@ import { decideVisualReview, readVisualReviews, requestVisualReview } from './re
 import { disableFeishuConnector, feishuConnectorStatus, initFeishuConfig, readFeishuConfig, superviseFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
 import { acceptLocalConfirmationAction, listFeishuActionInbox, processFeishuAction } from './connectors/feishu-callback.js';
 import { createLocalSpecLoopConfirmationController } from './connectors/feishu-controller.js';
+import { buildExecutionSnapshot } from './execution-view.js';
+import { closeExecutionViewServer, startExecutionViewServer } from './execution-view-server.js';
+import { finishWorkActivity, runWorkCommand, startWorkActivity, workActivityKindSchema } from './work-activity.js';
+import { spawn } from 'node:child_process';
+import {
+  approveAcceptanceContract, buildAcceptanceSchedule, compileAcceptancePlan, readAcceptanceRun,
+  recordRResult, recordVResult, resolveAcceptanceConflict, runControlledV, startAcceptanceRun,
+  submitMakerCandidate,
+} from './acceptance-loop.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -137,8 +146,54 @@ tasksCmd.command('list').argument('<project-dir>').option('--state <state>').opt
 tasksCmd.command('show').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>{const item=(await scanTasks(root(dir))).find(t=>t.task_id===id);if(!item)throw new Error('task not found');print(item,o.json)}));
 tasksCmd.command('resumable').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const items=(await scanTasks(root(dir))).filter(t=>t.resumable);print(o.json?items:items.map(t=>t.task_id).join('\n'),o.json)}));
 
+program.command('snapshot').description('Rebuild the project execution timeline from .spec-loop facts').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{
+  const snapshot=await buildExecutionSnapshot(root(dir));
+  print(o.json?snapshot:{project:snapshot.project,active_task:snapshot.active_task,tasks:snapshot.tasks.map((task)=>({task_id:task.task_id,status:task.status,wall_clock_ms:task.wall_clock_ms,active_ms:task.active_ms,waiting_ms:task.waiting_ms,timing_precision:task.timing_precision}))},true);
+}));
+
+program.command('view').description('Open the local read-only execution timeline').argument('<project-dir>')
+  .option('--port <port>','loopback port; 0 selects an available port','0').option('--no-open','do not open the system browser')
+  .action((dir,o)=>action(async()=>{
+    const {server,url}=await startExecutionViewServer(root(dir),{port:Number(o.port)});
+    console.log(`spec-loop execution view: ${url}`);
+    if(o.open){
+      const command=process.platform==='darwin'?'/usr/bin/open':process.platform==='win32'?'cmd':'xdg-open';
+      const args=process.platform==='win32'?['/c','start','',url]:[url];
+      const child=spawn(command,args,{detached:true,stdio:'ignore'});child.on('error',()=>{});child.unref();
+    }
+    await new Promise<void>((resolve)=>{
+      let closing=false;
+      const stop=()=>{if(closing)return;closing=true;closeExecutionViewServer(server).then(resolve,resolve)};
+      process.once('SIGINT',stop);process.once('SIGTERM',stop);server.once('close',resolve);
+    });
+  }));
+
+const activity=program.command('activity').description('Record detailed work inside the current Round');
+activity.command('start').argument('<task-dir>')
+  .addOption(new Option('--kind <kind>').choices(['reproduce','analyze','change']).makeOptionMandatory())
+  .requiredOption('--label <label>').requiredOption('--summary <summary>').option('--ref <ref...>').option('--json')
+  .action((dir,o)=>action(async()=>{
+    const event=await startWorkActivity(root(dir),{kind:workActivityKindSchema.parse(o.kind),label:o.label,summary:o.summary,refs:o.ref});
+    print(o.json?event:`started ${event.step_run_id} (${event.label})`,o.json);
+  }));
+activity.command('finish').argument('<task-dir>').requiredOption('--id <step-run-id>')
+  .addOption(new Option('--outcome <outcome>').choices(['success','failure','interrupted','cancelled']).makeOptionMandatory())
+  .option('--summary <summary>').option('--ref <ref...>').option('--json')
+  .action((dir,o)=>action(async()=>{
+    const event=await finishWorkActivity(root(dir),o.id,{outcome:o.outcome,summary:o.summary,refs:o.ref});
+    print(o.json?event:`finished ${event.step_run_id} (${event.outcome})`,o.json);
+  }));
+activity.command('run').argument('<task-dir>').argument('<executable>').argument('[args...]')
+  .addOption(new Option('--kind <kind>').choices(['command','playwright']).default('command'))
+  .requiredOption('--label <label>').requiredOption('--summary <summary>').option('--ref <ref...>').option('--json')
+  .action((dir,executable,args,o)=>action(async()=>{
+    const result=await runWorkCommand(root(dir),{kind:o.kind,label:o.label,summary:o.summary,executable,args,refs:o.ref});
+    print(o.json?result:`${o.label}: exit=${result.exitCode}`,o.json);
+    if(result.exitCode!==0)process.exitCode=result.exitCode;
+  }));
+
 const triage=program.command('triage').description('Manual proposal and approval flow');
-triage.command('propose').argument('<project-dir>').requiredOption('--source <source>').requiredOption('--goal <goal>').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).addOption(new Option('--priority <priority>').choices(['P0','P1','P2','P3']).default('P1')).requiredOption('--reason <reason>').requiredOption('--ac <criterion...>').action((dir,o)=>action(async()=>console.log(await createProposal(root(dir),{source:o.source,goal:o.goal,risk:o.risk,priority:o.priority,reason:o.reason,criteria:o.ac}))));
+triage.command('propose').argument('<project-dir>').requiredOption('--source <source>').requiredOption('--goal <goal>').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).addOption(new Option('--priority <priority>').choices(['P0','P1','P2','P3']).default('P1')).requiredOption('--reason <reason>').option('--ac <criterion...>').option('--contract <json>','P-prepared v2 Acceptance Contract; approved together with the Proposal').action((dir,o)=>action(async()=>console.log(await createProposal(root(dir),{source:o.source,goal:o.goal,risk:o.risk,priority:o.priority,reason:o.reason,criteria:o.ac,...(o.contract?{acceptanceContract:JSON.parse(await readFile(root(o.contract),'utf8'))}:{})}))));
 triage.command('approve').argument('<project-dir>').argument('<proposal-id>').requiredOption('--by <identity>').option('--ttl-hours <hours>','approval validity in hours','24').action((dir,id,o)=>action(async()=>console.log(await approveProposal(root(dir),id,o.by,Number(o.ttlHours)))));
 triage.command('create-task').argument('<project-dir>').argument('<proposal-id>').requiredOption('--id <task-id>').requiredOption('--title <title>').option('--adopt-existing','bind an approved draft in the target spec library').action((dir,p,o)=>action(async()=>console.log(await createTaskFromProposal(root(dir),p,o.id,o.title,Boolean(o.adoptExisting)))));
 
@@ -202,6 +257,35 @@ harness.command('collect').argument('<project-dir>').argument('<task-id>').optio
 harness.command('verify').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>{const r=await runGates(root(dir),id);print(r,o.json);if(r.some(x=>x.exit_code!==0))process.exitCode=1}));
 harness.command('report').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await reportHarness(root(dir),id),o.json)));
 harness.command('reconcile').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await reconcileHarness(root(dir),id),o.json)));
+
+const acceptance=program.command('acceptance').description('P → M → V → R Acceptance Protocol v2 (explicit opt-in; v1 tasks remain unchanged)');
+const acceptanceContract=acceptance.command('contract').description('P Acceptance Contract');
+acceptanceContract.command('approve').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--file <json>').requiredOption('--by <identity>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await approveAcceptanceContract(root(dir),id,root(o.file),o.by),o.json)));
+acceptance.command('start').argument('<project-dir>').argument('<task-id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await startAcceptanceRun(root(dir),id),o.json)));
+acceptance.command('m-submit').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--self-test <file...>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await submitMakerCandidate(root(dir),id,o.selfTest.map(root)),o.json)));
+acceptance.command('compile').argument('<project-dir>').argument('<task-id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await compileAcceptancePlan(root(dir),id),o.json)));
+acceptance.command('v-run').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>{const result=await runControlledV(root(dir),id,o.invocation);print(result,o.json);if(result.run.stage!=='v_passed')process.exitCode=1}));
+acceptance.command('v-record').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--file <json>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await recordVResult(root(dir),id,root(o.file)),o.json)));
+acceptance.command('r-record').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--file <json>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await recordRResult(root(dir),id,root(o.file)),o.json)));
+acceptance.command('resolve').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--file <json>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await resolveAcceptanceConflict(root(dir),id,JSON.parse(await readFile(root(o.file),'utf8'))),o.json)));
+acceptance.command('status').argument('<project-dir>').argument('<task-id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await readAcceptanceRun(root(dir),id),o.json)));
+acceptance.command('schedule').argument('<project-dir>').option('--json')
+  .action((dir,o)=>action(async()=>print(await buildAcceptanceSchedule(root(dir)),o.json)));
 
 program.command('writeback').argument('<project-dir>').argument('<task-id>').action((dir,id)=>action(async()=>console.log(await writebackDelivery(root(dir),id))));
 

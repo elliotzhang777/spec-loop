@@ -5,13 +5,15 @@
   "type": "module",
   "files": [
     "dist",
-    "assets/target-spec"
+    "assets/target-spec",
+    "assets/execution-view"
   ],
   "bin": {
     "spec-loop": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:execution-view && tsc",
+    "build:execution-view": "esbuild assets/execution-view/controls.jsx --bundle --minify --format=iife --target=es2022 --outfile=assets/execution-view/controls.js",
     "check:feishu-contracts": "node tools/check-feishu-connector-contracts.mjs",
     "quality:standard": "npm run build && npm run check:feishu-contracts && node --test test/*.test.mjs",
     "test": "npm run quality:standard",
@@ -21,13 +23,19 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.1.0",
     "@larksuiteoapi/node-sdk": "^1.72.0",
+    "antd": "^6.6.1",
     "commander": "^14.0.0",
+    "elkjs": "^0.11.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "yaml": "^2.8.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   }
 }

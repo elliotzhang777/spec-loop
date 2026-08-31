@@ -5,6 +5,7 @@ import { inflateSync } from 'node:zlib';
 import path from 'node:path';
 import { atomicWriteMany, assertNoSecrets, assertSubstantive, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
 import type { HumanReviewRecord, HumanReviewRequirement, ReviewArtifact, TaskState } from './model.js';
+import { finishLatestManagedTaskStep, startManagedTaskStep } from './execution-events.js';
 import { acceptanceSchema, humanReviewSchema, planSchema, stateSchema } from './schemas.js';
 
 const exec = promisify(execFile);
@@ -225,6 +226,11 @@ export async function requestVisualReview(root:string,reviewId:string,revision:s
     history_tail_hash:event.event_hash,decision_hash:null,reviewer:null,reviewed_at:null,note:'',
   }) as HumanReviewRecord;
   await atomicWriteMany(root,[...writes,{file:reviewFile(root,reviewId),content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}]);
+  await startManagedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'wait.user', wait: true,
+    label: `等待视觉确认 ${reviewId}`, summary: '等待用户检查当前 revision 的截图效果并批准或拒绝',
+    refs: [`reviews/${reviewId}.md`],
+  });
   return record;
 }
 
@@ -262,6 +268,10 @@ export async function decideVisualReview(root:string,reviewId:string,result:'app
   const writes:Array<{file:string;content:string}>=[{file,content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}];
   if(effectFile)writes.push({file:effectFile,content:`${JSON.stringify({schema_version:1,command_id:controllerCommandId,review_id:reviewId,result,decision_hash:record.decision_hash},null,2)}\n`});
   await atomicWriteMany(root,writes);
+  await finishLatestManagedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'wait.user', outcome: result === 'approved' ? 'success' : 'failure',
+    summary: `视觉确认 ${reviewId}：${result}`, refs: [`reviews/${reviewId}.md`],
+  });
   return record;
 }
 

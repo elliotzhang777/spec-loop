@@ -10,7 +10,7 @@
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 任务等级：Heavy
 - 依赖工单：TASK-021～025、Phase 4 Controller 对应确认类型已实现
-- Spec-Loop 控制任务：`.spec-loop/tasks/task-026`
+- Spec-Loop Task：`.spec-loop/tasks/task-026`
 - Proposal：PROP-10
 - 执行状态：已规划，等待真实飞书配置和单独启动授权
 

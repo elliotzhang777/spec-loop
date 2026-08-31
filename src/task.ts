@@ -9,6 +9,24 @@ import { budgetTemplate, initialFiles, roundTemplate } from './templates.js';
 import { guard, readBudget, readLedger, renderRunLog, renderSummary, validateAttemptSequence } from './runtime.js';
 import { attemptSchema } from './schemas.js';
 import { validateRequiredHumanReviews } from './review.js';
+import {
+  annotateManagedTask, finishExecutionStep, finishLatestManagedTaskStep, managedProjectRootForTask,
+  startManagedTaskStep, type ExecutionStepType,
+} from './execution-events.js';
+
+async function observedTaskStep<T>(root: string, input: {
+  taskId: string; round: number; stepType: ExecutionStepType; label: string; summary: string; refs?: string[];
+}, operation: () => Promise<T>): Promise<T> {
+  const started = await startManagedTaskStep(root, input), projectRoot = managedProjectRootForTask(root);
+  let result: T;
+  try { result = await operation(); }
+  catch (error) {
+    if (started && projectRoot) await finishExecutionStep(projectRoot, started, { outcome: 'failure', summary: `${input.summary}：失败` });
+    throw error;
+  }
+  if (started && projectRoot) await finishExecutionStep(projectRoot, started, { outcome: 'success' });
+  return result;
+}
 
 async function runtimeProjectionWrites(root: string, state: TaskState): Promise<Array<{ file: string; content: string }>> {
   if (!(await exists(path.join(root, 'BUDGET.md')))) return [];
@@ -122,16 +140,21 @@ export async function planTask(root: string): Promise<TaskState> {
   if (coverage.size !== data.ac_coverage.length || expected.size !== coverage.size || [...expected].some((id) => !coverage.has(id))) throw new Error('PLAN.md must cover every AC exactly once');
   const updated = stateSchema.parse({ ...nextState(state, 'plan'), acceptance_hash: acceptanceHash }) as TaskState;
   const boundPlan = { ...data, acceptance_hash: acceptanceHash };
-  await atomicWriteMany(root, [
+  await observedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'task.plan', label: '规格与计划',
+    summary: '校验 Task 契约、覆盖全部 AC 并冻结 Acceptance hash', refs: ['PLAN.md', 'ACCEPTANCE.md'],
+  }, async () => atomicWriteMany(root, [
     { file: path.join(root, 'PLAN.md'), content: stringifyMarkdown(boundPlan, plan.body) },
     { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') },
     await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated),
-  ]);
+  ]));
   return updated;
 }
 
 export async function startRound(root: string): Promise<TaskState> {
   const { state } = await contracts(root);
+  const projectRoot = managedProjectRootForTask(root);
+  if (projectRoot) await (await import('./project.js')).verifyTaskDependencies(projectRoot, state.task_id);
   if ((await readUserControl(root))?.status === 'paused') throw new Error('Task is paused by a structured user decision');
   if (state.status === 'iterating' && await exists(path.join(root, 'BUDGET.md'))) {
     const decision = guard(await readBudget(root), await readLedger(root, state));
@@ -140,12 +163,21 @@ export async function startRound(root: string): Promise<TaskState> {
   const updated = { ...nextState(state, 'round'), current_round: state.current_round + 1 };
   const roundFile = path.join(root, 'ROUNDS', `ROUND-${String(updated.current_round).padStart(4, '0')}.md`);
   if (await exists(roundFile)) throw new Error(`Round ${updated.current_round} already exists`);
-  await atomicWriteMany(root, [
-    { file: roundFile, content: roundTemplate(state.task_id, updated.current_round) },
-    { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') },
-    await stateHistoryWrite(root, updated),
-    ...await runtimeProjectionWrites(root, updated),
-  ]);
+  const started = await startManagedTaskStep(root, {
+    taskId: state.task_id, round: updated.current_round, stepType: 'round.work', label: `Round ${updated.current_round} 实现`,
+    summary: '推进本轮实现、修复和候选准备', refs: [`ROUNDS/ROUND-${String(updated.current_round).padStart(4, '0')}.md`],
+  });
+  try {
+    await atomicWriteMany(root, [
+      { file: roundFile, content: roundTemplate(state.task_id, updated.current_round) },
+      { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') },
+      await stateHistoryWrite(root, updated),
+      ...await runtimeProjectionWrites(root, updated),
+    ]);
+  } catch (error) {
+    if (started && projectRoot) await finishExecutionStep(projectRoot, started, { outcome: 'failure', summary: 'Round 初始化失败' });
+    throw error;
+  }
   return updated;
 }
 
@@ -221,7 +253,10 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
   state = { ...nextState({ ...state, code_revision: revision }, command), code_revision: revision };
   const verify = { schema_version: 1 as const, task_id: state.task_id, round: state.current_round, result: options.result, verifier: options.verifier, independent: options.independent, human_checked: humanChecked, signed_round: state.current_round, evidence: [...existing.map((e) => e.id), evidenceId] };
   const roundData = { ...round.data, status: options.result === 'pass' ? 'verified_pass' as const : 'verified_fail' as const };
-  await atomicWriteMany(root, [
+  await observedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'task.verify', label: 'Task 验证',
+    summary: `用当前 Round Evidence 签署验证结果：${options.result}`, refs: ['VERIFY.md', metadataRel],
+  }, async () => atomicWriteMany(root, [
     { file: path.join(root, artifactRel), content: artifact },
     { file: path.join(root, metadataRel), content: `${JSON.stringify(record, null, 2)}\n` },
     { file: round.file, content: stringifyMarkdown(roundData, round.doc.body) },
@@ -229,7 +264,11 @@ export async function verifyTask(root: string, options: { result: 'pass' | 'fail
     { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(state, '# Task State\n\nLifecycle fields are CLI-managed.') },
     await stateHistoryWrite(root, state),
     ...await runtimeProjectionWrites(root, state),
-  ]);
+  ]));
+  await finishLatestManagedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'round.work', outcome: options.result === 'pass' ? 'success' : 'failure',
+    summary: options.result === 'pass' ? '本轮实现通过验证' : '本轮实现验证失败，进入迭代', refs: ['VERIFY.md', metadataRel],
+  });
   return state;
 }
 
@@ -237,7 +276,8 @@ export async function evidenceRecords(root: string): Promise<EvidenceRecord[]> {
   const dir = path.join(root, 'evidence');
   if (!(await exists(dir))) return [];
   const { readdir } = await import('node:fs/promises');
-  const files = (await readdir(dir)).filter((f) => /^EV-[1-9]\d*\.json$/.test(f)).sort((a, b) => Number(a.slice(3)) - Number(b.slice(3)));
+  const files = (await readdir(dir)).filter((f) => /^EV-[1-9]\d*\.json$/.test(f))
+    .sort((a, b) => Number.parseInt(a.slice(3), 10) - Number.parseInt(b.slice(3), 10));
   const records: EvidenceRecord[] = [];
   for (const file of files) {
     const raw = await readFile(path.join(dir, file), 'utf8');
@@ -290,7 +330,10 @@ export async function deliverTask(root: string): Promise<TaskState> {
   const { state, criteria, humanReviews, webGates } = await contracts(root);
   await validateDelivery(root, state, criteria, humanReviews, webGates);
   const updated = nextState(state, 'deliver');
-  await atomicWriteMany(root, [{ file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') }, await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated)]);
+  await observedTaskStep(root, {
+    taskId: state.task_id, round: state.current_round, stepType: 'task.deliver', label: '交付关闭',
+    summary: '校验 AC 到当前 Evidence 的映射并关闭 Task', refs: ['DELIVERY.md', 'VERIFY.md'],
+  }, async () => atomicWriteMany(root, [{ file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') }, await stateHistoryWrite(root, updated), ...await runtimeProjectionWrites(root, updated)]));
   return updated;
 }
 
@@ -389,6 +432,10 @@ export async function appendAttempt(root: string, input: Omit<Attempt, 'schema_v
     { file: path.join(root, 'RUN_LOG.md'), content: renderRunLog(all) },
     { file: path.join(root, 'RUN_SUMMARY.md'), content: renderSummary(state, budget, all, result) },
   ]);
+  await annotateManagedTask(root, {
+    taskId: state.task_id, round: attempt.round, label: `Attempt ${attempt.attempt} · ${attempt.outcome}`,
+    summary: attempt.action, refs: ['LOOP_LEDGER.jsonl', 'RUN_LOG.md'], occurredAt: new Date(attempt.timestamp),
+  });
   return attempt;
 }
 

@@ -20,6 +20,8 @@
 - Light/Standard Task 的 Gate 必须使用 `coverage: targeted`，只覆盖自身 AC、改动模块和直接依赖；`coverage: full` 只允许最终 Heavy Task，业务波次完成后统一运行一次。
 - 工程已经提供长期验证数据库时，Gate 必须使用 `database.lifecycle: persistent`，不得在每次验证中创建、删除容器或数据卷；使用事务回滚、固定 Fixture 或受控 schema reset 恢复数据。
 - 一次性数据库只用于迁移、初始化、升级/回滚或隔离要求明确的 Heavy 验证，必须声明 `database.lifecycle: disposable` 和原因。
+- Round 开始后，问题复现、根因分析和代码修改分别使用 `spec-loop activity start/finish` 记录；编译、定向测试和 Playwright 使用 `spec-loop activity run` 包装。不得把所有工作只留在父级 `round.work`，否则可视化只能显示“未拆分耗时”。
+- 优先先完成复现和根因分析，再批量修改并运行一次最小定向验证；失败后按错误指纹决定是否再次运行，禁止无差别重复全量编译或回归。
 
 ## 规格层级
 

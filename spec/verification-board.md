@@ -6,7 +6,7 @@
 
 | 工单 | 验证范围 | 验证方式 | 验证人 | 状态 | 环境/入口 | 更新时间 |
 |---|---|---|---|---|---|---|
-当前没有等待验证的工单。
+| [TASK-030](04-task/TASK-030-pmvr-acceptance-loop.md) | v2 Contract、HEAD/计划/Evidence 绑定、V/R 路由、预算、Conflict/Inbox、调度和 v1 兼容 | 独立 V 执行定向 Gate；独立 R 复核 Evidence，必要时再申请 Heavy | 待独立 V/R | 待验证 | `src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs` | 2026-08-31 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 

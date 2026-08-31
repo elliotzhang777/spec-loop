@@ -86,7 +86,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
-> 当前授权：仅 FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；本授权不自动启动 FEAT-004～006 的完整 Controller、Scheduler、并发或平台 Toolchain。
+> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。默认协议切换、完整 Scheduler/并发、最终 Heavy Gate 和其他平台 Toolchain 仍需单独授权。
 
 ### 目标
 
@@ -100,13 +100,14 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ### 自动单任务闭环
 
-- Spec Analyst、Planner、Plan Reviewer；
-- step-scoped Maker；
-- Deterministic Gate Runner；
-- 独立 Checker；
-- Acceptance Judge 只能引用现有 Evidence；
-- Controller 将失败分类为 repair、replan、provider retry 或 needs_user；
-- Guard 自动决定是否开启下一 Round。
+- P 在规格/Task 创建时同步形成 AC、用例、工具、断言和证据要求并由人批准；
+- M 在受控 Worktree 实现、自测并提交稳定 HEAD；
+- Controller 从契约、HEAD、diff 和工程 Toolchain 编译不可降级的验收计划；
+- V 独立执行 Playwright、API、单测等验收并分类实现、环境、规格和高风险失败；
+- V PASS 后 R 才能独立复核结论与 Evidence，R 不替代 V 执行测试；
+- M/V/R 共用初次执行后最多 2 次语义返工，基础设施重试单独有界；
+- 预算耗尽或冲突生成 Conflict Record/Review Inbox 并进入 `waiting_human_review`；
+- 普通独立 Task 可暂挂并继续其他 Ready Task，下游、关键路径和高风险任务按规则阻塞或立即升级。
 
 ### 隔离与调度
 
@@ -124,6 +125,12 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 - 飞书只做本地事实的交互投影；卡片、消息和回调不得成为第二 Task 状态源，连接器不可用时必须回退本地 `needs_user` 与确认入口。
 - 默认禁止自动 merge、删除、生产数据、凭据、签名和发布修改。
 
+### 本地只读观察面
+
+- 每个 Project 可以从自身 `.spec-loop/` 重建当前 Task、当前步骤、历史步骤、耗时和 Evidence 路径，不建立第二 Task 状态源。
+- 旧运行事实缺少起止时间时必须显示精度和缺口；新增步骤使用追加式执行事件补齐准确时间，不得依赖文件 mtime 猜测。
+- 首版只提供本机回环地址的只读 Web 页面，不借可视化入口扩大 Controller、Connector 或文件写权限。
+
 ### 完成标准
 
 1. Scheduling 完成足够的 report-only 试运行，误报率、采纳率和成本可观察。
@@ -135,7 +142,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 7. 独立功能和安全验收 PASS，Phase 1–3 全量回归通过。
 8. 飞书正式机器人完成进度通知、失效/越权拒绝、有效确认、重复回调幂等、断线恢复和本地回退 Dogfood。
 
-关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)、[FEAT-008 飞书进度通知与确认连接器](02-feature/FEAT-008-feishu-progress-approval-connector.md)。
+关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)、[FEAT-008 飞书进度通知与确认连接器](02-feature/FEAT-008-feishu-progress-approval-connector.md)、[FEAT-009 可重建执行可视化](02-feature/FEAT-009-execution-visualization.md)。
 
 ## Phase 5：Portfolio、能力资产与持续优化治理
 

@@ -17,7 +17,9 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 - Phase 1：Light/Standard/Heavy、文件契约、状态机、Round、AC、Evidence 和 Delivery。
 - Phase 2：Attempt、Ledger、Budget、Guard、事实 Summary 和失败恢复。
 - Phase 3：Project Loop、受控 worktree 执行、安全加固、故障恢复和完整 Harness Evidence 闭环已完成正式 Heavy 验收。
+- Phase 4（旁路预览）：P/M/V/R v2 验收内核支持批准契约、稳定 HEAD、独立 V/R、共享返工预算、Conflict Record 与 Review Inbox；旧 v1 Task 不自动迁移。
 - Web/UI：支持目标工程本地 Playwright 功能 Gate，以及绑定 Round、revision 与截图哈希的人工视觉 Review。
+- Execution View（预览）：从项目 `.spec-loop/` 重建当前 Task/步骤、历史时间线、主动/等待/未记录耗时和最长步骤；本机只读页面不会成为第二状态源。
 
 当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 3 不包含后台 Scheduling、自动多 Round、自动 push/merge 或 Connector 写入。
 
@@ -63,6 +65,63 @@ node dist/cli.js verify tasks/example --result pass --evidence evidence/test.txt
 # Fill DELIVERY.md AC mappings
 node dist/cli.js deliver tasks/example
 ```
+
+## P/M/V/R 验收协议 v2
+
+v2 必须显式启用。P 先准备完整 JSON 契约（AC、用例、冻结的 Gate 命令或 Playwright 配置、断言、证据要求和预算），并把它随 Proposal 一起交给人批准：
+
+```bash
+spec-loop triage propose projects/demo \
+  --source "approved product specification" \
+  --goal "implement checkout" \
+  --reason "deliver independently verified behavior" \
+  --contract acceptance-contract-v2.json
+spec-loop triage approve projects/demo PROP-1 --by product-owner
+spec-loop triage create-task projects/demo PROP-1 --id TASK-CHECKOUT-1 --title "Checkout"
+```
+
+`create-task` 会自动生成绑定同一次人类 Approval 的 `ACCEPTANCE_CONTRACT_V2.md`。随后按角色推进：
+
+```bash
+spec-loop acceptance start projects/demo TASK-CHECKOUT-1
+# M 在受控 worktree 提交代码和自测后：
+spec-loop acceptance m-submit projects/demo TASK-CHECKOUT-1 --self-test .spec-loop/output/m-self-test.txt
+spec-loop acceptance compile projects/demo TASK-CHECKOUT-1
+
+# V 可以由引擎运行受控 Gate，也可接入独立 invocation 的结构化结果：
+spec-loop acceptance v-run projects/demo TASK-CHECKOUT-1 --invocation verifier-session-1
+spec-loop acceptance v-record projects/demo TASK-CHECKOUT-1 --file v-result.json
+
+# 只有 V PASS 后，另一个 invocation 才能提交 R 复核：
+spec-loop acceptance r-record projects/demo TASK-CHECKOUT-1 --file r-result.json
+spec-loop acceptance status projects/demo TASK-CHECKOUT-1 --json
+spec-loop acceptance schedule projects/demo --json
+```
+
+M 返工必须产生新 HEAD，V/R 重试必须产生新 Evidence。实现与证据返工共享最多 2 次预算；工具/环境重试单独计数。预算耗尽、重复失败、规格歧义或高风险会进入 `waiting_human_review`，并写入 `.spec-loop/conflicts/` 与可重建的 `.spec-loop/REVIEW_INBOX.json`，不能生成 Candidate。
+
+当前运行中的 v1 Task 继续使用 `TASK_STATE.md / VERIFY.md`；安装或构建新版本不会修改其状态，也不会自动重启已有 `view` 进程。
+
+## 执行可视化（预览）
+
+在任意已初始化 Project 中生成结构化快照，或打开本机只读页面：
+
+```bash
+node dist/cli.js snapshot projects/demo --json
+node dist/cli.js view projects/demo
+```
+
+`view` 只监听 `127.0.0.1`。升级后产生的步骤由 `.spec-loop/EXECUTION_EVENTS.jsonl` 提供精确起止时间；旧项目已有 Gate 的 `duration_ms` 继续显示为精确值，无法可靠还原的历史时间明确显示为“未知”，不会使用文件修改时间猜测。
+
+Round 内建议把活动拆成可计时步骤：
+
+```bash
+spec-loop activity start <task-dir> --kind reproduce --label "复现问题" --summary "稳定复现当前失败路径"
+spec-loop activity finish <task-dir> --id <step-run-id> --outcome success
+spec-loop activity run <task-dir> node backend/tools/run-task-141.mjs --label "TASK-141 定向验证" --summary "运行固定 MySQL 定向回归"
+```
+
+页面会分别显示复现、分析、修改、编译/测试耗时，并把没有子步骤事件覆盖的 Round 时间标记为“未拆分”，不会伪造历史明细。
 
 目标规格配置：
 

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csp-nonce" content="__CSP_NONCE__">
+  <title>Spec-Loop Execution</title>
+  <link rel="stylesheet" href="/controls.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="execution-view">
+    <header class="app-bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div><strong id="project-name">Spec-Loop</strong><span class="crumb">Execution Console</span></div>
+      </div>
+      <div class="connection-status" aria-live="polite">
+        <span class="live-beacon" aria-hidden="true"></span>
+        <div><strong id="connection-label">正在连接</strong><span id="freshness-text">等待第一次数据同步</span></div>
+      </div>
+    </header>
+
+    <div id="runtime-error" class="runtime-error" role="status" aria-live="polite" hidden>
+      <strong>本次刷新失败，已保留上一帧</strong><span id="runtime-error-message"></span>
+    </div>
+
+    <main>
+      <section id="current-work" class="runtime-card" aria-labelledby="current-heading">
+        <div class="runtime-scan" aria-hidden="true"></div>
+        <div class="runtime-heading">
+          <div>
+        <div class="section-kicker" id="current-heading">当前执行</div>
+            <h1 id="current-task">读取项目状态…</h1>
+            <div id="current-meta" class="tag-row"></div>
+          </div>
+          <div id="runtime-status" aria-live="polite"></div>
+        </div>
+
+        <div class="runtime-overview">
+          <div class="current-step-block">
+            <span class="field-label">当前步骤</span>
+            <h2 id="current-step-label">正在重建执行图</h2>
+            <p id="current-step-summary">正在读取项目中的执行事实</p>
+          </div>
+          <div class="statistic-block">
+            <span class="field-label">已运行</span>
+            <strong id="current-elapsed">—</strong>
+            <span class="statistic-suffix">当前步骤</span>
+          </div>
+          <div class="next-action-block">
+            <span class="field-label">下一动作</span>
+            <p id="next-action">等待状态加载</p>
+          </div>
+        </div>
+
+        <div class="workflow-wrap">
+          <div class="subsection-heading">
+            <div><span class="section-kicker">波次执行</span><h2 id="workflow-heading">正在定位当前波次</h2><p id="workflow-caption" class="workflow-caption">从项目事实重建完整 Task 依赖</p></div>
+            <div id="workflow-controls" class="workflow-actions" aria-label="波次执行操作"></div>
+          </div>
+          <div id="workflow" class="workflow" aria-label="当前波次 Task 执行图"></div>
+        </div>
+      </section>
+
+      <section id="current-metrics" class="metric-grid" aria-label="当前任务耗时"></section>
+
+      <div class="content-grid">
+        <section class="panel timeline-panel" aria-labelledby="timeline-heading">
+          <div class="panel-heading">
+            <div><span class="section-kicker">任务</span><h2 id="timeline-heading">执行任务</h2><p id="task-summary">从项目事实重建</p></div>
+            <div id="task-controls" class="task-toolbar" aria-label="任务筛选与排序"></div>
+          </div>
+          <div class="task-table-head" aria-hidden="true"><span>任务</span><span>生命周期构成 <small>Task 之间可重叠，不能相加为工时</small></span><span>生命周期跨度</span></div>
+          <div class="duration-legend" aria-label="耗时构成图例"><span><i class="active"></i>已记录主动执行</span><span><i class="waiting"></i>已记录等待</span><span><i class="untracked"></i>未归因 / 空闲</span></div>
+          <div id="task-list" class="task-list"></div>
+        </section>
+
+        <aside class="panel detail-panel" aria-labelledby="detail-title">
+          <div class="panel-heading detail-heading">
+            <div><span class="section-kicker">活动</span><h2 id="detail-title">步骤活动</h2><p id="detail-metrics">选择一个任务查看明细</p></div>
+          </div>
+          <div id="step-list" class="step-list"></div>
+          <div id="task-diagnostics" hidden></div>
+        </aside>
+      </div>
+
+      <section id="project-diagnostics" class="project-diagnostics" hidden aria-label="数据完整性提示"></section>
+    </main>
+  </div>
+  <script src="/vendor/elk.bundled.js" defer></script>
+  <script src="/controls.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

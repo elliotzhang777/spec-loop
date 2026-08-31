@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, readMarkdown, sha256 } from '../files.js';
 import { feishuConnectorRoot, readFeishuConfig, type FeishuTarget, type FeishuTransport } from './feishu.js';
-import { readProject, scanTasks } from '../project.js';
+import { readProject, scanTasks, selectActiveTask } from '../project.js';
 import { evidenceRecords, readState } from '../task.js';
 import { acceptanceSchema, verifySchema } from '../schemas.js';
 import { readVisualReviews } from '../review.js';
@@ -416,11 +416,7 @@ async function harnessMatchesCurrentEvidence(output: string, taskId: string, har
 export async function projectProgressSnapshot(projectRoot: string): Promise<ProgressSnapshot> {
   const project = await readProject(projectRoot), indexed = await scanTasks(projectRoot);
   const states = await Promise.all(indexed.map(async (task) => ({ task, state: await readState(task.path) })));
-  const active = states.filter(({ state }) => ['working', 'verifying', 'iterating'].includes(state.status))
-    .sort((left, right) => right.state.updated_at.localeCompare(left.state.updated_at))[0]
-    ?? states.filter(({ state }) => state.status === 'planned').sort((left, right) => right.state.updated_at.localeCompare(left.state.updated_at))[0]
-    ?? states.sort((left, right) => right.state.updated_at.localeCompare(left.state.updated_at))[0]
-    ?? null;
+  const active = selectActiveTask(states);
   const output = path.join(projectRoot, project.output_root);
   const taskId = active?.state.task_id ?? null;
   const prepareFile = taskId ? path.join(output, `${taskId}-prepare.json`) : null;

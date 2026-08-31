@@ -10,6 +10,7 @@ import { evidenceRecords, readState } from './task.js';
 import { acceptanceSchema, planSchema } from './schemas.js';
 import type { WebGateRequirement } from './model.js';
 import { validImage } from './review.js';
+import { finishExecutionStep, reconcileInterruptedExecutionSteps, startExecutionStep, type ExecutionOutcome, type ExecutionStepType } from './execution-events.js';
 
 const exec = promisify(execFile);
 const control = (root:string) => path.join(root, '.spec-loop');
@@ -86,6 +87,18 @@ const gateResultsSchema = z.array(gateResultSchema).min(1);
 export type WorkspaceManifest = z.infer<typeof manifestSchema>;
 export type GateResult = z.infer<typeof gateResultSchema>;
 type HarnessState = z.infer<typeof harnessStateSchema>;
+
+async function observedProjectStep<T>(root:string,input:{
+  taskId:string;round:number;stepType:ExecutionStepType;label:string;summary:string;refs?:string[];
+},operation:()=>Promise<T>,outcome:(result:T)=>ExecutionOutcome=()=> 'success'):Promise<T>{
+  const started=await startExecutionStep(root,{taskId:input.taskId,round:input.round,stepType:input.stepType,label:input.label,summary:input.summary,refs:input.refs});
+  let result:T;
+  try{result=await operation()}
+  catch(error){await finishExecutionStep(root,started,{outcome:'failure',summary:`${input.summary}：失败`});throw error}
+  const finalOutcome=outcome(result);
+  await finishExecutionStep(root,started,{outcome:finalOutcome,summary:finalOutcome==='success'?input.summary:`${input.summary}：未通过`});
+  return result;
+}
 
 function gatePlanHash(config:z.infer<typeof gateConfigSchema>):string { return sha256(JSON.stringify(config)); }
 
@@ -268,19 +281,27 @@ export async function prepareHarness(root:string,taskId:string,prompt:string){
   }
   if(remote?.action==='defer_verification')throw new Error('current candidate verification was deferred by a structured user decision');
   if(remote?.action==='authorize_verification')await decisions.consumeConfirmationDecision(root,{commandId:remote.command_id,contentHash:remote.content_hash,consumer:'harness-prepare'});
-  const payload={schema_version:1,task_id:taskId,round:state.current_round,state:state.status,base_commit:m.base_commit,worktree:m.worktree,head,prompt_hash:sha256(prompt),prepared_at:new Date().toISOString()};
-  const serialized=JSON.stringify(payload,null,2)+'\n',file=path.join(control(root),'output',`${taskId}-prepare.json`);await atomicWriteMany(root,[{file,content:serialized}]);await advance(root,taskId,null,'prepared',m,head,null,{prepare:sha256(serialized)});return file;
+  return observedProjectStep(root,{taskId,round:state.current_round,stepType:'harness.prepare',label:'准备执行',summary:'校验授权、候选、worktree 和 Harness 计划',refs:[`.spec-loop/output/${taskId}-prepare.json`]},async()=>{
+    const payload={schema_version:1,task_id:taskId,round:state.current_round,state:state.status,base_commit:m.base_commit,worktree:m.worktree,head,prompt_hash:sha256(prompt),prepared_at:new Date().toISOString()};
+    const serialized=JSON.stringify(payload,null,2)+'\n',file=path.join(control(root),'output',`${taskId}-prepare.json`);await atomicWriteMany(root,[{file,content:serialized}]);await advance(root,taskId,null,'prepared',m,head,null,{prepare:sha256(serialized)});return file;
+  });
 }
 export async function executeHarness(root:string,taskId:string,prompt:string){
   const m=await readWorkspace(root,taskId);const state=await readHarnessState(root,taskId);if(state.stage!=='prepared')throw new Error(`harness execute is illegal from ${state.stage}`);await verifyTaskExecutionApproval(root,taskId);
   const cfg=await readProviderConfig(root),p=cfg.providers[cfg.active_provider];let args=[...p.args];if(cfg.active_provider==='codex')args=['-C',m.worktree,...args,prompt];else args=[...args,prompt];
-  const startedAt=new Date().toISOString(),result=await runProcess(p.executable,args,m.worktree,p.timeout_seconds*1000);const head=await git(m.worktree,['rev-parse','HEAD']);const content=`PROVIDER ${cfg.active_provider}\nSTARTED ${startedAt}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}`;
-  const rel=`.spec-loop/output/${taskId}-provider.txt`,hash=sha256(content);await atomicWriteMany(root,[{file:path.join(root,rel),content}]);await advance(root,taskId,'prepared','executed',m,head,result.code===0?null:`provider exit ${result.code}`,{provider:hash});return{code:result.code,timed_out:result.timedOut,head,artifact:rel,sha256:hash};
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path);
+  return observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'harness.execute',label:'Agent 实现',summary:`${cfg.active_provider} 在隔离 worktree 中执行批准步骤`,refs:[`.spec-loop/output/${taskId}-provider.txt`]},async()=>{
+    const startedAt=new Date().toISOString(),result=await runProcess(p.executable,args,m.worktree,p.timeout_seconds*1000);const head=await git(m.worktree,['rev-parse','HEAD']);const content=`PROVIDER ${cfg.active_provider}\nSTARTED ${startedAt}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}`;
+    const rel=`.spec-loop/output/${taskId}-provider.txt`,hash=sha256(content);await atomicWriteMany(root,[{file:path.join(root,rel),content}]);await advance(root,taskId,'prepared','executed',m,head,result.code===0?null:`provider exit ${result.code}`,{provider:hash});return{code:result.code,timed_out:result.timedOut,head,artifact:rel,sha256:hash};
+  },(result)=>result.code===0&&!result.timed_out?'success':'failure');
 }
 export async function collectHarness(root:string,taskId:string){
   const m=await readWorkspace(root,taskId);const current=await readHarnessState(root,taskId);if(current.stage!=='executed')throw new Error(`harness collect is illegal from ${current.stage}`);
-  const head=await git(m.worktree,['rev-parse','HEAD']),status=await git(m.worktree,['status','--short']),diff=await git(m.worktree,['diff','--stat',m.base_commit]),fingerprint=await worktreeFingerprint(m.worktree);const value=collectSchema.parse({schema_version:1,task_id:taskId,workspace:m.worktree,base_commit:m.base_commit,head,status:status.split('\n').filter(Boolean),diff_stat:diff,worktree_fingerprint:fingerprint,collected_at:new Date().toISOString()});
-  const serialized=JSON.stringify(value,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-collect.json`),content:serialized}]);await advance(root,taskId,'executed','collected',m,head,null,{collect:sha256(serialized)});return value;
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path);
+  return observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'harness.collect',label:'收集改动',summary:'重新读取 HEAD、工作树和 diff，建立候选内容指纹',refs:[`.spec-loop/output/${taskId}-collect.json`]},async()=>{
+    const head=await git(m.worktree,['rev-parse','HEAD']),status=await git(m.worktree,['status','--short']),diff=await git(m.worktree,['diff','--stat',m.base_commit]),fingerprint=await worktreeFingerprint(m.worktree);const value=collectSchema.parse({schema_version:1,task_id:taskId,workspace:m.worktree,base_commit:m.base_commit,head,status:status.split('\n').filter(Boolean),diff_stat:diff,worktree_fingerprint:fingerprint,collected_at:new Date().toISOString()});
+    const serialized=JSON.stringify(value,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-collect.json`),content:serialized}]);await advance(root,taskId,'executed','collected',m,head,null,{collect:sha256(serialized)});return value;
+  });
 }
 
 function playwrightPackageRoots(worktree:string,gate:z.infer<typeof playwrightGateSchema>):string[]{
@@ -500,13 +521,15 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
   const collect=collectSchema.parse(JSON.parse(collectRaw));
   const startStatus=await worktreeStatus(m.worktree),startFingerprint=await worktreeFingerprint(m.worktree);
   if(startStatus!==collect.status.join('\n')||startFingerprint!==collectedFingerprint(collect))throw new Error('candidate worktree changed after collect');
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path);
   for(const gate of gates){
     if(gate.kind==='playwright'){
-      const result=await runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint);
+      const result=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.playwright',label:`Gate ${gate.id}`,summary:'执行目标工程真实浏览器验证路径',refs:[`.spec-loop/output/${taskId}-gates.json`]},()=>runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint),(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');
       results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(config),ac:gate.ac}));
       continue;
     }
-    assertGateCommand(gate.command);assertDatabaseLifecycle(gate.command,config);const started=Date.now(),createdAt=new Date().toISOString(),result=await runProcess(gate.command[0],gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnvironment(config)),head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);results.push(gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(config),ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt}))
+    assertGateCommand(gate.command);assertDatabaseLifecycle(gate.command,config);
+    const gateResult=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.command',label:`Gate ${gate.id}`,summary:`执行确定性命令：${gate.command[0]}`,refs:[`.spec-loop/output/${taskId}-gate-${gate.id}.txt`]},async()=>{const started=Date.now(),createdAt=new Date().toISOString(),result=await runProcess(gate.command[0],gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnvironment(config)),head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);return gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,plan_sha256:gatePlanHash(config),ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt})},(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');results.push(gateResult)
   }
   const serialized=JSON.stringify(results,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-gates.json`),content:serialized}]);await advance(root,taskId,'collected','verified',m,startHead,results.every(x=>x.exit_code===0)?null:'one or more gates failed',{gates:sha256(serialized)});return results;
 }
@@ -570,8 +593,11 @@ export async function reportHarness(root:string,taskId:string){
   if(await worktreeStatus(m.worktree)!==collected.status.join('\n')||await worktreeFingerprint(m.worktree)!==collectedFingerprint(collected))throw new Error('candidate worktree differs from collected evidence');
   await validateGateEvidence(root,taskId,m,head,gates);
   const config=await readGateConfig(root);
-  const passed=gates.every(g=>g.exit_code===0&&!g.timed_out),content=`# Harness Report — ${taskId}\n\n- Base: ${collected.base_commit}\n- Head: ${collected.head}\n- Verification scope: ${config.scope_kind??'legacy'}${config.wave_id?` (${config.wave_id})`:''}\n- Coverage: ${config.coverage}\n- Database lifecycle: ${config.database.lifecycle} (${config.database.reset})\n- Gate verdict: ${passed?'PASS':'FAIL'}\n- Modified entries: ${collected.status.length}\n\n## Gates\n${gates.map(g=>`- ${g.id} (${g.kind}, AC ${g.ac?.join(', ')||'legacy'}): exit ${g.exit_code}, timeout ${g.timed_out}, artifact ${g.artifact}, sha256 ${g.sha256}${g.web_evidence?`, tests ${g.web_evidence.stats.expected}, screenshots ${g.web_evidence.screenshots}, web manifest ${g.web_evidence.manifest}`:''}`).join('\n')}\n`,file=path.join(control(root),'output',`${taskId}-harness-report.md`);
-  const reportHash=sha256(content);await atomicWriteMany(root,[{file,content}]);await advance(root,taskId,'verified','reported',m,head,passed?null:'gate verdict failed',{report:reportHash});return{passed,head,file,sha256:reportHash};
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path);
+  return observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'harness.report',label:'生成验证报告',summary:'校验 Gate Evidence hash 并生成 Harness Report',refs:[`.spec-loop/output/${taskId}-harness-report.md`]},async()=>{
+    const passed=gates.every(g=>g.exit_code===0&&!g.timed_out),content=`# Harness Report — ${taskId}\n\n- Base: ${collected.base_commit}\n- Head: ${collected.head}\n- Verification scope: ${config.scope_kind??'legacy'}${config.wave_id?` (${config.wave_id})`:''}\n- Coverage: ${config.coverage}\n- Database lifecycle: ${config.database.lifecycle} (${config.database.reset})\n- Gate verdict: ${passed?'PASS':'FAIL'}\n- Modified entries: ${collected.status.length}\n\n## Gates\n${gates.map(g=>`- ${g.id} (${g.kind}, AC ${g.ac?.join(', ')||'legacy'}): exit ${g.exit_code}, timeout ${g.timed_out}, artifact ${g.artifact}, sha256 ${g.sha256}${g.web_evidence?`, tests ${g.web_evidence.stats.expected}, screenshots ${g.web_evidence.screenshots}, web manifest ${g.web_evidence.manifest}`:''}`).join('\n')}\n`,file=path.join(control(root),'output',`${taskId}-harness-report.md`);
+    const reportHash=sha256(content);await atomicWriteMany(root,[{file,content}]);await advance(root,taskId,'verified','reported',m,head,passed?null:'gate verdict failed',{report:reportHash});return{passed,head,file,sha256:reportHash};
+  },(result)=>result.passed?'success':'failure');
 }
 
 export async function validateRequiredWebGates(root:string,taskId:string,revision:string):Promise<string[]>{
@@ -619,7 +645,9 @@ export async function reconcileHarness(root:string,taskId:string){
     updated_at:new Date().toISOString(),
     last_error:staleHeadEvidence?'workspace HEAD or worktree changed; rerun execute/collect/verify':state.last_error,
   };
-  await writeHarnessState(root,reconciled);return reconciled;
+  await writeHarnessState(root,reconciled);
+  await reconcileInterruptedExecutionSteps(root,{taskId,stepTypes:['harness.prepare','harness.execute','harness.collect','gate.command','gate.playwright','harness.report'],summary:'Harness reconcile 确认原执行进程已退出，步骤按中断处理'});
+  return reconciled;
 }
 
 export async function writebackDelivery(root:string,taskId:string){const item=(await scanTasks(root)).find(t=>t.task_id===taskId);if(!item)throw new Error('task not found');const state=await readState(item.path);if(state.status!=='delivered')throw new Error('task is not delivered');const evidence=await evidenceRecords(item.path);const content=`# Project Write-back — ${taskId}\n\n- Project: ${(await readProject(root)).project_id}\n- Status: delivered\n- Round: ${state.current_round}\n- Revision: ${state.code_revision}\n- Evidence: ${evidence.map(e=>e.id).join(', ')}\n\nThis is a generated external-system write-back draft. No external write was performed.\n`;const file=path.join(control(root),'output',`${taskId}-writeback.md`);await atomicWriteMany(root,[{file,content}]);return file}

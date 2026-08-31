@@ -56,3 +56,21 @@ test('Delivery rejects incomplete AC mapping', async () => {
   await fillDelivery(root, { id, round: 1, revision: 'r1', evidenceId: 'EV-1', criteriaCount: 1 });
   const result = cli(['deliver', root]); assert.notEqual(result.code, 0); assert.match(result.stderr, /AC-2: missing/);
 });
+
+test('Evidence ordering remains continuous after EV-9', async () => {
+  const root = await tempRoot('evidence-order-'); const id = 'TASK-EVIDENCE-ORDER';
+  assert.equal(cli(['init', root, '--level', 'standard', '--id', id, '--title', 'Evidence ordering']).code, 0);
+  await fillContracts(root, { id, title: 'Evidence ordering', level: 'standard' });
+  assert.equal(cli(['plan', root]).code, 0);
+  for (let round = 1; round <= 11; round++) {
+    assert.equal(cli(['round', root]).code, 0);
+    await fillRound(root, round);
+    const proof = await artifact(root, `proof-${round}.txt`, `round ${round}\n`);
+    const verified = cli(['verify', root, '--result', 'fail', '--evidence', proof,
+      '--verifier', 'ordering-verifier', '--independent', '--revision', `r${round}`]);
+    assert.equal(verified.code, 0, verified.stderr);
+  }
+  const check = cli(['check', root, '--json']);
+  assert.equal(check.code, 0, check.stderr);
+  assert.equal(JSON.parse(check.stdout).ok, true);
+});
