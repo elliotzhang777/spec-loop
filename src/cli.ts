@@ -7,27 +7,35 @@ import { LEVELS } from './model.js';
 import { atomicWriteMany, assertNoSecrets } from './files.js';
 import { appendAttempt, checkTask, deliverTask, initTask, planTask, readState, runtimeInit, startRound, verifyTask } from './task.js';
 import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
-import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider } from './project.js';
+import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider, setDefaultTaskProtocol } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
 import { disableFeishuConnector, feishuConnectorStatus, initFeishuConfig, readFeishuConfig, superviseFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
 import { acceptLocalConfirmationAction, listFeishuActionInbox, processFeishuAction } from './connectors/feishu-callback.js';
 import { createLocalSpecLoopConfirmationController } from './connectors/feishu-controller.js';
 import { buildExecutionSnapshot } from './execution-view.js';
-import { closeExecutionViewServer, startExecutionViewServer } from './execution-view-server.js';
+import { closeExecutionViewServer, executionViewStatus, serveManagedExecutionView, startExecutionViewServer, startManagedExecutionView, stopManagedExecutionView } from './execution-view-server.js';
 import { finishWorkActivity, runWorkCommand, startWorkActivity, workActivityKindSchema } from './work-activity.js';
 import { spawn } from 'node:child_process';
 import {
   approveAcceptanceContract, buildAcceptanceSchedule, compileAcceptancePlan, readAcceptanceRun,
   recordRResult, recordVResult, resolveAcceptanceConflict, runControlledV, startAcceptanceRun,
-  submitMakerCandidate,
+  submitMakerCandidate, reconcileCandidateBaseline,
 } from './acceptance-loop.js';
+import { cancelRoleInvocation, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
+import { initReportScheduler, readReportSchedulerStatus, runReportScheduler, setReportSchedulerPaused } from './report-scheduler.js';
+import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
+import { schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor } from './scheduler-supervisor.js';
+import { collectSpringEvidence, detectSpringBoot, planV2Gates, verifySpringEvidence, verifyV2GatePlan } from './toolchain.js';
+import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree } from './maintenance.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
 
 function root(value: string): string { return path.resolve(value); }
 function print(value: unknown, json?: boolean): void { console.log(json ? JSON.stringify(value, null, 2) : value); }
+
+process.stdout.on('error',(error:NodeJS.ErrnoException)=>{if(error.code==='EPIPE')process.exit(0);throw error});
 
 async function action(fn: () => Promise<void>): Promise<void> {
   try { await fn(); }
@@ -137,12 +145,25 @@ review.command('status').argument('<task-dir>').option('--json').action((dir, op
 
 const projectCmd=program.command('project').description('Project Loop control plane');
 projectCmd.command('init').argument('<project-dir>').requiredOption('--id <id>').requiredOption('--name <name>').requiredOption('--repository <path>').option('--branch <branch>','default Git branch','main').addOption(new Option('--risk <level>').choices(['light','standard','heavy']).default('standard')).addOption(new Option('--spec-profile <profile>').choices(['standard','backend','frontend','fullstack']).default('standard')).action((dir,o)=>action(async()=>{await initProject(root(dir),{id:o.id,name:o.name,repository:path.resolve(o.repository),branch:o.branch,risk:o.risk,specProfile:o.specProfile});console.log(`initialized project ${o.id}`)}));
-projectCmd.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const p=await readProject(root(dir));const s=await readProjectState(root(dir));const tasks=await scanTasks(root(dir));print(o.json?{project:p,state:s,derived:{active:tasks.filter(t=>t.status!=='delivered'),recent_delivery:tasks.filter(t=>t.status==='delivered')}}:`${p.project_id} ${p.name}: ${tasks.length} tasks, ${tasks.filter(t=>t.resumable).length} resumable`,o.json)}));
+projectCmd.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const p=await readProject(root(dir));const s=await readProjectState(root(dir));const tasks=await scanTasks(root(dir)),latestTaskUpdate=tasks.map(task=>task.path).length?Math.max(...await Promise.all(tasks.map(async task=>Date.parse((await readState(task.path)).updated_at)))):null,stateStale=latestTaskUpdate!==null&&Date.parse(s.updated_at)<latestTaskUpdate;print(o.json?{project:p,state:s,state_authority:'compatibility_summary',state_stale:stateStale,derived_authority:'TASK_STATE.md + ACCEPTANCE_RUN.json + EXECUTION_EVENTS.jsonl',derived:{active:tasks.filter(t=>!['delivered','cancelled'].includes(t.status)),recent_delivery:tasks.filter(t=>t.status==='delivered'),cancelled:tasks.filter(t=>t.status==='cancelled')}}:`${p.project_id} ${p.name}: default_protocol=${p.default_task_protocol}, ${tasks.length} tasks, ${tasks.filter(t=>t.resumable).length} resumable, project_state=${stateStale?'stale compatibility summary':'current'}`,o.json)}));
 projectCmd.command('spec-init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await initTargetSpecLibrary(root(dir)),o.json)));
 projectCmd.command('spec-check').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const result=await checkTargetSpecLibrary(root(dir));print(result,o.json);if(!result.ok)process.exitCode=1}));
+projectCmd.command('protocol').description('Show or set the default protocol for newly proposed tasks').argument('<project-dir>')
+  .addOption(new Option('--set <protocol>').choices(['v1','v2'])).option('--json')
+  .action((dir,o)=>action(async()=>{
+    const project=o.set?await setDefaultTaskProtocol(root(dir),o.set):await readProject(root(dir));
+    print(o.json?{project_id:project.project_id,default_task_protocol:project.default_task_protocol}:project.default_task_protocol,o.json);
+  }));
+projectCmd.command('doctor').description('Report project protocol and task-level protocol blockers').argument('<project-dir>').option('--json')
+  .action((dir,o)=>action(async()=>{
+    const project=await readProject(root(dir)),tasks=await scanTasks(root(dir)),providers=await providerDoctor(root(dir));
+    const report={ok:tasks.every(task=>!task.blocking_reason?.startsWith('invalid v2')),project_id:project.project_id,default_task_protocol:project.default_task_protocol,tasks:tasks.map(({task_id,status,protocol,protocol_stage,blocking_reason})=>({task_id,status,protocol,protocol_stage,blocking_reason})),providers};
+    print(o.json?report:[`project=${report.project_id} default_protocol=${report.default_task_protocol} ok=${report.ok}`,...report.tasks.map(task=>`${task.task_id}\t${task.protocol}\t${task.protocol_stage??task.status}\t${task.blocking_reason??'ready'}`)].join('\n'),o.json);
+    if(!report.ok)process.exitCode=1;
+  }));
 
 const tasksCmd=program.command('tasks').description('Rebuildable task registry queries');
-tasksCmd.command('list').argument('<project-dir>').option('--state <state>').option('--project <id>').option('--json').action((dir,o)=>action(async()=>{let tasks=await scanTasks(root(dir));if(o.state)tasks=tasks.filter(t=>t.status===o.state);if(o.project)tasks=tasks.filter(t=>t.project_id===o.project);print(o.json?tasks:tasks.map(t=>`${t.task_id}\t${t.status}\t${t.level}\tround=${t.round}`).join('\n'),o.json)}));
+tasksCmd.command('list').argument('<project-dir>').option('--state <state>').option('--project <id>').option('--json').action((dir,o)=>action(async()=>{let tasks=await scanTasks(root(dir));if(o.state)tasks=tasks.filter(t=>t.status===o.state);if(o.project)tasks=tasks.filter(t=>t.project_id===o.project);print(o.json?tasks:tasks.map(t=>`${t.task_id}\t${t.status}\t${t.level}\tprotocol=${t.protocol}\tstage=${t.protocol_stage??'-'}\tblocked=${t.blocking_reason??'-'}\tround=${t.round}`).join('\n'),o.json)}));
 tasksCmd.command('show').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>{const item=(await scanTasks(root(dir))).find(t=>t.task_id===id);if(!item)throw new Error('task not found');print(item,o.json)}));
 tasksCmd.command('resumable').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const items=(await scanTasks(root(dir))).filter(t=>t.resumable);print(o.json?items:items.map(t=>t.task_id).join('\n'),o.json)}));
 
@@ -167,6 +188,17 @@ program.command('view').description('Open the local read-only execution timeline
       process.once('SIGINT',stop);process.once('SIGTERM',stop);server.once('close',resolve);
     });
   }));
+const viewControl=program.command('view-control').description('Manage one background execution view per Project');
+viewControl.command('start').argument('<project-dir>').option('--port <port>','loopback port; 0 selects an available port','0').option('--json').action((dir,o)=>action(async()=>print(await startManagedExecutionView(root(dir),Number(o.port)),o.json)));
+viewControl.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await executionViewStatus(root(dir)),o.json)));
+viewControl.command('open').argument('<project-dir>').action((dir)=>action(async()=>{const status=await executionViewStatus(root(dir));if(!status.running||!status.marker)throw new Error('execution view is not running');const child=spawn(process.platform==='darwin'?'/usr/bin/open':'xdg-open',[status.marker.url],{detached:true,stdio:'ignore'});child.unref();console.log(status.marker.url)}));
+viewControl.command('stop').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await stopManagedExecutionView(root(dir)),o.json)));
+program.command('_view-serve',{hidden:true}).argument('<project-dir>').option('--port <port>','loopback port','0').action((dir,o)=>action(async()=>serveManagedExecutionView(root(dir),Number(o.port))));
+program.command('_scheduler-supervise',{hidden:true}).argument('<project-dir>')
+  .option('--interval-seconds <seconds>','seconds between watchdog cycles','5')
+  .option('--stale-seconds <seconds>','execution heartbeat stale threshold','15')
+  .option('--cycle-timeout-seconds <seconds>','hard timeout for one isolated watchdog cycle','60')
+  .action((dir,o)=>action(async()=>serveSchedulerSupervisor(root(dir),{intervalSeconds:Number(o.intervalSeconds),staleSeconds:Number(o.staleSeconds),cycleTimeoutSeconds:Number(o.cycleTimeoutSeconds)})));
 
 const activity=program.command('activity').description('Record detailed work inside the current Round');
 activity.command('start').argument('<task-dir>')
@@ -266,8 +298,8 @@ acceptanceContract.command('approve').argument('<project-dir>').argument('<task-
 acceptance.command('start').argument('<project-dir>').argument('<task-id>').option('--json')
   .action((dir,id,o)=>action(async()=>print(await startAcceptanceRun(root(dir),id),o.json)));
 acceptance.command('m-submit').argument('<project-dir>').argument('<task-id>')
-  .requiredOption('--self-test <file...>').option('--json')
-  .action((dir,id,o)=>action(async()=>print(await submitMakerCandidate(root(dir),id,o.selfTest.map(root)),o.json)));
+  .requiredOption('--self-test <file...>').option('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await submitMakerCandidate(root(dir),id,o.selfTest.map(root),o.invocation),o.json)));
 acceptance.command('compile').argument('<project-dir>').argument('<task-id>').option('--json')
   .action((dir,id,o)=>action(async()=>print(await compileAcceptancePlan(root(dir),id),o.json)));
 acceptance.command('v-run').argument('<project-dir>').argument('<task-id>')
@@ -286,6 +318,90 @@ acceptance.command('status').argument('<project-dir>').argument('<task-id>').opt
   .action((dir,id,o)=>action(async()=>print(await readAcceptanceRun(root(dir),id),o.json)));
 acceptance.command('schedule').argument('<project-dir>').option('--json')
   .action((dir,o)=>action(async()=>print(await buildAcceptanceSchedule(root(dir)),o.json)));
+acceptance.command('reconcile-candidate').description('Inspect baseline drift; --apply invalidates stale verification and requeues M without merging').argument('<project-dir>').argument('<task-id>').option('--apply','apply a detected baseline-drift recovery').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await reconcileCandidateBaseline(root(dir),id,Boolean(o.apply)),o.json)));
+acceptance.command('usage').description('Summarize locally recorded Provider token and cost facts').argument('<project-dir>').argument('[task-id]').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await summarizeRoleUsage(root(dir),id),o.json)));
+const acceptanceRole=acceptance.command('role').description('Managed M/V/R provider invocations');
+acceptanceRole.command('prepare').argument('<project-dir>').argument('<task-id>').addOption(new Option('--role <role>').choices(['M','V','R']).makeOptionMandatory()).option('--json')
+  .action((dir,id,o)=>action(async()=>print(await prepareRoleInvocation(root(dir),id,o.role),o.json)));
+acceptanceRole.command('run').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>{const result=await runRoleInvocation(root(dir),id,o.invocation);print(result,o.json);if(result.status!=='succeeded')process.exitCode=1}));
+acceptanceRole.command('status').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await readRoleInvocation(root(dir),id,o.invocation),o.json)));
+acceptanceRole.command('cancel').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await cancelRoleInvocation(root(dir),id,o.invocation),o.json)));
+acceptanceRole.command('reconcile').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await reconcileRoleInvocation(root(dir),id,o.invocation),o.json)));
+
+const scheduler=program.command('scheduler').description('Project scheduler controls');
+scheduler.command('init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await initReportScheduler(root(dir)),o.json)));
+scheduler.command('report').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await runReportScheduler(root(dir)),o.json)));
+scheduler.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await readReportSchedulerStatus(root(dir)),o.json)));
+scheduler.command('pause').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await setReportSchedulerPaused(root(dir),true),o.json)));
+scheduler.command('resume').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await setReportSchedulerPaused(root(dir),false),o.json)));
+const schedulerControl=scheduler.command('control').description('Lease, fencing, resource, Pause and Kill controls');
+schedulerControl.command('init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await initSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('acquire-project').argument('<project-dir>').requiredOption('--owner <identity>').requiredOption('--key <idempotency-key>').option('--ttl <seconds>','lease TTL','300').option('--json').action((dir,o)=>action(async()=>print(await acquireProjectLease(root(dir),{owner:o.owner,idempotencyKey:o.key,ttlSeconds:Number(o.ttl)}),o.json)));
+schedulerControl.command('acquire-task').argument('<project-dir>').requiredOption('--project-lease <id>').requiredOption('--project-token <token>').requiredOption('--task <id>').requiredOption('--owner <identity>').requiredOption('--key <idempotency-key>').requiredOption('--resource <claim...>').addOption(new Option('--action <action>').choices(['start_m','start_v','start_r','run_gate']).makeOptionMandatory()).option('--ttl <seconds>','lease TTL','300').option('--json').action((dir,o)=>action(async()=>print(await acquireTaskLease(root(dir),{projectLeaseId:o.projectLease,projectFencingToken:Number(o.projectToken),taskId:o.task,owner:o.owner,idempotencyKey:o.key,ttlSeconds:Number(o.ttl),resources:o.resource,action:o.action}),o.json)));
+schedulerControl.command('accept-result').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--invocation <id>').option('--json').action((dir,o)=>action(async()=>print(await assertTaskLeaseResult(root(dir),o.lease,Number(o.token),o.invocation),o.json)));
+schedulerControl.command('release-task').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--json').action((dir,o)=>action(async()=>print(await releaseTaskLease(root(dir),o.lease,Number(o.token)),o.json)));
+schedulerControl.command('release-project').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--json').action((dir,o)=>action(async()=>print(await releaseProjectLease(root(dir),o.lease,Number(o.token)),o.json)));
+schedulerControl.command('authorize').argument('<action>').option('--json').action((value,o)=>action(async()=>print(assertSchedulerAction(value),o.json)));
+schedulerControl.command('pause').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await pauseSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('resume').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await resumeSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('kill').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await killSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('stop-task').argument('<project-dir>').requiredOption('--task <id>').option('--reason <text>','auditable stop reason','stopped by user').option('--json').action((dir,o)=>action(async()=>print(await stopTaskExecution(root(dir),o.task,o.reason),o.json)));
+schedulerControl.command('budget').description('Configure wave-wide concurrency, elapsed, token and cost ceilings').argument('<project-dir>').requiredOption('--max-parallel <count>').requiredOption('--max-elapsed-seconds <seconds>').requiredOption('--max-tokens <tokens>').requiredOption('--max-cost-usd <amount>').option('--json').action((dir,o)=>action(async()=>print(await configureWaveBudget(root(dir),{maxParallel:Number(o.maxParallel),maxElapsedSeconds:Number(o.maxElapsedSeconds),maxTokens:Number(o.maxTokens),maxCostUsd:Number(o.maxCostUsd)}),o.json)));
+schedulerControl.command('run-ready').description('Plan by default; --execute concurrently starts one legal M/V/R invocation per Ready Task').argument('<project-dir>').requiredOption('--owner <identity>').option('--execute','start managed role invocations').option('--json').action((dir,o)=>action(async()=>{
+  const result=o.execute?await runReadyWave(root(dir),{owner:o.owner}):await planReadyWave(root(dir));print(result,o.json);if(o.execute&&result.status!=='completed')process.exitCode=5;
+}));
+schedulerControl.command('health').description('Read-only PID, heartbeat, Driver and wave deadline liveness inspection').argument('<project-dir>').option('--stale-seconds <seconds>','heartbeat stale threshold','15').option('--json').action((dir,o)=>action(async()=>{const result=await inspectSchedulerLiveness(root(dir),Number(o.staleSeconds));print(result,o.json);if(!result.ok)process.exitCode=5}));
+schedulerControl.command('watchdog').description('Inspect by default; --apply atomically stops Tasks with dead or stale execution owners').argument('<project-dir>').option('--stale-seconds <seconds>','heartbeat stale threshold','15').option('--apply','stop unhealthy Tasks').option('--json').action((dir,o)=>action(async()=>{const result=await runSchedulerWatchdog(root(dir),Number(o.staleSeconds),Boolean(o.apply));print(result,o.json);if(!result.ok&&!o.apply)process.exitCode=5}));
+schedulerControl.command('supervisor-start')
+  .description('Start the independent persistent watchdog Supervisor')
+  .argument('<project-dir>')
+  .option('--interval-seconds <seconds>', 'seconds between watchdog cycles', '5')
+  .option('--stale-seconds <seconds>', 'execution heartbeat stale threshold', '15')
+  .option('--cycle-timeout-seconds <seconds>', 'hard timeout for one isolated watchdog cycle', '60')
+  .option('--json')
+  .action((dir, o) => action(async () => {
+    const result = await startManagedSchedulerSupervisor(root(dir), {
+      intervalSeconds: Number(o.intervalSeconds), staleSeconds: Number(o.staleSeconds), cycleTimeoutSeconds: Number(o.cycleTimeoutSeconds),
+    });
+    print(result, o.json);
+  }));
+schedulerControl.command('supervisor-status')
+  .description('Report Supervisor PID identity, heartbeat and latest watchdog result')
+  .argument('<project-dir>').option('--json')
+  .action((dir, o) => action(async () => {
+    const result = await schedulerSupervisorStatus(root(dir));
+    print(result, o.json);
+    if (!result.running || !result.healthy) process.exitCode = 5;
+  }));
+schedulerControl.command('supervisor-launchd-plan').description('Print an optional macOS launchd auto-restart plan without installing it').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerSupervisorLaunchdPlan(root(dir)),o.json)));
+schedulerControl.command('supervisor-stop')
+  .description('Stop the managed watchdog Supervisor without starting or cancelling business work')
+  .argument('<project-dir>').option('--json')
+  .action((dir, o) => action(async () => print(await stopManagedSchedulerSupervisor(root(dir)), o.json)));
+schedulerControl.command('reconcile').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await reconcileSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerControlStatus(root(dir)),o.json)));
+
+const toolchain=program.command('toolchain').description('Read-only Gate planning and native evidence adapters');
+toolchain.command('detect-spring').argument('<repository>').option('--json').action((dir,o)=>action(async()=>print(await detectSpringBoot(root(dir)),o.json)));
+toolchain.command('plan').argument('<project-dir>').argument('<task-id>').addOption(new Option('--stage <stage>').choices(['feedback','candidate','delivery','phase']).makeOptionMandatory()).option('--json').action((dir,id,o)=>action(async()=>print(await planV2Gates(root(dir),id,o.stage),o.json)));
+toolchain.command('verify-plan').argument('<project-dir>').argument('<task-id>').addOption(new Option('--stage <stage>').choices(['feedback','candidate','delivery','phase']).makeOptionMandatory()).option('--json').action((dir,id,o)=>action(async()=>print(await verifyV2GatePlan(root(dir),id,o.stage),o.json)));
+toolchain.command('collect-spring').argument('<project-dir>').argument('<task-id>').requiredOption('--reports <directory>').option('--json').action((dir,id,o)=>action(async()=>print(await collectSpringEvidence(root(dir),id,root(o.reports)),o.json)));
+toolchain.command('verify-spring').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await verifySpringEvidence(root(dir),id),o.json)));
+
+const maintenance=program.command('maintenance').description('Read-only artifact inventory and retention planning');
+maintenance.command('inspect').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await inspectArtifacts(root(dir)),o.json)));
+maintenance.command('retention-plan').description('Show bounded artifact, shared-cache and retirement policy without deleting data').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await retentionPolicy(root(dir)),o.json)));
+maintenance.command('archive-evidence').description('Copy bounded authoritative Acceptance facts into a persistent hash manifest').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await archiveAcceptanceEvidence(root(dir),id),o.json)));
+maintenance.command('retire-worktree').description('Preview by default; --apply removes only a clean terminal Worktree while preserving its branch and records').argument('<project-dir>').argument('<task-id>').option('--expected-head <commit>').option('--apply','perform the validated retirement').option('--json').action((dir,id,o)=>action(async()=>{
+  if(o.apply&&!o.expectedHead)throw new Error('--apply requires --expected-head');
+  print(o.apply?await retireWorktree(root(dir),id,o.expectedHead):await planWorktreeRetirement(root(dir),id,o.expectedHead),o.json);
+}));
 
 program.command('writeback').argument('<project-dir>').argument('<task-id>').action((dir,id)=>action(async()=>console.log(await writebackDelivery(root(dir),id))));
 

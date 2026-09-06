@@ -21,7 +21,7 @@ test('versioned repository root contains only current engineering responsibiliti
   assert.equal(result.status,0,result.stderr);
   const entries=new Set(result.stdout.trim().split(/\r?\n/).filter(Boolean).map(file=>file.split('/')[0]));
   assert.deepEqual([...entries].sort(),[
-    '.gitignore','AGENT.md','README.md','assets','package-lock.json','package.json','spec','src','test','tsconfig.json',
+    '.gitignore','AGENT.md','README.md','assets','package-lock.json','package.json','spec','src','test','tools','tsconfig.json',
   ]);
   assert.equal(entries.has('artifacts'),false);
   assert.equal(entries.has('dogfood'),false);

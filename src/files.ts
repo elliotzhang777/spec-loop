@@ -47,6 +47,12 @@ export function assertNoSecrets(value: string, label: string): void {
 interface TxWrite { target: string; temp: string; hash: string }
 interface Journal { id: string; status: 'prepared'; writes: TxWrite[] }
 interface CrossRootJournal extends Journal { allowed_roots: string[] }
+const localTransactionTails=new Map<string,Promise<void>>();
+
+async function withLocalTransactionQueue<T>(key:string,operation:()=>Promise<T>):Promise<T>{
+  const previous=localTransactionTails.get(key)??Promise.resolve();let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve}),tail=previous.then(()=>gate);localTransactionTails.set(key,tail);await previous;
+  try{return await operation()}finally{release();if(localTransactionTails.get(key)===tail)localTransactionTails.delete(key)}
+}
 
 async function safeTransactionDirectory(root:string,name:string):Promise<string> {
   const dir=path.join(root,name),existing=await lstat(dir).catch(()=>null);
@@ -79,7 +85,16 @@ async function safeTarget(root: string, target: string): Promise<string> {
   return resolved;
 }
 
-export async function recoverTransactions(root: string): Promise<void> {
+async function withFileTransactionLock<T>(root:string,name:string,operation:()=>Promise<T>):Promise<T>{
+  const lock=path.join(root,name);for(let attempt=0;attempt<3000;attempt++){
+    let acquired=false;try{await mkdir(lock);acquired=true}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}
+    if(acquired){await writeFile(path.join(lock,'owner.json'),`${JSON.stringify({pid:process.pid,created_at:new Date().toISOString()})}\n`,{flag:'wx'});try{return await operation()}finally{await rm(lock,{recursive:true,force:true})}}
+    const owner=await readFile(path.join(lock,'owner.json'),'utf8').then(raw=>JSON.parse(raw) as {pid?:number}).catch(()=>null),info=await lstat(lock).catch(()=>null);let reclaim=false;if(owner?.pid)try{process.kill(owner.pid,0)}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')reclaim=true;else throw error}if(!owner&&info&&Date.now()-info.mtimeMs>30_000)reclaim=true;if(reclaim){await rm(lock,{recursive:true,force:true});continue}await new Promise(resolve=>setTimeout(resolve,10));
+  }throw new Error(`transaction lock is busy: ${name}`)
+}
+async function withTransactionLock<T>(root:string,name:string,operation:()=>Promise<T>):Promise<T>{return withLocalTransactionQueue(`${path.resolve(root)}:${name}`,()=>withFileTransactionLock(root,name,operation))}
+
+async function recoverTransactionsUnlocked(root: string): Promise<void> {
   const dir = path.join(root, '.spec-loop-tx');
   if (!(await exists(dir))) return;
   await safeTransactionDirectory(root,'.spec-loop-tx');
@@ -105,20 +120,24 @@ export async function recoverTransactions(root: string): Promise<void> {
   }
 }
 
+export async function recoverTransactions(root:string):Promise<void>{return withTransactionLock(root,'.spec-loop-tx-lock',()=>recoverTransactionsUnlocked(root))}
+
 export async function atomicWriteMany(root: string, values: Array<{ file: string; content: string | Buffer }>): Promise<void> {
-  await recoverTransactions(root);
-  const txDir = await safeTransactionDirectory(root,'.spec-loop-tx');
-  const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
-  const writes: TxWrite[] = [];
-  for (let i = 0; i < values.length; i++) {
-    const target = await safeTarget(root, values[i].file);
-    const temp = await safeTarget(root,path.join(txDir, `${id}-${i}.tmp`));
-    await writeFile(temp, values[i].content);
-    writes.push({ target, temp, hash: sha256(values[i].content) });
-  }
-  const journalPath = await safeTarget(root,path.join(txDir, `${id}.json`));
-  await writeFile(journalPath, JSON.stringify({ id, status: 'prepared', writes } satisfies Journal, null, 2));
-  await recoverTransactions(root);
+  await withTransactionLock(root,'.spec-loop-tx-lock',async()=>{
+    await recoverTransactionsUnlocked(root);
+    const txDir = await safeTransactionDirectory(root,'.spec-loop-tx');
+    const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
+    const writes: TxWrite[] = [];
+    for (let i = 0; i < values.length; i++) {
+      const target = await safeTarget(root, values[i].file);
+      const temp = await safeTarget(root,path.join(txDir, `${id}-${i}.tmp`));
+      await writeFile(temp, values[i].content);
+      writes.push({ target, temp, hash: sha256(values[i].content) });
+    }
+    const journalPath = await safeTarget(root,path.join(txDir, `${id}.json`));
+    await writeFile(journalPath, JSON.stringify({ id, status: 'prepared', writes } satisfies Journal, null, 2));
+    await recoverTransactionsUnlocked(root);
+  });
 }
 
 function withinAnyRoot(file: string, roots: string[]): boolean {

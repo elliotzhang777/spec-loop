@@ -86,7 +86,18 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
-> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。默认协议切换、完整 Scheduler/并发、最终 Heavy Gate 和其他平台 Toolchain 仍需单独授权。
+> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。2026-09-04，用户批准将剩余工单统一对齐最新版 P/M/V/R v2 架构并开始批次实施，范围为 TASK-027～037 的规格、实现和快速反馈检查。正式 V/R、完整 Gate、Heavy/阶段验收、merge、push、deploy 仍分别需要当前稳定候选上的明确授权。
+
+### Phase 4 实施批次
+
+| 批次 | 目标 | 工单 | 进入条件 | 当前状态 |
+|---|---|---|---|---|
+| P4-B1 | v1 在途兼容收口与 v2 内核验证就绪 | TASK-027、TASK-028、TASK-030 | 已具备 | 进行中 |
+| P4-B2 | 新任务 v2 接入、角色物理隔离与 v2 观察面 | TASK-031～TASK-033 | TASK-030 正式 V/R PASS；TASK-027/028 收口 | 已批准，依赖阻塞 |
+| P4-B3 | report-only Scheduler、Lease/Pause/Kill 与 Spring Gate Planner | TASK-034～TASK-036 | TASK-032 完成；Scheduler 先证明 report-only 稳定 | 已批准，依赖阻塞 |
+| P4-B4 | 执行视图、飞书与 Phase 4 最终 Heavy | TASK-026、TASK-029、TASK-037 | 前置 Task 完成、真实配置就绪、另获正式验证授权 | 已批准，依赖阻塞 |
+
+批次只表达依赖和去重边界，不允许跳过单个 Task 的 P Contract、稳定 HEAD、独立 V/R 或人工门禁。P4-B1 中 TASK-027/028 按 v1 兼容收口，不中途迁移；所有未开始的新工单使用 v2。
 
 ### 目标
 

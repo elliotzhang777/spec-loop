@@ -1,9 +1,9 @@
 # DES-005：Scheduling、Worktree 与资源协调
 
-- 状态：草稿
-- 负责人：待定
+- 状态：已批准
+- 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-08-04
+- 最后更新：2026-09-04
 - 所属特性：[FEAT-005](../02-feature/FEAT-005-scheduling-isolation.md)
 
 ## 设计目标
@@ -48,6 +48,13 @@ Pause 阻止新 Triage/Task/Round，允许安全 Gate 收尾。Kill 取消 Agent
 
 单任务/全局 Budget、path/action denylist、高风险人工 gate、所有 Policy decision 和外部副作用审计。
 
+### 常驻监督、恢复与产物保留
+
+- `run-ready --execute` 必须绑定健康的独立 Supervisor；Supervisor 使用 PID 启动身份、单实例锁和自身心跳，每个 watchdog cycle 由独立超时子进程承担。
+- Candidate baseline 漂移会保留旧 Candidate 事实、作废旧 V/R 绑定并自动重新排队，不静默复用 PASS。成功 invocation 若尚未摄入，明确进入等待摄入而不是继续计时。
+- Project 级 `.spec-loop/shared-cache/` 复用 npm/Maven 下载；Evidence archive 只复制 Contract、Run、Plan、角色 manifest、Gate 与 hash Evidence，排除可重建候选快照。
+- Dashboard Snapshot 上限 256 KiB；历史/当前/未启动状态分离。macOS 可审核 `launchd` 模板用于重启后恢复 Supervisor，但安装和卸载始终由用户显式执行。
+
 ## 风险与回滚
 
 | 风险 | 影响 | 缓解措施 | 回滚方式 |
@@ -62,11 +69,16 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 
 ## 工单拆分
 
-Phase 4 的飞书 Connector 已形成 TASK-021～026 并获专项实施授权；Scheduling、完整 Controller、并发和 Toolchain 的其他工单仍待统一拆分与授权。
+| 工单 | 交付物 | 依赖 | 状态 |
+|---|---|---|---|
+| [TASK-034](../04-task/TASK-034-report-only-scheduler.md) | 幂等 report-only 扫描、建议与质量指标 | TASK-032 | 待验证 |
+| [TASK-035](../04-task/TASK-035-scheduler-leases-controls.md) | Lease、fencing、resource claim、Pause/Kill 和受控 Ready 调度 | TASK-034 稳定 | 待验证 |
+| [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书真实连接器专项 Heavy | 真实配置、TASK-021～025 | 已批准 |
+| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 自动闭环最终 Heavy | 全部 Phase 4 子 Task | 已批准 |
 
 ## 实际实现
 
-- 最终实现：未开始。
+- 最终实现：report-only、Project/Task lease、fencing、resource claim、Pause/Kill/reconcile 与 denylist 已形成待验证候选。
 
 ## 变更记录
 
@@ -74,3 +86,4 @@ Phase 4 的飞书 Connector 已形成 TASK-021～026 并获专项实施授权；
 |---|---|---|---|
 | 2026-07-12 | 融合 Scheduling、多任务与安全 | 最终 Roadmap | - |
 | 2026-08-04 | 引用飞书正式机器人专项设计与草稿工单 | 将通用 Connector Policy 与具体双向交互实现分层 | TASK-021～026 |
+| 2026-09-04 | 拆分 report-only、受控调度与最终 Heavy | 对齐最新版 P/M/V/R，保持“先报告后执行”和唯一全量验收 | TASK-034、035、037 |

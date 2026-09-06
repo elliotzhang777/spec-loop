@@ -1,9 +1,9 @@
 # FEAT-006：工程 Toolchain 与原生证据
 
-- 状态：待验证
-- 负责人：待定
+- 状态：进行中
+- 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-07-26
+- 最后更新：2026-09-04
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 3（T1）/ Phase 4（T2/T3）/ Phase 5（资产治理）
 
@@ -47,15 +47,16 @@ Toolchain 从 T0 外部 Evidence 演进到 T1 通用命令、T2 平台预设和 
 
 | 类型 | 文档 | 状态 |
 |---|---|---|
-| Design | [DES-006 工程 Toolchain 适配](../03-design/DES-006-engineering-toolchain-adapters.md) | 草稿 |
-| Task | T1 已由 [TASK-009](../04-task/TASK-009-git-worktree-gate.md)交付；范围规范见 [TASK-016](../04-task/TASK-016-define-verification-scope.md)；Playwright Web Gate 见 [TASK-019](../04-task/TASK-019.md)；其他 T2/T3 待 Phase 4 稳定后拆分 | 部分完成 |
+| Design | [DES-006 工程 Toolchain 适配](../03-design/DES-006-engineering-toolchain-adapters.md) | 进行中 |
+| Task | T1 [TASK-009](../04-task/TASK-009-git-worktree-gate.md)、范围 [TASK-016](../04-task/TASK-016-define-verification-scope.md)、Playwright [TASK-019](../04-task/TASK-019.md) | 已完成 |
+| Task | [TASK-036 v2 Gate Planner 与 Spring Boot T2](../04-task/TASK-036-gate-planner-spring-toolchain.md) | 已批准 |
 
 ## 实际交付
 
 - 已实现行为：T0 外部 Evidence 与 T1 通用命令 Gate；命令受 cwd、超时、环境限制约束，并生成绑定 Git HEAD 的 artifact。
 - 已实现行为：显式 Playwright Web Gate 使用目标本地 CLI，强制解析测试统计，归档 HTML、JSON、截图和逐文件哈希，并接入 Harness Report 完整性复核。
 - 已实现行为：`GATES.md` 可声明 `scope_kind`、`wave_id`、`coverage` 和数据库生命周期；非 Heavy 全量覆盖/一次性数据库、persistent Gate 直接创建删除容器以及执行后策略漂移均会被拒绝。
-- 未实现行为：自动识别 Web 工程和生成 Gate Plan；Spring Boot、Xcode/iOS、微信小程序等 T2/T3 平台预设与原生结果解析。
+- 未实现行为：v2 自动 Gate Plan 与 Spring Boot T2 由 TASK-036 实施；Xcode/iOS、微信小程序按真实项目需求另建独立工单，不混入当前批次。
 - 验证结论：T1 已通过自动化测试和两个真实 Git Project Dogfood；T2/T3 待后续阶段验证。
 
 ## 变更记录

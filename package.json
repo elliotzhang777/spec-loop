@@ -6,7 +6,8 @@
   "files": [
     "dist",
     "assets/target-spec",
-    "assets/execution-view"
+    "assets/execution-view",
+    "assets/launchd"
   ],
   "bin": {
     "spec-loop": "dist/cli.js"
@@ -15,7 +16,7 @@
     "build": "npm run build:execution-view && tsc",
     "build:execution-view": "esbuild assets/execution-view/controls.jsx --bundle --minify --format=iife --target=es2022 --outfile=assets/execution-view/controls.js",
     "check:feishu-contracts": "node tools/check-feishu-connector-contracts.mjs",
-    "quality:standard": "npm run build && npm run check:feishu-contracts && node --test test/*.test.mjs",
+    "quality:standard": "npm run build && npm run check:feishu-contracts && node --test --test-concurrency=4 test/*.test.mjs",
     "test": "npm run quality:standard",
     "check": "npm run build && node dist/cli.js --help"
   },

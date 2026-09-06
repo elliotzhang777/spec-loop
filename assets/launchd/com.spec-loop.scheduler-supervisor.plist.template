@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__CLI__</string>
+    <string>_scheduler-supervise</string>
+    <string>__PROJECT_ROOT__</string>
+    <string>--interval-seconds</string><string>5</string>
+    <string>--stale-seconds</string><string>15</string>
+    <string>--cycle-timeout-seconds</string><string>60</string>
+  </array>
+  <key>WorkingDirectory</key><string>__PROJECT_ROOT__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOG_OUT__</string>
+  <key>StandardErrorPath</key><string>__LOG_ERR__</string>
+</dict>
+</plist>

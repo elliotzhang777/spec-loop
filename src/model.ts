@@ -1,7 +1,7 @@
 export const LEVELS = ['light', 'standard', 'heavy'] as const;
 export type TaskLevel = (typeof LEVELS)[number];
 
-export const STATUSES = ['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered'] as const;
+export const STATUSES = ['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered', 'cancelled'] as const;
 export type TaskStatus = (typeof STATUSES)[number];
 
 export interface TaskState {
@@ -112,4 +112,5 @@ export const LEGAL_TRANSITIONS: Record<string, [TaskStatus[], TaskStatus]> = {
   'verify-pass': [['working'], 'verifying'],
   'verify-fail': [['working', 'verifying'], 'iterating'],
   deliver: [['verifying'], 'delivered'],
+  cancel: [['planned', 'working', 'verifying', 'iterating'], 'cancelled'],
 };

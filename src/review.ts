@@ -38,7 +38,7 @@ function acceptanceHash(value:unknown):string { return sha256(JSON.stringify(val
 
 export async function canonicalGitRevision(repository:string,revision:string):Promise<string> {
   assertSubstantive(revision, 'candidate Git revision');
-  const result = await exec('git', ['-C', repository, 'rev-parse', '--verify', `${revision}^{commit}`], { maxBuffer: 1_000_000 })
+  const result = await exec('git', ['-C', repository, 'rev-parse', '--verify', `${revision}^{commit}`], { maxBuffer: 1_000_000, timeout: 30_000, killSignal: 'SIGKILL' })
     .catch(() => { throw new Error(`candidate revision is not a commit in the target repository: ${revision}`); });
   const canonical = result.stdout.trim().toLowerCase();
   if (!/^[a-f0-9]{40,64}$/.test(canonical)) throw new Error('Git returned an invalid candidate revision');

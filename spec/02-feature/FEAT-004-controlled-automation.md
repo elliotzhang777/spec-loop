@@ -3,7 +3,7 @@
 - 状态：进行中
 - 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-08-31
+- 最后更新：2026-09-04
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 4
 
@@ -44,7 +44,10 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 | 类型 | 文档 | 状态 |
 |---|---|---|
 | Design | [DES-004 受控自动 Controller](../03-design/DES-004-controlled-automation-controller.md) | 进行中 |
-| Task | [TASK-030 P/M/V/R 验收闭环内核](../04-task/TASK-030-pmvr-acceptance-loop.md) | 进行中 |
+| Task | [TASK-030 P/M/V/R 验收闭环内核](../04-task/TASK-030-pmvr-acceptance-loop.md) | 待验证 |
+| Task | [TASK-031 v2 验收契约接入](../04-task/TASK-031-v2-contract-onboarding.md) | 已批准 |
+| Task | [TASK-032 P/M/V/R 隔离角色编排](../04-task/TASK-032-pmvr-role-orchestration.md) | 已批准 |
+| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
 
 ## 实际交付
 
@@ -57,3 +60,4 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 |---|---|---|---|
 | 2026-07-12 | 加入 Approval 与自动 Controller | 最终 Roadmap 定稿 | - |
 | 2026-08-31 | 重构为 P 预制契约、M 实现、V 独立验收、R 独立复核的四段式闭环 | 避免实现者自验收，并把失败路由、证据和返工预算变成引擎事实 | TASK-030 |
+| 2026-09-04 | 拆分新任务默认 v2、角色编排与 Phase 4 Heavy | 把架构图中的状态机、实际 invocation 和最终验收分开实施 | TASK-031、TASK-032、TASK-037 |

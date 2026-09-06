@@ -1,9 +1,9 @@
 # DES-006：工程 Toolchain 适配
 
-- 状态：待验证
-- 负责人：待定
+- 状态：进行中
+- 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-07-26
+- 最后更新：2026-09-04
 - 所属特性：[FEAT-006](../02-feature/FEAT-006-engineering-toolchains.md)
 
 ## 设计目标
@@ -116,12 +116,13 @@ Gate Planner 的影响判断不能自行改变验证阶段。Task/Loop 启动仅
 
 ## 工单拆分
 
-实现顺序为 Phase 3 T1 runner、TASK-016 验证范围规范、TASK-019 显式 Playwright Web Gate、Phase 4 自动发现与 Spring/Xcode/小程序 T2/T3、Phase 5 Adapter 资产治理。用户已明确授权 TASK-019；它不包含 Phase 4 自动 Controller 或 Scheduling。
+Phase 3 T1 runner、TASK-016 验证范围规范和 TASK-019 Playwright Web Gate 已完成；[TASK-036](../04-task/TASK-036-gate-planner-spring-toolchain.md) 负责 v2 自动 Gate Plan 与首个 Spring Boot T2 原生适配。Xcode/iOS、微信小程序在真实项目进入后分别建立工单，不与 Spring 工单共享验收范围；Phase 5 再进入 Adapter 资产治理。
 
 ## 实际实现
 
 - 已实现：T1 runner 使用固定 cwd、受限环境、timeout，记录退出码、stdout/stderr、artifact hash 与真实 Git HEAD；显式 Playwright Web Gate 解析原生 JSON、归档 HTML/截图/附件 Manifest，并由 Harness Report 复核；显式 task/wave、targeted/full、数据库生命周期和 AC 映射会进入 Gate Evidence。
-- 未实现：自动 Web 检测与 Gate Plan；Spring Boot、Xcode/iOS、微信小程序的 T2/T3 平台预设和原生结果解析。
+- 已形成待验证候选：v2 自动 Gate Plan；Spring Boot Maven/Gradle/Java/module 发现与 Surefire/Gradle JUnit、JaCoCo 原生 Evidence 解析。
+- 未实现：自动 Web 检测；Xcode/iOS、微信小程序的 T2/T3 平台预设和原生结果解析（按本设计保留为后续独立工单）。
 
 ## 变更记录
 
@@ -133,3 +134,4 @@ Gate Planner 的影响判断不能自行改变验证阶段。Task/Loop 启动仅
 | 2026-07-25 | 把验证阶段升级与技术影响升级分离 | 高影响只影响建议范围，不能替代用户的正式交付授权 | TASK-016 |
 | 2026-07-26 | 增加 task_scope 与 wave_scope | 多 Task 波次只在最终阶段运行一次全量组合验证 | TASK-016 |
 | 2026-07-26 | 增加 coverage 与数据库生命周期门禁 | 非 Heavy 只跑定向 Gate，普通验证复用长期数据库 | TASK-016 |
+| 2026-09-04 | 将 v2 Gate Planner 与 Spring Boot T2 拆为 TASK-036 | 对齐 P 契约、Controller 计划、V 执行和 R 证据复核边界 | TASK-036 |

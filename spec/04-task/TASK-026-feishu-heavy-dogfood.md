@@ -4,7 +4,7 @@
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-08-04
-- 最后更新：2026-08-06
+- 最后更新：2026-09-04
 - 所属设计：[DES-008](../03-design/DES-008-feishu-bot-connector.md)
 - 所属特性：[FEAT-008](../02-feature/FEAT-008-feishu-progress-approval-connector.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -13,10 +13,20 @@
 - Spec-Loop Task：`.spec-loop/tasks/task-026`
 - Proposal：PROP-10
 - 执行状态：已规划，等待真实飞书配置和单独启动授权
+- 协议版本：P/M/V/R v2；现有 v1 `planned` 壳仅作历史索引，不得进入 Round
+- 所属批次：P4-B4
 
 ## 目标
 
 使用用户提供的真实飞书企业自建应用完成进度通知和远程确认 Dogfood，并以唯一一次飞书能力全量 Heavy 证明功能、安全、恢复和本地降级边界。
+
+## P/M/V/R v2 对齐
+
+- P：在真实配置写入前冻结租户范围、接收目标、身份映射、失败/回退用例、工具、断言和脱敏 Evidence；人批准 contract hash 后才能启动。
+- M：只允许在隔离 worktree 修改实现与测试；真实 Secret 只进入本机环境，不写规格、日志或 Evidence。
+- V：使用独立只读 invocation 执行发送/更新、越权拒绝、幂等、断线恢复和本地回退 Gate。
+- R：仅在 V PASS 后复核当前 Contract、Plan、HEAD、卡片/Evidence hash 和隐私边界。
+- Candidate 不授权 merge、push、deploy 或扩大飞书权限；Heavy 人工确认与外部副作用分别授权。
 
 ## 工作范围
 
@@ -42,6 +52,7 @@
 - [ ] AC-5：飞书不可用时本地回退可完成同一确认，恢复后卡片状态与本地事实重新一致。
 - [ ] AC-6：全量功能、安全、隐私和恢复 Gate PASS，输出不包含真实 Secret/Token；独立 Verifier PASS。
 - [ ] AC-7：用户对当前真实卡片效果、提醒频率、确认流程和接受边界完成最终 Heavy 人工验收。
+- [ ] AC-8：本工单使用 v2 Contract、稳定 HEAD、独立 V、独立 R 与 Evidence Gate；现有 v1 planned 壳未被错误执行或迁移。
 
 ## 验证计划
 
@@ -65,8 +76,15 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施（草稿阶段）
+- 完成日期：已批准，尚未启动（等待真实飞书配置与单独启动授权）
 - 变更文件/交付物：实施完成后按实际结果记录
 - 关键实现与决策：实施完成后按实际结果记录
 - 与原设计的差异：无
 - 遗留风险：待 Heavy 后记录
+
+## 变更记录
+
+| 日期 | 变更 | 原因 |
+|---|---|---|
+| 2026-09-04 | 对齐 P/M/V/R v2 | 工单尚未执行，可直接使用最新版架构；保留 v1 planned 壳只作历史索引 |
+| 2026-09-04 | 修正交付记录状态 | 工单已批准但缺少真实配置和启动授权，不再错误标为草稿阶段 |

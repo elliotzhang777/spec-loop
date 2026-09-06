@@ -3,7 +3,7 @@
 - 状态：进行中
 - 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-08-31
+- 最后更新：2026-09-04
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 
 ## 设计目标
@@ -84,6 +84,13 @@ R: independent evidence review → Candidate | M | V | human
 - 人工动作包括 `revise_spec_and_reauthorize`、`change_approach`、`split_task`、`waive_noncritical`、`mark_external_block`、`cancel`。
 - 非关键豁免产生新契约版本并重新 V/R；安全、隐私、权限、数据完整性和关键路径 AC 不允许豁免。
 
+### Provider 运行门禁与在线预算
+
+- 真实 Codex 在语义身份变化后执行最长 20 秒的同参数 runtime probe，验证 UTF-8 locale、sandbox、Evidence 写区和最小响应；成功缓存 24 小时，确定性失败缓存 10 分钟，避免重复消耗。
+- invocation 心跳携带角色阶段、deadline、剩余时间、最新 usage 和角色预算。stdout 的结构化 usage 流达到 Token/费用上限时，Controller 先 TERM、后 KILL 整个进程组。
+- M 成功后自动收集受管 Evidence、提交候选并编译计划；V/R 只在独立 Evidence 根提供合法 `RESULT.json` 时自动摄入。无结果使用 `awaiting_ingestion`，无效结果使用 `invalid`，均不得投影成运行中或 PASS。
+- 相对 Evidence 路径以 Project 根为基准，仍要求常规非符号链接文件且 realpath 不得逃逸。
+
 ## 方案取舍
 
 | 方案 | 优点 | 缺点 | 结论 |
@@ -106,11 +113,16 @@ R: independent evidence review → Candidate | M | V | human
 
 ## 工单拆分
 
-[TASK-030](../04-task/TASK-030-pmvr-acceptance-loop.md) 实现 v2 旁路协议、执行计划、V/R 结果、预算和人工冲突；默认协议切换另行授权。
+| 工单 | 交付物 | 依赖 | 状态 |
+|---|---|---|---|
+| [TASK-030](../04-task/TASK-030-pmvr-acceptance-loop.md) | v2 旁路协议、执行计划、V/R 结果、预算和人工冲突 | TASK-013、019 | 待验证 |
+| [TASK-031](../04-task/TASK-031-v2-contract-onboarding.md) | P 契约同步生成、新任务默认 v2 与模板接入 | TASK-030 | 待验证 |
+| [TASK-032](../04-task/TASK-032-pmvr-role-orchestration.md) | M/V/R 真实 invocation 隔离与 Controller 调度 | TASK-031 | 已批准 |
+| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 唯一全量 P/M/V/R Heavy Dogfood | TASK-026、029、031～036 | 已批准 |
 
 ## 实际实现
 
-- 最终实现：进行中。
+- 最终实现：TASK-030/031 已形成待验证候选；真实隔离角色编排由 TASK-032 继续实现。
 
 ## 变更记录
 
@@ -118,3 +130,4 @@ R: independent evidence review → Candidate | M | V | human
 |---|---|---|---|
 | 2026-07-12 | 加入 Approval 驱动和自动角色链 | 最终 Roadmap | - |
 | 2026-08-31 | 将 Checker/Judge 明确拆分为 V/R，并新增共享返工预算、Conflict Record 与 v1 双轨兼容 | 用户确认的新验收治理流程 | TASK-030 |
+| 2026-09-04 | 将目标架构拆为内核、接入、真实角色编排和最终 Heavy | 避免一个工单同时承担协议、运行时和阶段验收 | TASK-030～032、037 |

@@ -12,7 +12,7 @@ import { acceptanceSchema, verifySchema } from '../schemas.js';
 import { readVisualReviews } from '../review.js';
 import { guard, readBudget, readLedger } from '../runtime.js';
 
-const taskStatusSchema = z.enum(['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered']);
+const taskStatusSchema = z.enum(['draft', 'planned', 'working', 'verifying', 'iterating', 'delivered', 'cancelled']);
 const interventionSchema = z.enum(['none', 'approve_proposal', 'provide_input', 'review_visual', 'authorize_verification', 'accept_delivery']);
 const resultSchema = z.enum(['none', 'pass', 'reject', 'failed']);
 const nextActionSchema = z.enum(['continue_execution', 'fix_rejection', 'wait_for_verification_authorization', 'wait_for_heavy_acceptance', 'task_delivered', 'no_active_task']);
@@ -22,7 +22,7 @@ export const progressSnapshotSchema = z.object({
   project_id: z.string().regex(/^PROJ-[A-Z0-9-]+$/),
   wave_id: z.string().regex(/^[A-Z][A-Z0-9-]{1,63}$/),
   task_total: z.number().int().nonnegative(),
-  task_counts: z.object({ draft: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), running: z.number().int().nonnegative(), verifying: z.number().int().nonnegative(), blocked: z.number().int().nonnegative(), completed: z.number().int().nonnegative() }).strict(),
+  task_counts: z.object({ draft: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), running: z.number().int().nonnegative(), verifying: z.number().int().nonnegative(), blocked: z.number().int().nonnegative(), completed: z.number().int().nonnegative(), cancelled: z.number().int().nonnegative() }).strict(),
   current: z.object({ task_id: z.string().regex(/^(?:WEB-)?TASK-[A-Z0-9-]+$/).nullable(), round: z.number().int().nonnegative(), harness_step: z.enum(['none', 'prepared', 'executed', 'collected', 'verified', 'reported']) }).strict(),
   recent: z.object({ gate: resultSchema, verifier: resultSchema }).strict(),
   next_user_intervention: interventionSchema,
@@ -42,7 +42,7 @@ export function buildProgressSnapshot(input: {
   const count = (status: z.infer<typeof taskStatusSchema>): number => tasks.filter((task) => task.status === status).length;
   return progressSnapshotSchema.parse({
     schema_version: 1, project_id: input.projectId, wave_id: input.waveId, task_total: tasks.length,
-    task_counts: { draft: count('draft'), pending: count('planned'), running: count('working'), verifying: count('verifying'), blocked: count('iterating'), completed: count('delivered') },
+    task_counts: { draft: count('draft'), pending: count('planned'), running: count('working'), verifying: count('verifying'), blocked: count('iterating'), completed: count('delivered'), cancelled: count('cancelled') },
     current: { task_id: current?.task_id ?? null, round: current?.round ?? 0, harness_step: input.harnessStep ?? 'none' },
     recent: { gate: input.gate ?? 'none', verifier: input.verifier ?? 'none' },
     next_user_intervention: input.nextUserIntervention ?? 'none', next_action: input.nextAction, updated_at: input.updatedAt ?? new Date().toISOString(),
@@ -71,7 +71,7 @@ export function renderProgressCard(snapshotInput: ProgressSnapshot): Record<stri
     schema: '2.0', config: { update_multi: true },
     header: { title: { tag: 'plain_text', content: `Spec-Loop · ${snapshot.wave_id}` }, template: snapshot.next_user_intervention === 'none' ? 'blue' : 'orange' },
     body: { elements: [
-      { tag: 'markdown', content: `**总体进度**  ${counts.completed}/${snapshot.task_total}\n草稿 ${counts.draft} · 待执行 ${counts.pending} · 执行中 ${counts.running} · 待验证 ${counts.verifying} · 阻塞 ${counts.blocked}` },
+      { tag: 'markdown', content: `**总体进度**  ${counts.completed}/${snapshot.task_total}\n草稿 ${counts.draft} · 待执行 ${counts.pending} · 执行中 ${counts.running} · 待验证 ${counts.verifying} · 阻塞 ${counts.blocked} · 已取消 ${counts.cancelled}` },
       { tag: 'markdown', content: `**当前**  ${snapshot.current.task_id ?? '无'} · Round ${snapshot.current.round} · ${snapshot.current.harness_step}` },
       { tag: 'markdown', content: `**最近结论**  Gate ${snapshot.recent.gate} · Verifier ${snapshot.recent.verifier}` },
       { tag: 'markdown', content: `**下一步**  ${nextActionLabels[snapshot.next_action]}\n**人工介入**  ${interventionLabels[snapshot.next_user_intervention]}` },

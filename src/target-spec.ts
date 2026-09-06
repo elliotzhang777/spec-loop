@@ -61,7 +61,7 @@ const rolePaths = new Map([
 ]);
 
 export const defaultTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v2/', import.meta.url));
-export const profileTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v4/', import.meta.url));
+export const profileTargetSpecAssetRoot = fileURLToPath(new URL('../assets/target-spec/v5/', import.meta.url));
 
 function assertManifest(value:unknown): asserts value is TargetSpecManifest {
   if(!value||typeof value!=='object')throw new Error('invalid target spec manifest');

@@ -3,7 +3,7 @@
 - 状态：进行中
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-08-13
+- 最后更新：2026-09-04
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 4 可观测性前置能力；不依赖或启动自动 Controller
 
@@ -70,7 +70,8 @@
 | Design | [DES-009 执行事件、可重建投影与本地观察面](../03-design/DES-009-execution-visualization.md) | 已批准 |
 | Task | [TASK-027 执行事件协议与埋点](../04-task/TASK-027-execution-events.md) | 进行中 |
 | Task | [TASK-028 可重建投影与本地 Web UI](../04-task/TASK-028-execution-view.md) | 进行中 |
-| Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 草稿 |
+| Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 已批准 |
+| Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 已批准 |
 
 ## 实际交付
 

@@ -1,30 +1,25 @@
 const root = document.getElementById('execution-view');
 const elements = {
   projectName: document.getElementById('project-name'), connectionLabel: document.getElementById('connection-label'),
-  freshness: document.getElementById('freshness-text'), currentTask: document.getElementById('current-task'),
-  currentMeta: document.getElementById('current-meta'), runtimeStatus: document.getElementById('runtime-status'),
-  stepLabel: document.getElementById('current-step-label'), stepSummary: document.getElementById('current-step-summary'),
-  elapsed: document.getElementById('current-elapsed'), nextAction: document.getElementById('next-action'),
+  freshness: document.getElementById('freshness-text'),
   workflow: document.getElementById('workflow'),
-  currentMetrics: document.getElementById('current-metrics'), taskList: document.getElementById('task-list'),
-  taskSummary: document.getElementById('task-summary'), detailTitle: document.getElementById('detail-title'),
-  detailMetrics: document.getElementById('detail-metrics'), stepList: document.getElementById('step-list'),
-  taskDiagnostics: document.getElementById('task-diagnostics'), projectDiagnostics: document.getElementById('project-diagnostics'),
-  runtimeError: document.getElementById('runtime-error'),
-  runtimeErrorMessage: document.getElementById('runtime-error-message'), workflowHeading: document.getElementById('workflow-heading'),
-  workflowCaption: document.getElementById('workflow-caption'),
+  taskList: document.getElementById('task-list'),
+  taskSummary: document.getElementById('task-summary'), projectDiagnostics: document.getElementById('project-diagnostics'),
+  workflowHeading: document.getElementById('workflow-heading'),
+  workflowCaption: document.getElementById('workflow-caption'), waveList: document.getElementById('wave-list'),
+  waveSidebarCount: document.getElementById('wave-sidebar-count'), waveSidebarSummary: document.getElementById('wave-sidebar-summary'),
 };
 
 const workflowStages = [
-  { key: 'intake', label: '目标与规格', hint: '冻结边界与 AC', actor: 'agent', role: 'CONTROLLER', types: ['task.plan'], x: 480, y: 20 },
+  { key: 'intake', label: 'P 契约', hint: '冻结边界、AC 与权限', actor: 'agent', role: 'PLANNER · P', types: ['task.plan', 'acceptance.plan'], x: 480, y: 20 },
   { key: 'prepare', label: '准备执行', hint: '权限 / worktree / Plan', actor: 'system', role: 'SPEC-LOOP', types: ['harness.prepare'], x: 480, y: 120 },
-  { key: 'maker', label: 'Maker 实现', hint: '复现、分析、修改与修复', actor: 'agent', role: 'MAKER', types: ['round.work', 'work.reproduce', 'work.analyze', 'work.change', 'harness.execute'], x: 480, y: 220 },
+  { key: 'maker', label: 'M 实现', hint: '唯一候选写角色', actor: 'agent', role: 'MAKER · M', types: ['round.work', 'work.reproduce', 'work.analyze', 'work.change', 'harness.execute', 'role.m'], x: 480, y: 220 },
   { key: 'collect', label: '收集候选', hint: 'HEAD / diff / artifacts', actor: 'system', role: 'SPEC-LOOP', types: ['harness.collect', 'harness.report'], x: 480, y: 320 },
   { key: 'command', label: '构建 / 测试 Gate', hint: '确定性命令', actor: 'system', role: 'SPEC-LOOP GATE', types: ['gate.command'], x: 180, y: 440 },
   { key: 'browser', label: '浏览器 Gate', hint: 'Playwright 路径', actor: 'system', role: 'SPEC-LOOP GATE', types: ['gate.playwright'], x: 780, y: 440 },
   { key: 'review', label: '人工效果确认', hint: '截图与主观验收', actor: 'human', role: 'HUMAN', types: ['review.visual', 'wait.user'], x: 780, y: 550 },
-  { key: 'verify', label: 'Verifier 验证', hint: 'AC / diff / Evidence', actor: 'agent', role: 'VERIFIER', types: ['task.verify'], x: 480, y: 680 },
-  { key: 'deliver', label: '交付关闭', hint: 'Delivery Guard', actor: 'system', role: 'SPEC-LOOP', types: ['task.deliver'], x: 300, y: 810 },
+  { key: 'verify', label: 'V 验收', hint: '独立验证 AC / HEAD', actor: 'agent', role: 'VERIFIER · V', types: ['task.verify', 'role.v'], x: 480, y: 680 },
+  { key: 'deliver', label: 'R 复核 / Candidate', hint: 'Evidence Guard 后进入候选', actor: 'agent', role: 'REVIEWER · R', types: ['role.r', 'acceptance.candidate', 'task.deliver'], x: 300, y: 810 },
   { key: 'triage', label: 'Triage 归因', hint: '区分失败类型', actor: 'agent', role: 'TRIAGE', types: [], x: 660, y: 810 },
   { key: 'revision', label: '新 Revision', hint: '生成下一张 DAG', actor: 'system', role: 'SPEC-LOOP', types: [], x: 660, y: 920 },
 ];
@@ -64,6 +59,8 @@ let selectedWaveId = null;
 let workflowSelectionInitialized = false;
 let portfolioHasLocated = false;
 let expandedTaskId = null;
+let projectCatalog = [];
+let selectedProjectKey = 'root';
 const elkLayoutCache = new Map();
 let elkInstance = null;
 let workflowControlState = { options: [], value: '', backVisible: false, backLabel: '返回上一级', source: '从 .spec-loop 重建' };
@@ -90,6 +87,42 @@ function updateTaskControls() {
     filterValue: taskFilter,
     locateDisabled: !snapshot?.active_task,
   }]);
+}
+
+function updateProjectControls(loading = false) {
+  callAntd('updateProject', [{
+    options: projectCatalog.map((project) => ({ value: project.key, label: project.name })),
+    value: selectedProjectKey,
+    loading,
+  }]);
+}
+
+async function loadProjects() {
+  updateProjectControls(true);
+  try {
+    const response = await fetch('/api/projects', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const catalog = await response.json();
+    projectCatalog = Array.isArray(catalog.projects) ? catalog.projects : [];
+    if (!projectCatalog.some((project) => project.key === selectedProjectKey)) selectedProjectKey = catalog.default_project || projectCatalog[0]?.key || 'root';
+  } catch {
+    if (!projectCatalog.length) projectCatalog = [{ key: 'root', project_id: 'LOCAL', name: '当前工程' }];
+  }
+  updateProjectControls(false);
+}
+
+function resetProjectSelection() {
+  selectedTaskId = null; taskWaveFilter = null; selectedWaveId = null; expandedTaskId = null;
+  workflowMode = 'portfolio'; workflowSelectionInitialized = false; portfolioHasLocated = false;
+  elkLayoutCache.clear();
+}
+
+async function switchProject(projectKey) {
+  if (!projectCatalog.some((project) => project.key === projectKey) || projectKey === selectedProjectKey) return;
+  selectedProjectKey = projectKey; etag = null; snapshot = null; resetProjectSelection(); updateProjectControls(false);
+  callAntd('updateLayout', [{ switching: true, error: null }]);
+  root.classList.add('project-switching'); elements.connectionLabel.textContent = '正在切换工程'; elements.freshness.textContent = '保留上一帧直到新工程加载完成';
+  await refresh();
 }
 
 function appendAntdEmpty(parent, description, detail = '', actionLabel = '', onAction) {
@@ -140,8 +173,23 @@ function duration(value) {
 }
 
 function totalTaskLabel(task) {
-  return task?.wall_clock_ms === null || task?.wall_clock_ms === undefined
-    ? '生命周期未知' : `生命周期 ${duration(task.wall_clock_ms)}`;
+  if (task?.wall_clock_ms !== null && task?.wall_clock_ms !== undefined) return `生命周期 ${duration(task.wall_clock_ms)}`;
+  if (task?.record_kind === 'historical_no_runtime') return '历史耗时未记录';
+  if (task?.record_kind === 'never_started' || task?.record_kind === 'specification_only') return '尚未开始计时';
+  return '生命周期未知';
+}
+
+function recordKindLabel(task) {
+  return ({ current_run: '当前运行', historical_runtime: '历史运行', historical_no_runtime: '历史任务·无运行档案', never_started: '未启动', specification_only: '仅规格' })[task?.record_kind] ?? '状态未知';
+}
+
+function runtimeLabel(runtime) {
+  if (!runtime) return '无活动角色';
+  const state = runtime.state === 'awaiting_ingestion' ? '等待结果摄入' : runtime.state === 'running' ? '运行中' : '已准备';
+  const heartbeat = runtime.heartbeat_age_ms === null ? '心跳未记录' : `心跳 ${duration(runtime.heartbeat_age_ms)} 前`;
+  const remaining = runtime.remaining_ms === null ? '无截止时间' : `熔断剩余 ${duration(runtime.remaining_ms)}`;
+  const usage = runtime.usage_total_tokens === null ? 'Token 未记录' : `Token ${runtime.usage_total_tokens}${runtime.token_limit ? `/${runtime.token_limit}` : ''}`;
+  return `${runtime.role} ${state} · ${heartbeat} · ${remaining} · ${usage}`;
 }
 
 function taskTimingBreakdownLabel(task) {
@@ -188,11 +236,11 @@ function precisionName(value) {
 }
 
 function statusName(value) {
-  return ({ running: '运行中', waiting: '等待中', succeeded: '已完成', failed: '失败', interrupted: '已中断', noted: '记录', unknown: '未知' })[value] ?? value;
+  return ({ running: '运行中', waiting: '等待中', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消', noted: '记录', unknown: '未知' })[value] ?? value;
 }
 
 function lifecycleName(value) {
-  return ({ draft: '草稿', planned: '已计划', working: '实现中', verifying: '验证中', iterating: '迭代中', delivered: '已交付' })[value] ?? value;
+  return ({ draft: '草稿', planned: '已计划', working: '实现中', verifying: '验证中', iterating: '迭代中', delivered: '已交付', cancelled: '已取消' })[value] ?? value;
 }
 
 function taskLifecycleName(task) {
@@ -209,7 +257,7 @@ function waveName(wave) {
 
 function stepClass(step) {
   if (step.status === 'failed') return 'fail';
-  if (step.status === 'interrupted') return 'interrupt';
+  if (step.status === 'interrupted' || step.status === 'cancelled') return 'interrupt';
   if (step.type === 'wait.user' || step.status === 'waiting') return 'wait';
   if (step.type.startsWith('gate.')) return 'gate';
   return 'work';
@@ -232,57 +280,62 @@ function tag(value, className = 'meta-tag') {
   return text('span', className, value);
 }
 
-function setRuntimeStatus(kind, label) {
-  if (elements.runtimeStatus.dataset.kind === kind && elements.runtimeStatus.dataset.label === label) return;
-  elements.runtimeStatus.dataset.kind = kind; elements.runtimeStatus.dataset.label = label;
-  callAntd('mountStatus', [elements.runtimeStatus, kind, label], () => {
-    elements.runtimeStatus.replaceChildren(tag(label, `runtime-status-fallback ${kind}`));
-  });
+const globalTaskStatuses = {
+  delivered: { label: '已交付', className: 'delivered' },
+  working: { label: '实现中', className: 'working' },
+  verifying: { label: '验证中', className: 'verifying' },
+  iterating: { label: '返工中', className: 'iterating' },
+  blocked: { label: '阻塞', className: 'blocked' },
+  planned: { label: '已计划', className: 'planned' },
+  draft: { label: '草稿', className: 'draft' },
+  cancelled: { label: '已取消', className: 'cancelled' },
+};
+
+function globalTaskStatus(task) {
+  return task.blocked_by?.length ? 'blocked' : task.status ?? 'unknown';
 }
 
-function syncTags(container, specs) {
-  const signature = JSON.stringify(specs);
-  if (container.dataset.signature === signature) return;
-  container.dataset.signature = signature;
-  callAntd('mountTags', [container, specs.map(([value]) => value)], () => {
-    container.replaceChildren(...specs.map(([value, className]) => tag(value, className)));
-  });
+function globalTaskStatusSummary() {
+  const counts = new Map();
+  for (const task of snapshot.tasks) {
+    const status = globalTaskStatus(task);
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  const orderedKeys = [...Object.keys(globalTaskStatuses), ...[...counts.keys()].filter((key) => !globalTaskStatuses[key])]
+    .filter((key) => counts.get(key));
+  return orderedKeys.map((key) => ({ key, label: globalTaskStatuses[key]?.label ?? lifecycleName(key), count: counts.get(key) ?? 0 }));
+}
+
+function globalWaveStatusSummary() {
+  const states = { done: 0, active: 0, waiting: 0, pending: 0 };
+  for (const wave of snapshot.waves) states[waveState(wave)] += 1;
+  return states;
 }
 
 function renderCurrent() {
   const active = snapshot.active_task;
-  if (!active) {
-    elements.currentTask.textContent = '当前没有活动 Task';
-    syncTags(elements.currentMeta, [['项目空闲', 'meta-tag'], ['只读观察面', 'meta-tag']]);
-    elements.stepLabel.textContent = '等待任务进入执行';
-    elements.stepSummary.textContent = '项目中还没有可展示的活动任务事实';
-    elements.elapsed.textContent = '—'; elements.nextAction.textContent = '创建或启动一个 Task';
-    setRuntimeStatus('success', '项目空闲');
-    return;
+  const delivered = snapshot.tasks.filter((task) => task.status === 'delivered').length;
+  const inFlight = snapshot.tasks.filter((task) => ['working', 'verifying', 'iterating'].includes(task.status)).length;
+  const activeWave = active ? waveForTask(active.task_id) : null;
+  let status = { kind: 'success', label: '项目空闲' }, location = '等待任务进入执行', summary = '项目中还没有可展示的活动任务事实', nextAction = '下一动作：创建或启动一个 Task';
+  if (active) {
+    location = `${activeWave ? waveName(activeWave) : '未归属波次'} / ${active.task_id} / Round ${active.round}`;
+    summary = active.blocked_by?.length ? `${active.title} · 等待前置 Task ${active.blocked_by.join('、')}` : `${active.title} · ${taskLifecycleName(active)} · ${active.step_label ?? '当前执行器未上报步骤事件'}`;
+    nextAction = `下一动作：${active.next_action}`;
+    status = active.blocked_by?.length ? { kind: 'waiting', label: '依赖阻塞' } : active.step_status === 'running' ? { kind: 'processing', label: '正在运行' } : { kind: 'waiting', label: active.step_status === 'waiting' ? '等待用户' : '等待事件接入' };
   }
-  const activeWave = waveForTask(active.task_id);
-  elements.currentTask.textContent = `${activeWave ? waveName(activeWave) : '未归属波次'} / ${active.task_id} · ${active.title}`;
-  syncTags(elements.currentMeta, [[`第 ${active.round} 轮`, 'meta-tag'], [taskLifecycleName(active), 'meta-tag'], [snapshot.project.project_id, 'meta-tag']]);
-  if (active.blocked_by?.length) {
-    elements.stepLabel.textContent = '等待前置 Task 完成';
-    elements.stepSummary.textContent = `当前控制记录尚未关闭，但依赖 ${active.blocked_by.join('、')} 未完成，因此不能继续执行。`;
-    elements.elapsed.textContent = '—'; elements.nextAction.textContent = active.next_action;
-    setRuntimeStatus('waiting', '依赖阻塞');
-    return;
-  }
-  elements.stepLabel.textContent = active.step_label ?? '当前执行器未上报步骤事件';
-  elements.stepSummary.textContent = active.step_summary ?? 'Task 状态存在，但尚未收到由新版 Spec-Loop CLI 写入的实时步骤事件';
-  elements.nextAction.textContent = active.next_action;
-  if (active.step_status === 'waiting') setRuntimeStatus('waiting', '等待用户');
-  else if (active.step_status === 'running') setRuntimeStatus('processing', '正在运行');
-  else setRuntimeStatus('waiting', '等待事件接入');
-  tickElapsed();
+  callAntd('updateGlobalOverview', [{ projectName: `${snapshot.project.name} · ${snapshot.tasks.length} Task · ${snapshot.waves.length} 波次`, taskTotal: snapshot.tasks.length, waveTotal: snapshot.waves.length, delivered, inFlight, statuses: globalTaskStatusSummary(), waves: globalWaveStatusSummary(), status, location, summary, elapsed: currentElapsedLabel(), nextAction }]);
+}
+
+function currentElapsedLabel() {
+  if (!snapshot?.active_task?.step_started_at) return '—';
+  return duration(Math.max(0, Date.now() - Date.parse(snapshot.active_task.step_started_at)));
 }
 
 function tickElapsed() {
-  if (!snapshot?.active_task?.step_started_at) { elements.elapsed.textContent = '—'; return; }
-  const elapsed = duration(Math.max(0, Date.now() - Date.parse(snapshot.active_task.step_started_at)));
-  elements.elapsed.textContent = elapsed;
+  if (!snapshot) return;
+  callAntd('updateGlobalOverview', [{ elapsed: currentElapsedLabel() }]);
+  const elapsed = currentElapsedLabel();
   const activeNodeDuration = elements.workflow.querySelector('[data-active-node-duration]');
   if (activeNodeDuration) activeNodeDuration.textContent = `已运行 ${elapsed}`;
 }
@@ -294,7 +347,7 @@ function stageForType(type) {
 function workflowStageState(stage, activeTask, activeStage) {
   const related = activeTask?.steps.filter((step) => stage.types.includes(step.type)) ?? [];
   const isActive = stage.key === activeStage;
-  const failed = related.some((step) => step.status === 'failed' || step.status === 'interrupted');
+  const failed = related.some((step) => step.status === 'failed' || step.status === 'interrupted' || step.status === 'cancelled');
   if (isActive && failed) return { state: 'failed', related };
   if (isActive && related.some((step) => step.status === 'waiting')) return { state: 'waiting', related };
   if (isActive) return { state: 'active', related };
@@ -352,11 +405,8 @@ function taskMatchesFilter(task) {
 
 function renderWaveSelector() {
   updateWorkflowControls({
-    options: [
-      { value: '', label: '全部波次总览' },
-      ...snapshot.waves.map((wave) => ({ value: wave.wave_id, label: waveName(wave) })),
-    ],
-    value: selectedWaveId ?? '',
+    options: snapshot.waves.map((wave) => ({ value: wave.wave_id, label: waveName(wave) })),
+    value: selectedWaveId ?? undefined,
   });
 }
 
@@ -373,6 +423,14 @@ function currentWave() {
     ?? snapshot.waves.at(-1) ?? null;
 }
 
+function defaultWave() {
+  return currentWave()
+    ?? snapshot.waves.find((wave) => ['working', 'verifying'].includes(wave.status))
+    ?? [...snapshot.waves].reverse().find((wave) => wave.task_total > 0 && wave.status !== 'delivered')
+    ?? [...snapshot.waves].reverse().find((wave) => wave.status !== 'delivered')
+    ?? snapshot.waves.at(-1) ?? null;
+}
+
 function waveProgressLabel(wave) {
   if (wave.status === 'delivered') return '已完成';
   if (wave.status === 'verifying') return '验证中';
@@ -380,31 +438,70 @@ function waveProgressLabel(wave) {
   return '待开始';
 }
 
+function waveTimingLabel(wave) {
+  const live = liveWaveTiming(wave);
+  return live.task_wall_clock_ms === null ? '耗时未记录' : duration(live.task_wall_clock_ms);
+}
+
+function waveSidebarStatus(wave, activeWave) {
+  const current = wave.wave_id === activeWave?.wave_id;
+  return current ? '当前执行' : waveProgressLabel(wave);
+}
+
+function renderWaveSidebar() {
+  const activeWave = currentWave(), completed = snapshot.waves.filter((wave) => wave.status === 'delivered').length;
+  elements.waveSidebarCount.textContent = `${completed}/${snapshot.waves.length} 已收口`;
+  elements.waveSidebarSummary.textContent = activeWave
+    ? `当前运行到 ${activeWave.wave_id} · ${activeWave.title}`
+    : snapshot.active_task ? `当前 ${snapshot.active_task.task_id} 尚未归属波次` : '当前没有活动 Task';
+  callAntd('updateWaveMenu', [{
+    selectedKey: selectedWaveId ?? undefined,
+    items: snapshot.waves.map((wave) => {
+      const state = waveState(wave);
+      return {
+        key: wave.wave_id,
+        title: wave.title,
+        current: wave.wave_id === activeWave?.wave_id,
+        stateLabel: waveSidebarStatus(wave, activeWave),
+        stateColor: state === 'done' ? 'success' : state === 'active' ? 'processing' : state === 'waiting' ? 'warning' : undefined,
+        completed: wave.completed_tasks,
+        total: wave.task_total,
+        time: waveTimingLabel(wave),
+        percent: wave.task_total ? Math.min(100, Math.round(wave.completed_tasks / wave.task_total * 100)) : 0,
+      };
+    }),
+  }]);
+}
+
+function patchWaveSidebar() {
+  renderWaveSidebar();
+}
+
 function goPortfolio() {
-  workflowSelectionInitialized = true; workflowMode = 'portfolio'; selectedWaveId = null; expandedTaskId = null; portfolioHasLocated = true; renderWorkflow(); renderMetrics();
+  const wave = defaultWave();
+  if (wave) { openWave(wave.wave_id); return; }
+  workflowSelectionInitialized = true; workflowMode = 'portfolio'; selectedWaveId = null; expandedTaskId = null; portfolioHasLocated = true; renderWorkflow(); renderMetrics(); patchWaveSidebar();
   requestAnimationFrame(() => elements.workflow.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function openWave(waveId) {
-  if (!snapshot.waves.some((wave) => wave.wave_id === waveId)) return;
+  const wave = snapshot.waves.find((item) => item.wave_id === waveId); if (!wave) return;
   workflowSelectionInitialized = true; selectedWaveId = waveId; expandedTaskId = null; workflowMode = 'wave'; portfolioHasLocated = true;
-  taskWaveFilter = waveId; renderTaskWaveSelector(); renderWorkflow(); renderTasks();
+  selectedTaskId = snapshot.active_task && wave.task_ids.includes(snapshot.active_task.task_id) ? snapshot.active_task.task_id : wave.task_ids[0] ?? null;
+  taskWaveFilter = waveId; renderTaskWaveSelector(); renderWorkflow(); renderTasks(); renderDetails(); renderMetrics(); patchWaveSidebar();
   requestAnimationFrame(() => elements.workflow.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function toggleWave(waveId) {
-  if (selectedWaveId === waveId) {
-    selectedWaveId = null; expandedTaskId = null; renderWorkflow(); renderMetrics(); return;
-  }
   openWave(waveId); renderMetrics();
 }
 
 function renderBreadcrumb(task = null) {
   const nav = document.createElement('nav'); nav.className = 'workflow-breadcrumb'; nav.setAttribute('aria-label', '工作流层级');
-  const items = [{ label: '全部波次总览', disabled: workflowMode === 'portfolio', onClick: goPortfolio }];
+  const items = [];
   const wave = selectedWaveId ? snapshot.waves.find((item) => item.wave_id === selectedWaveId) : waveForTask(task?.task_id);
   elements.workflow.append(nav);
-  if (wave) items.push({ label: `${wave.wave_id} · ${wave.title}`, disabled: workflowMode === 'wave', onClick: () => openWave(wave.wave_id) });
+  if (wave) items.push({ label: `${wave.wave_id} · ${wave.title}`, current: !task, disabled: workflowMode === 'wave', onClick: () => openWave(wave.wave_id) });
   if (task) items.push({ label: task.task_id, current: true });
   callAntd('mountBreadcrumb', [nav, items], () => {
     items.forEach((item, index) => {
@@ -739,8 +836,8 @@ function renderPortfolioWorkflow() {
   const activeTaskId = snapshot.active_task?.task_id;
   const activeUnassigned = Boolean(activeTaskId && !activeWave);
   elements.workflowHeading.textContent = activeUnassigned ? '波次执行总览 · 当前 Task 未归属' : `波次执行总览 · 当前 ${activeWave?.wave_id ?? '无'}`;
-  elements.workflowCaption.textContent = '默认只显示 H1→H15 主链 · 点击 H 原位展开任务 · 同列 Task 表示可并行';
-  updateWorkflowControls({ backVisible: false, source: '真实依赖 · 已去除传递性冗余边' });
+  elements.workflowCaption.textContent = '左侧固定展示 H1→H15 完整明细 · 选择波次后在这里查看 Task 依赖';
+  updateWorkflowControls({ backVisible: false, source: '左侧全局波次 · 右侧按需下钻' });
   if (!snapshot.waves.length) { appendAntdEmpty(elements.workflow, '规格中没有可展示的波次'); return; }
   const overview = document.createElement('section'); overview.className = 'portfolio-overview';
   const overviewLead = document.createElement('div'); overviewLead.className = 'portfolio-overview-lead';
@@ -749,10 +846,8 @@ function renderPortfolioWorkflow() {
     : activeUnassigned ? `当前执行 ${activeTaskId}，但规格中没有它与波次的归属关系` : '当前没有活动 Task'));
   const activeBelongsToWave = activeWave?.task_ids.includes(snapshot.active_task?.task_id);
   overview.append(overviewLead, tag(`${completedTasks}/${totalTasks} Task 完成`, 'overview-stat'), tag(`${timedTasks}/${totalTasks} 有耗时事实`, 'overview-stat'), tag(snapshot.active_task ? `Agent CLI：${snapshot.active_task.task_id} · ${taskLifecycleName(snapshot.active_task)}${activeBelongsToWave ? ` · ${activeWave.wave_id}` : ' · 未归属波次'}` : 'Agent CLI：当前空闲', `overview-stat${activeUnassigned ? ' unassigned' : ''}`));
-  const lanes = document.createElement('div'); lanes.className = 'portfolio-lanes';
-  for (const wave of snapshot.waves) lanes.append(renderWaveLane(wave, activeWave));
-  elements.workflow.append(overview, lanes);
-  if (!portfolioHasLocated && activeWave) { portfolioHasLocated = true; requestAnimationFrame(() => document.getElementById(`wave-lane-${activeWave.wave_id}`)?.scrollIntoView({ behavior: 'auto', block: 'center' })); }
+  elements.workflow.append(overview);
+  appendAntdEmpty(elements.workflow, activeWave ? `选择 ${activeWave.wave_id} 查看当前波次` : '从左侧选择一个波次', '右侧只呈现所选波次的 Task 依赖、状态和耗时，避免重复铺开全部 H。', activeWave ? `打开 ${activeWave.wave_id}` : '', activeWave ? () => openWave(activeWave.wave_id) : undefined);
 }
 
 function renderFocusedWaveWorkflow() {
@@ -765,7 +860,7 @@ function renderFocusedWaveWorkflow() {
   elements.workflowCaption.textContent = activeTask
     ? `当前 ${activeTask.task_id} · Round ${activeTask.round} · ${lifecycleName(activeTask.lifecycle)}；完整展示本波次 Task 依赖与并行关系`
     : `${wave.completed_tasks}/${wave.task_total} 个 Task 完成；完整展示本波次 Task 依赖与并行关系`;
-  updateWorkflowControls({ backVisible: true, backLabel: '查看全部波次总览', source: '波次 Task DAG · 左到右执行' });
+  updateWorkflowControls({ backVisible: false, source: '波次 Task DAG · 左到右执行' });
 
   const overview = document.createElement('section'); overview.className = 'focused-wave-overview';
   const identity = document.createElement('div'); identity.className = 'focused-wave-identity';
@@ -925,6 +1020,15 @@ function renderTaskWorkflow() {
   const inlineBack = document.createElement('div'); inlineBack.className = 'workflow-inline-back';
   mountButton(inlineBack, { label: selectedWaveId ? `返回 ${selectedWaveId} 子 Task 图` : '返回全部波次总览', icon: null }, () => { if (selectedWaveId) openWave(selectedWaveId); else goPortfolio(); });
   elements.workflow.append(inlineBack);
+  const hasWorkflowEvents = activeTask.steps.some((step) => step.source === 'EXECUTION_EVENTS.jsonl');
+  if (!hasWorkflowEvents) {
+    updateWorkflowControls({ source: activeTask.managed ? '历史状态·无原生执行事件' : '仅规格与交付状态' });
+    const message = activeTask.status === 'delivered'
+      ? '该 Task 已完成，但历史数据没有 Event Log / Run：耗时未记录，不生成虚构 Workflow。'
+      : '该 Task 尚无 Event Log / Run：仅展示规格状态，不将其投影为已启动的 Workflow。';
+    elements.workflow.append(text('div', 'inline-empty', message));
+    return;
+  }
 
   const legend = document.createElement('div');
   legend.className = 'workflow-legend';
@@ -985,6 +1089,10 @@ function renderTaskWorkflow() {
 }
 
 function renderWorkflow() {
+  if (!selectedWaveId) {
+    const wave = defaultWave();
+    if (wave) { selectedWaveId = wave.wave_id; workflowMode = 'wave'; taskWaveFilter = wave.wave_id; }
+  }
   if (selectedWaveId) renderFocusedWaveWorkflow(); else renderPortfolioWorkflow();
 }
 
@@ -996,23 +1104,12 @@ function renderMetrics() {
   const observedWaiting = wave ? (wave.timed_tasks ? wave.waiting_ms : null) : task && (task.waiting_ms > 0 || task.timing_precision !== 'unknown') ? task.waiting_ms : null;
   const timingNote = wave ? `${wave.timed_tasks} / ${wave.task_total} 个 Task 有耗时事实；跨度可能重叠` : task ? 'Task 开始至今；可与其他 Task 重叠，不能相加为工时' : '无活动任务';
   const metrics = [
-    { label: wave ? 'Task 生命周期跨度合计' : '生命周期跨度', value: wave?.task_wall_clock_ms ?? task?.wall_clock_ms ?? null, note: timingNote, color: 'var(--primary)' },
-    { label: '主动执行', value: observedActive, note: '已扣除等待重叠', color: 'var(--success)' },
-    { label: '等待时间', value: observedWaiting, note: '用户 / Review / 授权', color: 'var(--warning)' },
-    { label: wave ? '耗时覆盖' : '未归因 / 空闲', value: wave ? null : task?.untracked_ms ?? null, note: wave ? timingNote : '没有活动事件覆盖，可能是空闲或历史漏记', color: 'var(--danger)', textValue: wave ? `${wave.timed_tasks}/${wave.task_total}` : null },
+    { key: 'span', label: wave ? 'Task 生命周期跨度合计' : '生命周期跨度', value: duration(wave?.task_wall_clock_ms ?? task?.wall_clock_ms ?? null), note: timingNote, color: 'var(--primary)' },
+    { key: 'active', label: '主动执行', value: duration(observedActive), note: '已扣除等待重叠', color: 'var(--success)' },
+    { key: 'waiting', label: '等待时间', value: duration(observedWaiting), note: '用户 / Review / 授权', color: 'var(--warning)' },
+    { key: 'coverage', label: wave ? '耗时覆盖' : '未归因 / 空闲', value: wave ? `${wave.timed_tasks}/${wave.task_total}` : duration(task?.untracked_ms ?? null), note: wave ? timingNote : '没有活动事件覆盖，可能是空闲或历史漏记', color: 'var(--danger)' },
   ];
-  if (elements.currentMetrics.children.length !== metrics.length) {
-    elements.currentMetrics.replaceChildren(...metrics.map((_, index) => {
-      const card = document.createElement('article'); card.className = 'metric-card'; card.dataset.metricIndex = String(index);
-      card.append(text('span', 'metric-label', ''), text('strong', 'metric-value', ''), text('small', 'metric-note', '')); return card;
-    }));
-  }
-  metrics.forEach((metric, index) => {
-    const card = elements.currentMetrics.children[index]; card.style.setProperty('--metric-color', metric.color);
-    card.querySelector('.metric-label').textContent = metric.label;
-    card.querySelector('.metric-value').textContent = metric.textValue ?? duration(metric.value);
-    card.querySelector('.metric-note').textContent = metric.note;
-  });
+  callAntd('updateWaveMetrics', [{ metrics }]);
 }
 
 function updateTrackSpace(space, task) {
@@ -1102,7 +1199,7 @@ function renderTasks() {
       button.setAttribute('aria-selected', String(task.task_id === selectedTaskId));
       const identity = document.createElement('span'); identity.className = 'task-identity';
       const idLine = document.createElement('span'); idLine.className = 'task-id-line';
-      idLine.append(text('span', 'task-id', task.task_id), text('span', `task-state ${taskStateClass(task)}`, taskLifecycleName(task)));
+      idLine.append(text('span', 'task-id', task.task_id), text('span', `task-state ${taskStateClass(task)}`, taskLifecycleName(task)), text('span', 'task-wave-chip', task.protocol === 'v2' ? `v2 · ${task.acceptance?.stage ?? '未启动'}` : 'v1'), text('span', 'task-wave-chip', recordKindLabel(task)));
       if (taskWaveFilter === 'all') idLine.append(text('span', `task-wave-chip${group.id === 'unassigned' ? ' unassigned' : ''}`, group.id === 'unassigned' ? '未归属波次' : group.id));
       identity.append(idLine, text('span', 'task-title', task.title));
       const metrics = document.createElement('span'); metrics.className = 'task-metrics';
@@ -1116,28 +1213,34 @@ function renderTasks() {
 
 function renderDetails() {
   const task = snapshot.tasks.find((item) => item.task_id === selectedTaskId);
-  elements.stepList.replaceChildren();
   if (!task) {
-    elements.detailTitle.textContent = '步骤活动'; elements.detailMetrics.textContent = '选择一个 Task 查看明细';
-    elements.taskDiagnostics.hidden = true;
-    appendAntdEmpty(elements.stepList, '选择一个 Task 查看明细'); return;
+    callAntd('updateTaskInspector', [{ task: null }]); return;
   }
-  elements.detailTitle.textContent = `${task.task_id} · 第 ${task.round} 轮`;
-  elements.detailMetrics.textContent = `生命周期跨度 ${duration(task.wall_clock_ms)}（可与其他 Task 重叠）· 主动 ${duration(task.active_ms)} · 等待 ${duration(task.waiting_ms)} · 未归因/空闲 ${duration(task.untracked_ms)} · 轮次未拆分 ${duration(task.round_unattributed_ms)}`;
-  if (!task.steps.length) appendAntdEmpty(elements.stepList, '暂无步骤事件', '等待新版执行器上报');
-  for (const step of task.steps) {
-    const row = document.createElement('div'); row.className = `step ${step.status}${step.id === task.bottleneck_step_id ? ' bottleneck' : ''}`;
-    const top = document.createElement('div'); top.className = 'step-top';
-    top.append(text('span', 'step-name', step.label), text('span', 'step-time', duration(step.duration_ms)));
-    row.append(top, text('p', 'step-summary', step.summary));
-    const meta = document.createElement('div'); meta.className = 'step-meta';
-    if (step.id === task.bottleneck_step_id) meta.append(text('span', 'bottleneck-label', '耗时最长'));
-    meta.append(text('span', 'time-range', timeRange(step)), text('span', step.precision, precisionName(step.precision)), text('span', '', statusName(step.status)), text('span', '', step.source));
-    for (const ref of step.refs) meta.append(text('span', 'ref', `↗ ${ref}`));
-    row.append(meta); elements.stepList.append(row);
-  }
-  elements.taskDiagnostics.hidden = task.diagnostics.length === 0;
-  if (task.diagnostics.length) mountAlert(elements.taskDiagnostics, { message: 'Task 数据提示', descriptions: task.diagnostics });
+  callAntd('updateTaskInspector', [{ task: {
+    title: `${task.task_id} · 第 ${task.round} 轮`, status: taskStateClass(task), statusLabel: taskLifecycleName(task),
+    metrics: [
+      { key: 'protocol', label: '执行协议', children: task.protocol === 'v2' ? `P/M/V/R v2 · ${task.acceptance?.stage ?? '未启动'}` : 'v1 兼容流程' },
+      { key: 'fresh', label: 'v2 绑定新鲜度', children: task.acceptance ? (task.acceptance.fresh ? '当前有效' : '异常') : '不适用' },
+      { key: 'head', label: '候选 HEAD', children: task.acceptance?.head?.slice(0, 12) ?? '未形成' },
+      { key: 'roles', label: '角色 invocation', children: task.acceptance ? `M ${task.acceptance.last_m_invocation ? '✓' : '—'} / V ${task.acceptance.last_v_invocation ? '✓' : '—'} / R ${task.acceptance.last_r_invocation ? '✓' : '—'}` : '不适用' },
+      { key: 'runtime', label: '实时角色进度', children: runtimeLabel(task.runtime) },
+      { key: 'record', label: '运行档案口径', children: recordKindLabel(task) },
+      { key: 'budget', label: '返工 / 基础设施预算', children: task.acceptance ? `${task.acceptance.semantic_reworks_used}/2 · V${task.acceptance.infrastructure_retries.V} R${task.acceptance.infrastructure_retries.R}` : '不适用' },
+      { key: 'conflict', label: 'Conflict / Candidate', children: task.acceptance?.active_conflict_id ?? task.acceptance?.candidate_id ?? '无' },
+      { key: 'span', label: '生命周期跨度', children: duration(task.wall_clock_ms) },
+      { key: 'active', label: '主动执行', children: duration(task.active_ms) },
+      { key: 'waiting', label: '等待', children: duration(task.waiting_ms) },
+      { key: 'untracked', label: '未归因 / 空闲', children: duration(task.untracked_ms) },
+      { key: 'round', label: '轮次未拆分', children: duration(task.round_unattributed_ms) },
+      { key: 'overlap', label: '计时口径', children: '可与其他 Task 重叠' },
+    ],
+    steps: task.steps.map((step) => ({
+      label: step.label, duration: duration(step.duration_ms), summary: step.summary, status: step.status,
+      statusLabel: statusName(step.status), precision: precisionName(step.precision), timeRange: timeRange(step), source: step.source,
+      bottleneck: step.id === task.bottleneck_step_id, refs: step.refs,
+    })),
+    diagnostics: task.diagnostics,
+  } }]);
 }
 
 function renderDiagnostics() {
@@ -1149,14 +1252,14 @@ function snapshotStructureSignature(value) {
   return JSON.stringify({
     project: value.project,
     waves: value.waves.map((wave) => ({ id: wave.wave_id, title: wave.title, summary: wave.summary, task_ids: wave.task_ids, heavy: wave.heavy_task_ids })),
-    tasks: value.tasks.map((task) => ({ id: task.task_id, title: task.title, level: task.level, managed: task.managed, depends_on: task.depends_on, blocked_by: task.blocked_by })),
+    tasks: value.tasks.map((task) => ({ id: task.task_id, title: task.title, level: task.level, protocol:task.protocol, managed: task.managed, depends_on: task.depends_on, blocked_by: task.blocked_by })),
   });
 }
 
 function taskDetailSignature(task) {
   if (!task) return '';
   return JSON.stringify({
-    status: task.status, blocked_by: task.blocked_by, round: task.round, wall: task.wall_clock_ms, active: task.active_ms, waiting: task.waiting_ms,
+    status: task.status, protocol:task.protocol, acceptance:task.acceptance, blocked_by: task.blocked_by, round: task.round, wall: task.wall_clock_ms, active: task.active_ms, waiting: task.waiting_ms,
     untracked: task.untracked_ms, retry: task.retry_count, bottleneck: task.bottleneck_step_id,
     steps: task.steps.map((step) => [step.id, step.status, step.ended_at, step.duration_ms, step.summary]),
   });
@@ -1215,7 +1318,7 @@ function patchFocusedWave() {
 
 function patchLiveView(previousSnapshot) {
   elements.projectName.textContent = snapshot.project.name; root.classList.remove('error-state');
-  renderCurrent(); renderMetrics(); patchTaskList(); patchFocusedWave();
+  renderCurrent(); renderMetrics(); patchWaveSidebar(); patchTaskList(); patchFocusedWave();
   const previousTask = previousSnapshot.tasks.find((task) => task.task_id === selectedTaskId), nextTask = snapshot.tasks.find((task) => task.task_id === selectedTaskId);
   if (taskDetailSignature(previousTask) !== taskDetailSignature(nextTask)) {
     renderDetails();
@@ -1223,12 +1326,12 @@ function patchLiveView(previousSnapshot) {
     if (inline) inline.replaceWith(renderInlineTaskDetail(nextTask));
   }
   if (JSON.stringify(previousSnapshot.diagnostics) !== JSON.stringify(snapshot.diagnostics)) renderDiagnostics();
-  updateFreshness(); elements.runtimeError.hidden = true;
+  updateFreshness(); callAntd('updateLayout', [{ error: null }]);
 }
 
 function tickLiveNumbers() {
   if (!snapshot) return;
-  renderMetrics();
+  renderMetrics(); patchWaveSidebar();
   for (const row of elements.taskList.querySelectorAll('.task-row[data-task-id]')) {
     const task = liveTaskTiming(snapshot.tasks.find((item) => item.task_id === row.dataset.taskId)); if (!task) continue;
     const total = row.querySelector('.task-metrics strong'), detail = row.querySelector('.task-metrics span'), track = row.querySelector('.track-space');
@@ -1246,12 +1349,12 @@ function render() {
   elements.projectName.textContent = snapshot.project.name;
   root.classList.remove('error-state');
   if (!workflowSelectionInitialized) {
-    const activeWave = waveForTask(snapshot.active_task?.task_id);
+    const activeWave = defaultWave();
     if (activeWave) { selectedWaveId = activeWave.wave_id; workflowMode = 'wave'; taskWaveFilter = activeWave.wave_id; }
     workflowSelectionInitialized = true;
   }
-  renderCurrent(); renderWorkflow(); renderMetrics(); renderTasks(); renderDetails(); renderDiagnostics(); updateFreshness();
-  elements.runtimeError.hidden = true;
+  renderCurrent(); renderWaveSidebar(); renderWorkflow(); renderMetrics(); renderTasks(); renderDetails(); renderDiagnostics(); updateFreshness();
+  callAntd('updateLayout', [{ error: null }]);
 }
 
 function relativeTime(timestamp) {
@@ -1269,20 +1372,22 @@ function updateFreshness() {
 }
 
 async function refresh() {
+  const requestedProjectKey = selectedProjectKey;
   try {
     const headers = etag ? { 'If-None-Match': etag } : {};
-    const response = await fetch('/api/snapshot', { headers, cache: 'no-store' });
+    const response = await fetch(`/api/snapshot?project=${encodeURIComponent(requestedProjectKey)}`, { headers, cache: 'no-store' });
+    if (requestedProjectKey !== selectedProjectKey) return;
     lastCheckedAt = Date.now();
-    if (response.status === 304) { lastPollChanged = false; root.classList.remove('error-state'); updateFreshness(); return; }
+    if (response.status === 304) { lastPollChanged = false; root.classList.remove('error-state', 'project-switching'); callAntd('updateLayout', [{ switching: false, error: null }]); updateFreshness(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const nextEtag = response.headers.get('etag');
     const nextSnapshot = await response.json(), previousSnapshot = snapshot;
     if (previousSnapshot && nextSnapshot.revision === previousSnapshot.revision) {
-      etag = nextEtag ?? etag; lastPollChanged = false; root.classList.remove('error-state'); updateFreshness(); return;
+      etag = nextEtag ?? etag; lastPollChanged = false; root.classList.remove('error-state', 'project-switching'); callAntd('updateLayout', [{ switching: false, error: null }]); updateFreshness(); return;
     }
     lastPollChanged = true; etag = nextEtag ?? nextSnapshot.revision;
     lastChangedAt = lastCheckedAt;
-    snapshot = nextSnapshot;
+    snapshot = nextSnapshot; root.classList.remove('project-switching'); callAntd('updateLayout', [{ switching: false, error: null }]);
     try {
       if (previousSnapshot && snapshotStructureSignature(previousSnapshot) === snapshotStructureSignature(nextSnapshot)) patchLiveView(previousSnapshot);
       else render();
@@ -1293,8 +1398,9 @@ async function refresh() {
       throw renderError;
     }
   } catch (error) {
+    if (requestedProjectKey !== selectedProjectKey) return;
+    callAntd('updateLayout', [{ switching: false, error: error.message }]);
     root.classList.add('error-state'); elements.connectionLabel.textContent = '连接异常'; elements.freshness.textContent = '本次刷新失败 · 页面保留上一帧';
-    elements.runtimeError.hidden = false; elements.runtimeErrorMessage.textContent = error.message;
   }
 }
 
@@ -1303,27 +1409,27 @@ window.addEventListener('spec-loop:task-filter-change', (event) => {
 });
 window.addEventListener('spec-loop:task-wave-change', (event) => { taskWaveFilter = event.detail.value; updateTaskControls(); renderTasks(); });
 window.addEventListener('spec-loop:task-sort-change', (event) => { taskSort = event.detail.value; updateTaskControls(); renderTasks(); });
+window.addEventListener('spec-loop:project-change', (event) => { switchProject(event.detail.value); });
 window.addEventListener('spec-loop:locate-current', () => {
   const currentId = snapshot?.active_task?.task_id;
   if (!currentId) return;
   const activeWave = waveForTask(currentId);
   taskWaveFilter = activeWave?.wave_id ?? 'unassigned'; selectedWaveId = activeWave?.wave_id ?? null; workflowMode = activeWave ? 'wave' : 'portfolio';
-  selectedTaskId = currentId; expandedTaskId = null; renderWorkflow(); renderMetrics(); renderTasks(); renderDetails();
+  selectedTaskId = currentId; expandedTaskId = null; renderWorkflow(); renderMetrics(); renderTasks(); renderDetails(); patchWaveSidebar();
   requestAnimationFrame(() => elements.taskList.querySelector(`[data-task-id="${CSS.escape(currentId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
 });
 
 window.addEventListener('spec-loop:wave-change', (event) => { if (event.detail.value) openWave(event.detail.value); else goPortfolio(); });
 window.addEventListener('spec-loop:workflow-back', goPortfolio);
 window.addEventListener('spec-loop:antd-ready', () => {
+  updateProjectControls(false);
   updateWorkflowControls();
   updateTaskControls();
   if (!snapshot) return;
-  delete elements.currentMeta.dataset.signature;
-  delete elements.runtimeStatus.dataset.kind;
-  delete elements.runtimeStatus.dataset.label;
   render();
 });
 
 setInterval(refresh, 2000);
+setInterval(loadProjects, 10_000);
 setInterval(() => { tickElapsed(); tickLiveNumbers(); updateFreshness(); }, 1000);
-refresh();
+loadProjects().then(refresh);

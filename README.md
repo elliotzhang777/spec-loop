@@ -18,10 +18,11 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 - Phase 2：Attempt、Ledger、Budget、Guard、事实 Summary 和失败恢复。
 - Phase 3：Project Loop、受控 worktree 执行、安全加固、故障恢复和完整 Harness Evidence 闭环已完成正式 Heavy 验收。
 - Phase 4（旁路预览）：P/M/V/R v2 验收内核支持批准契约、稳定 HEAD、独立 V/R、共享返工预算、Conflict Record 与 Review Inbox；旧 v1 Task 不自动迁移。
+- Phase 4（批次实施）：P4-B1 已启动；P4-B2～B4 已按最新版架构拆为 TASK-031～037，但受依赖和正式验证授权约束，尚未宣称交付。
 - Web/UI：支持目标工程本地 Playwright 功能 Gate，以及绑定 Round、revision 与截图哈希的人工视觉 Review。
 - Execution View（预览）：从项目 `.spec-loop/` 重建当前 Task/步骤、历史时间线、主动/等待/未记录耗时和最长步骤；本机只读页面不会成为第二状态源。
 
-当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 3 不包含后台 Scheduling、自动多 Round、自动 push/merge 或 Connector 写入。
+当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 4 已形成 P/M/V/R 受管 invocation、report-only Scheduler、lease/fencing/资源控制和 Spring Boot T2 Gate Planner 的待验证候选；自动 push/merge/deploy 仍不在授权范围。
 
 ## 工程结构
 
@@ -31,6 +32,7 @@ spec-loop/
 ├── test/                  自动化、对抗和恢复测试
 ├── assets/                运行时随包资产
 │   └── target-spec/        目标工程规格模板
+├── products/              各目标工程的本机最终成品统一出口
 ├── spec/                  产品、架构、工单和交付事实源
 ├── AGENT.md               协作规则
 ├── package.json           Node.js 工程配置
@@ -38,7 +40,7 @@ spec-loop/
 └── tsconfig.json          TypeScript 构建配置
 ```
 
-`dist/`、`node_modules/`、`.spec-loop/` 和 `.spec-loop-*-tx/` 是本地生成或运行目录，不是版本化的工程结构。历史测试输出和 Dogfood 按 Phase 归档在 [`spec/05-delivery/`](spec/05-delivery/)，不再占用根目录。
+`dist/`、`node_modules/`、`.spec-loop/` 和 `.spec-loop-*-tx/` 是本地生成或运行目录，不是版本化的工程结构。目标工程可安装/可分发的最终二进制统一放入 [`products/`](products/)，其内容默认不提交 Git。历史测试输出和 Dogfood 按 Phase 归档在 [`spec/05-delivery/`](spec/05-delivery/)，不再占用根目录。
 
 ## 安装与构建
 
@@ -100,6 +102,20 @@ spec-loop acceptance schedule projects/demo --json
 
 M 返工必须产生新 HEAD，V/R 重试必须产生新 Evidence。实现与证据返工共享最多 2 次预算；工具/环境重试单独计数。预算耗尽、重复失败、规格歧义或高风险会进入 `waiting_human_review`，并写入 `.spec-loop/conflicts/` 与可重建的 `.spec-loop/REVIEW_INBOX.json`，不能生成 Candidate。
 
+真实 Codex 角色在首次运行或 Provider 语义身份变化后，会先执行最长 20 秒的同参数 runtime probe；probe 同时验证 UTF-8 locale、sandbox 和独立 Evidence 写区，并按二进制、版本、参数、角色和环境指纹缓存。运行中的 JSON usage 会持续计入角色/波次预算，达到 Token 或费用上限时终止完整进程组。Provider 可在独立 Evidence 目录写入 `RESULT.json`：合法结果由 Controller 自动摄入；缺失结果明确显示为 `awaiting_ingestion`，不会继续显示成运行中。
+
+Scheduler Supervisor 和产物维护入口：
+
+```bash
+spec-loop scheduler control supervisor-start projects/demo --json
+spec-loop scheduler control supervisor-status projects/demo --json
+spec-loop scheduler control supervisor-launchd-plan projects/demo --json
+spec-loop maintenance retention-plan projects/demo --json
+spec-loop maintenance archive-evidence projects/demo TASK-CHECKOUT-1 --json
+```
+
+`supervisor-launchd-plan` 只生成可审核的 macOS 配置和命令，不会自动安装；Evidence 归档排除可重建的候选快照并生成 SHA-256 manifest。npm/Maven 下载统一复用 Project 级 `.spec-loop/shared-cache/`，不再复制到每个 invocation。
+
 当前运行中的 v1 Task 继续使用 `TASK_STATE.md / VERIFY.md`；安装或构建新版本不会修改其状态，也不会自动重启已有 `view` 进程。
 
 ## 执行可视化（预览）
@@ -111,7 +127,7 @@ node dist/cli.js snapshot projects/demo --json
 node dist/cli.js view projects/demo
 ```
 
-`view` 只监听 `127.0.0.1`。升级后产生的步骤由 `.spec-loop/EXECUTION_EVENTS.jsonl` 提供精确起止时间；旧项目已有 Gate 的 `duration_ms` 继续显示为精确值，无法可靠还原的历史时间明确显示为“未知”，不会使用文件修改时间猜测。
+`view` 只监听 `127.0.0.1`。Dashboard Snapshot 硬限制为 256 KiB，每个 Task 只携带最近 20 个步骤；完整事实仍保存在 Event Log 和 Evidence 中。运行角色显示心跳、熔断剩余时间、实时 Token 和结果摄入状态。历史任务、当前运行、从未启动和仅有规格的 Task 使用不同标记；旧项目已有 Gate 的 `duration_ms` 继续显示为精确值，无法可靠还原的历史时间明确显示为“未记录”，不会使用文件修改时间猜测。
 
 Round 内建议把活动拆成可计时步骤：
 

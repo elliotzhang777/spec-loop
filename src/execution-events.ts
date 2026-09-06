@@ -8,6 +8,7 @@ export const executionStepTypeSchema = z.enum([
   'task.plan', 'task.attempt', 'round.work',
   'work.reproduce', 'work.analyze', 'work.change',
   'harness.prepare', 'harness.execute', 'harness.collect', 'harness.report',
+  'role.m', 'role.v', 'role.r', 'acceptance.plan', 'acceptance.route', 'acceptance.candidate',
   'gate.command', 'gate.playwright', 'review.visual', 'task.verify', 'task.deliver', 'wait.user',
 ]);
 export const executionEventKindSchema = z.enum([
@@ -25,7 +26,7 @@ const safeRefSchema = z.string().trim().min(1).max(500).refine((value) => {
 export const executionEventSchema = z.object({
   schema_version: z.literal(1), sequence: z.number().int().positive(), event_id: z.string().uuid(),
   step_run_id: z.string().uuid().nullable(), project_id: z.string().regex(/^PROJ-[A-Z0-9-]+$/),
-  task_id: z.string().min(1).nullable(), round: z.number().int().nonnegative().nullable(), run_id: z.string().uuid().nullable(),
+  task_id: z.string().min(1).nullable(), round: z.number().int().nonnegative().nullable(), run_id: z.string().min(1).max(160).nullable(),
   owner_pid: z.number().int().positive().nullable().optional(),
   kind: executionEventKindSchema, step_type: executionStepTypeSchema.nullable(),
   label: z.string().trim().min(3).max(120), summary: z.string().trim().min(3).max(500),
@@ -193,6 +194,8 @@ export async function finishExecutionStep(projectRoot: string, start: ExecutionE
   outcome: ExecutionOutcome; summary?: string; refs?: string[]; occurredAt?: Date;
 }): Promise<ExecutionEvent> {
   if (!start.step_run_id || !start.task_id || start.round === null || !start.step_type) throw new Error('cannot finish an annotation event');
+  const existing=(await readExecutionEvents(projectRoot)).find((event)=>event.step_run_id===start.step_run_id&&['step_succeeded','step_failed','step_interrupted','wait_ended'].includes(event.kind));
+  if(existing){if(existing.outcome==='cancelled')return existing;throw new Error('execution step already has a terminal event')}
   const kind = start.kind === 'wait_started' ? 'wait_ended'
     : input.outcome === 'success' ? 'step_succeeded'
       : input.outcome === 'failure' ? 'step_failed' : 'step_interrupted';
@@ -207,6 +210,48 @@ export async function annotateExecution(projectRoot: string, input: AnnotationIn
   return append(projectRoot, {
     step_run_id: null, task_id: input.taskId, round: input.round, run_id: null, owner_pid: null, kind: 'annotation', step_type: null,
     label: input.label, summary: input.summary, occurred_at: (input.occurredAt ?? new Date()).toISOString(), outcome: null, refs: input.refs ?? [],
+  });
+}
+
+export async function cancelTaskExecution(projectRoot: string, input: {
+  taskId: string; round: number; runId?: string | null; summary?: string; refs?: string[]; occurredAt?: Date;
+}): Promise<{ cancellation: ExecutionEvent; closed: ExecutionEvent[]; alreadyCancelled: boolean }> {
+  assertNoSecrets(`${input.summary ?? ''}\n${(input.refs ?? []).join('\n')}`, 'execution cancellation');
+  return withEventLock(projectRoot, async () => {
+    const id = await projectId(projectRoot), existing = await readExecutionEvents(projectRoot);
+    const prior = existing.find((event) => event.kind === 'annotation' && event.task_id === input.taskId && event.label === 'Task 已取消');
+    if (prior) return { cancellation: prior, closed: [], alreadyCancelled: true };
+    const additions:ExecutionEvent[] = [];
+    let previous = existing.at(-1)?.event_hash ?? null, sequence = existing.length + 1;
+    if (!existing.length) {
+      const baseline = createEvent({
+        step_run_id: null, project_id: id, task_id: null, round: null, run_id: null, owner_pid: null, kind: 'annotation', step_type: null,
+        label: 'Observability baseline', summary: 'Execution timing starts at this project event baseline; earlier facts retain their original precision.',
+        occurred_at: (input.occurredAt ?? new Date()).toISOString(), outcome: null, refs: [],
+      }, sequence++, previous);
+      additions.push(baseline); previous = baseline.event_hash;
+    }
+    const occurredAt = (input.occurredAt ?? new Date()).toISOString();
+    const cancellation = createEvent({
+      step_run_id: null, project_id: id, task_id: input.taskId, round: input.round, run_id: null, owner_pid: null,
+      kind: 'annotation', step_type: null, label: 'Task 已取消', summary: input.summary ?? 'Controller 已请求停止 Task，并冻结运行时间。',
+      occurred_at: occurredAt, outcome: null, refs: input.refs ?? [],
+    }, sequence++, previous);
+    additions.push(cancellation); previous = cancellation.event_hash;
+    const terminals = new Set(existing.filter((event) => ['step_succeeded','step_failed','step_interrupted','wait_ended'].includes(event.kind)).map((event) => event.step_run_id));
+    const starts = existing.filter((event) => (event.kind === 'step_started' || event.kind === 'wait_started') && event.task_id === input.taskId && !terminals.has(event.step_run_id));
+    const closed:ExecutionEvent[] = [];
+    for (const start of starts) {
+      const terminal = createEvent({
+        step_run_id:start.step_run_id,project_id:id,task_id:start.task_id,round:start.round,run_id:start.run_id,owner_pid:start.owner_pid??null,
+        kind:start.kind==='wait_started'?'wait_ended':'step_interrupted',step_type:start.step_type,label:start.label,
+        summary:'Task 已取消；该步骤由停止闭环终止。',occurred_at:occurredAt,outcome:'cancelled',refs:start.refs,
+      }, sequence++, previous);
+      additions.push(terminal); closed.push(terminal); previous = terminal.event_hash;
+    }
+    const events=[...existing,...additions];validateEventSequence(events);
+    await atomicWriteMany(projectRoot,[{file:eventFile(projectRoot),content:`${events.map((event)=>JSON.stringify(event)).join('\n')}\n`}]);
+    return { cancellation, closed, alreadyCancelled:false };
   });
 }
 

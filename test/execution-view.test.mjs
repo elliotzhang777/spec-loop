@@ -7,13 +7,16 @@ import { Script } from 'node:vm'
 
 import { cli, fillContracts, tempRoot } from './helpers.mjs'
 import {
+  annotateExecution,
+  cancelTaskExecution,
   finishExecutionStep,
   readExecutionEvents,
   startExecutionStep,
 } from '../dist/execution-events.js'
+import { cancelTask } from '../dist/task.js'
 import { finishWorkActivity, runWorkCommand, startWorkActivity } from '../dist/work-activity.js'
-import { buildExecutionSnapshot } from '../dist/execution-view.js'
-import { closeExecutionViewServer, startExecutionViewServer } from '../dist/execution-view-server.js'
+import { buildExecutionSnapshot, MAX_EXECUTION_SNAPSHOT_BYTES } from '../dist/execution-view.js'
+import { closeExecutionViewServer, executionViewStatus, startExecutionViewServer, startManagedExecutionView, stopManagedExecutionView } from '../dist/execution-view-server.js'
 
 async function projectFixture(name = 'execution-view-') {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
@@ -69,6 +72,43 @@ test('execution events produce exact active, waiting, wall-clock and current ela
   assert.equal(events[0].kind, 'annotation')
   assert.equal(events.at(-1).kind, 'step_started')
   assert.equal(events.every((event, index) => event.sequence === index + 1), true)
+})
+
+test('cancelled tasks close active steps, freeze elapsed time, and bound Dashboard history', async () => {
+  const { root, taskRoot } = await projectFixture('execution-view-cancelled-')
+  await fillContracts(taskRoot, { id: 'TASK-VIEW', title: 'Measure execution', level: 'standard' })
+  assert.equal(cli(['plan', taskRoot]).code, 0)
+  assert.equal(cli(['round', taskRoot]).code, 0)
+  const startedAt = new Date('2026-09-06T00:00:00.000Z')
+  await startExecutionStep(root, { taskId: 'TASK-VIEW', round: 1, stepType: 'harness.execute', label: 'Agent 实现', summary: 'active provider work', occurredAt: startedAt, detached: true })
+  for (let index = 0; index < 205; index++) await annotateExecution(root, { taskId: 'TASK-VIEW', round: 1, label: `进度 ${index}`, summary: `bounded dashboard event ${index}`, occurredAt: new Date(startedAt.getTime() + index + 1) })
+  const cancelledAt = new Date(Date.now() + 1_000)
+  await cancelTaskExecution(root, { taskId: 'TASK-VIEW', round: 1, summary: 'user stopped task', occurredAt: cancelledAt })
+  await cancelTask(taskRoot, cancelledAt)
+  const first = await buildExecutionSnapshot(root, new Date(startedAt.getTime() + 20_000))
+  const later = await buildExecutionSnapshot(root, new Date(startedAt.getTime() + 3_620_000))
+  const task = first.tasks.find(item => item.task_id === 'TASK-VIEW')
+  assert.equal(task.status, 'cancelled')
+  assert.equal(task.wall_clock_ms, later.tasks.find(item => item.task_id === 'TASK-VIEW').wall_clock_ms)
+  assert.equal(task.steps.length, 20)
+  assert.match(task.diagnostics.join(' '), /最近 20 个步骤/)
+  assert.equal(first.active_task, null)
+  assert.ok(task.steps.some(step => step.status === 'cancelled'))
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) <= MAX_EXECUTION_SNAPSHOT_BYTES)
+})
+
+test('Dashboard distinguishes historical records and exposes bounded live role heartbeat, deadline and usage', async () => {
+  const { root, taskRoot } = await projectFixture('execution-view-runtime-')
+  await fillContracts(taskRoot, { id: 'TASK-VIEW', title: 'Measure execution', level: 'standard' })
+  assert.equal(cli(['plan', taskRoot]).code, 0); assert.equal(cli(['round', taskRoot]).code, 0)
+  const invocationId = 'INV-TASK-VIEW-V-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', base = path.join(root, '.spec-loop', 'output', 'TASK-VIEW-acceptance-v2', 'invocations', invocationId), now = new Date('2026-09-06T08:00:00.000Z')
+  await mkdir(base, { recursive: true })
+  await writeFile(path.join(base, 'INVOCATION.json'), `${JSON.stringify({ invocation_id: invocationId, role: 'V', status: 'running', result_status: 'none', created_at: new Date(now.getTime() - 5_000).toISOString(), token_limit: 1000, usage: { total_tokens: 120 } }, null, 2)}\n`)
+  await writeFile(path.join(base, 'HEARTBEAT.json'), `${JSON.stringify({ heartbeat_at: new Date(now.getTime() - 2_000).toISOString(), deadline_at: new Date(now.getTime() + 30_000).toISOString(), usage: { total_tokens: 120 } }, null, 2)}\n`)
+  const snapshot = await buildExecutionSnapshot(root, now), task = snapshot.tasks.find(item => item.task_id === 'TASK-VIEW')
+  assert.equal(task.record_kind, 'current_run')
+  assert.deepEqual(task.runtime, { role: 'V', invocation_id: invocationId, state: 'running', heartbeat_at: '2026-09-06T07:59:58.000Z', heartbeat_age_ms: 2000, deadline_at: '2026-09-06T08:00:30.000Z', remaining_ms: 30000, usage_total_tokens: 120, token_limit: 1000 })
+  assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) <= MAX_EXECUTION_SNAPSHOT_BYTES)
 })
 
 test('an open Round envelope does not become continuous active execution or a live step', async () => {
@@ -370,6 +410,9 @@ test('concurrent writers keep a continuous hash chain and dead bounded steps bec
 
 test('local execution view is loopback-only, read-only and supports stable ETags', async () => {
   const { root } = await projectFixture('execution-view-http-')
+  const childRoot = path.join(root, 'projects', 'child-project'), childRepository = path.join(childRoot, 'repo')
+  await mkdir(childRepository, { recursive: true })
+  assert.equal(cli(['project', 'init', childRoot, '--id', 'PROJ-CHILD', '--name', 'Child Project', '--repository', childRepository]).code, 0)
   await startExecutionStep(root, {
     taskId: 'TASK-VIEW', round: 1, stepType: 'harness.execute', label: 'Agent 实现', summary: 'Execute the approved local step',
   })
@@ -381,16 +424,23 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     const page = await fetch(url)
     assert.equal(page.status, 200)
     const html = await page.text()
-    assert.match(html, /正在定位当前波次/)
-    assert.match(html, /当前波次 Task 执行图/)
-    assert.match(html, /id="workflow-controls"/)
-    assert.match(html, /id="task-controls"/)
+    const controlsSource = await readFile(new URL('../assets/execution-view/controls.jsx', import.meta.url), 'utf8')
+    assert.match(html, /id="execution-view"/)
+    assert.match(controlsSource, /正在定位当前波次/)
+    assert.match(controlsSource, /当前波次 Task 执行图/)
+    assert.match(controlsSource, /id="workflow-controls"/)
+    assert.match(controlsSource, /id="task-controls"/)
+    assert.match(controlsSource, /id="project-controls"/)
+    assert.match(controlsSource, /id="wave-list"/)
+    assert.match(controlsSource, /完整波次明细/)
+    assert.match(controlsSource, /AIRFLOW OVERVIEW/)
+    assert.match(controlsSource, /id="global-overview-control"/)
     assert.match(html, /\/controls\.js/)
     assert.doesNotMatch(html, /<(?:select|button)\b/)
-    assert.match(html, /生命周期构成/)
-    assert.match(html, /生命周期跨度/)
-    assert.match(html, /不能相加为工时/)
-    assert.match(html, /未归因 \/ 空闲/)
+    assert.match(controlsSource, /生命周期构成/)
+    assert.match(controlsSource, /生命周期跨度/)
+    assert.match(controlsSource, /不能相加为工时/)
+    assert.match(controlsSource, /未归因 \/ 空闲/)
     assert.match(page.headers.get('content-security-policy'), /default-src 'none'/)
     assert.match(page.headers.get('content-security-policy'), /style-src 'self' 'nonce-/)
     const app = await (await fetch(new URL('/app.js', url))).text()
@@ -402,6 +452,8 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     assert.match(app, /Task 内部步骤有向无环执行图/)
     assert.match(app, /renderPortfolioWorkflow/)
     assert.match(app, /renderFocusedWaveWorkflow/)
+    assert.match(app, /renderWaveSidebar/)
+    assert.match(app, /patchWaveSidebar/)
     assert.match(app, /波次执行图/)
     assert.match(app, /reducedWaveGraph/)
     assert.match(app, /elkWaveLayout/)
@@ -424,6 +476,8 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     assert.match(app, /workflow-breadcrumb/)
     assert.match(app, /本次刷新失败/)
     assert.match(app, /function callAntd/)
+    assert.match(app, /label: project\.name/)
+    assert.doesNotMatch(app, /label: `\$\{project\.name\} · \$\{project\.project_id\}`/)
     assert.match(app, /spec-loop:antd-ready/)
     assert.doesNotMatch(app, /window\.ExecutionAntd\.(?:mount|update)/)
     const style = await (await fetch(new URL('/style.css', url))).text()
@@ -431,6 +485,13 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     assert.match(style, /@keyframes dag-flow/)
     assert.match(style, /task-node/)
     assert.match(style, /wave-lane/)
+    assert.match(style, /antd-wave-item/)
+    assert.match(style, /antd-global-overview/)
+    assert.match(app, /updateWaveMenu/)
+    assert.match(app, /globalTaskStatusSummary/)
+    assert.match(app, /function defaultWave/)
+    assert.match(style, /antd-global-grid/)
+    assert.match(style, /execution-shell/)
     assert.match(style, /inline-task-detail/)
     assert.match(style, /lane-arrow-head/)
     assert.match(style, /lane-edge\.highlight/)
@@ -438,16 +499,38 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     assert.doesNotMatch(style, /\.segmented button/)
     const controls = await (await fetch(new URL('/controls.js', url))).text()
     assert.match(controls, /ExecutionAntd/)
-    const controlsSource = await readFile(new URL('../assets/execution-view/controls.jsx', import.meta.url), 'utf8')
     assert.match(controlsSource, /from 'antd'/)
+    assert.match(controlsSource, /当前执行位置/)
+    assert.doesNotMatch(controlsSource, /state\.projectId/)
     assert.match(controlsSource, /task-filter-change/)
+    assert.match(controlsSource, /project-change/)
     assert.match(controlsSource, /<Select/)
     assert.match(controlsSource, /<Segmented/)
-    assert.ok(controlsSource.indexOf('window.ExecutionAntd =') < controlsSource.indexOf("mountStatic('workflow-controls'"))
+    assert.match(controlsSource, /<Card/)
+    assert.match(controlsSource, /<Menu/)
+    assert.match(controlsSource, /<Progress/)
+    assert.match(controlsSource, /<Statistic/)
+    assert.match(controlsSource, /<Layout/)
+    assert.match(controlsSource, /<Sider/)
+    assert.match(controlsSource, /<Timeline/)
+    assert.match(controlsSource, /<Descriptions/)
+    assert.match(controlsSource, /<Spin/)
+    assert.ok(controlsSource.indexOf('window.ExecutionAntd =') < controlsSource.indexOf('flushSync(() => executionViewRoot.render'))
     assert.equal((await fetch(new URL('/controls.css', url))).status, 200)
     const elk = await fetch(new URL('/vendor/elk.bundled.js', url))
     assert.equal(elk.status, 200)
     assert.match(elk.headers.get('content-type'), /javascript/)
+
+    const catalogResponse = await fetch(new URL('/api/projects', url))
+    assert.equal(catalogResponse.status, 200)
+    const catalog = await catalogResponse.json()
+    assert.equal(catalog.default_project, 'root')
+    assert.deepEqual(catalog.projects.map((project) => project.key), ['root', 'project:child-project'])
+    assert.deepEqual(catalog.projects.map((project) => project.project_id), ['PROJ-VIEW', 'PROJ-CHILD'])
+    const childSnapshot = await (await fetch(new URL('/api/snapshot?project=project%3Achild-project', url))).json()
+    assert.equal(childSnapshot.project.project_id, 'PROJ-CHILD')
+    assert.equal((await fetch(new URL('/api/snapshot?project=..%2Fsecret', url))).status, 404)
+    assert.equal((await fetch(new URL('/api/projects?path=secret', url))).status, 400)
 
     const first = await fetch(new URL('/api/snapshot', url))
     assert.equal(first.status, 200)
@@ -459,5 +542,22 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     assert.equal((await fetch(new URL('/..%2f..%2fetc%2fpasswd', url))).status, 404)
   } finally {
     await closeExecutionViewServer(server)
+  }
+})
+
+test('background execution view lifecycle is idempotent and rejects stale process markers', async () => {
+  const { root } = await projectFixture('execution-view-lifecycle-')
+  let marker
+  try {
+    marker = await startManagedExecutionView(root)
+    assert.match(marker.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
+    const reused = await startManagedExecutionView(root)
+    assert.equal(reused.pid, marker.pid)
+    assert.equal(reused.process_started_at, marker.process_started_at)
+    assert.equal((await executionViewStatus(root)).running, true)
+    assert.equal((await stopManagedExecutionView(root)).stopped, true)
+    assert.equal((await executionViewStatus(root)).running, false)
+  } finally {
+    if ((await executionViewStatus(root).catch(() => ({ running: false }))).running) await stopManagedExecutionView(root)
   }
 })

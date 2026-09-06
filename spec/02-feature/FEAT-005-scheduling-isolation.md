@@ -1,9 +1,9 @@
 # FEAT-005：Scheduling、隔离与安全控制
 
-- 状态：草稿
-- 负责人：待定
+- 状态：已批准
+- 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-08-04
+- 最后更新：2026-09-04
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 4
 
@@ -36,13 +36,15 @@
 
 | 类型 | 文档 | 状态 |
 |---|---|---|
-| Design | [DES-005 Scheduling、Worktree 与资源协调](../03-design/DES-005-scheduling-worktree-coordination.md) | 草稿 |
-| Task | 待 Phase 4 进入条件满足 | 草稿 |
+| Design | [DES-005 Scheduling、Worktree 与资源协调](../03-design/DES-005-scheduling-worktree-coordination.md) | 已批准 |
+| Task | [TASK-034 Report-only Scheduler](../04-task/TASK-034-report-only-scheduler.md) | 已批准 |
+| Task | [TASK-035 Lease、资源协调与 Pause/Kill](../04-task/TASK-035-scheduler-leases-controls.md) | 已批准 |
+| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
 
 ## 实际交付
 
-- 已实现行为：无。
-- 验证结论：待验证。
+- 已实现行为：已有 TASK-030 的 Ready/blocked、Conflict/Inbox 调度投影；真实 Scheduler、lease 和 Worker 控制尚未实现。
+- 验证结论：TASK-034/035 已按 P/M/V/R v2 批准，等待前置依赖。
 
 ## 变更记录
 
@@ -50,3 +52,4 @@
 |---|---|---|---|
 | 2026-07-12 | 融合 Scheduling、多任务和安全控制 | 最终 Roadmap 定稿 | - |
 | 2026-08-04 | 将飞书正式机器人下沉为独立 Feature | 通用 Connector 规则不足以表达远程身份、卡片确认和恢复契约 | TASK-021～026 |
+| 2026-09-04 | 批准 report-only 与受控执行两段实施 | 先证明报告质量，再开放 lease 约束下的自动动作 | TASK-034、TASK-035、TASK-037 |

@@ -4,15 +4,23 @@
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-08-20
+- 最后更新：2026-09-04
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 依赖工单：TASK-027
+- 协议版本：v1 在途兼容收口；不得中途迁移
+- 所属批次：P4-B1
 
 ## 目标
 
 交付 `snapshot` 与 `view` 命令，让用户通过只读本地页面看到当前 Task/步骤、步骤目的、实时 elapsed、历史 Task 时间泳道和可展开的步骤/Evidence 明细。
+
+## 与 P/M/V/R v2 的关系
+
+- 本工单已在 v1 Round 1 开始，继续沿用原协议并保留当前未提交实现；不创建影子 v2 Run，不重置 Round。
+- 页面本轮只完成现有 v1 Task/Harness 与多工程观察面；P/M/V/R、Conflict、Review Inbox 和 Candidate 原生展示由 TASK-033 实现。
+- TASK-029 将以 v2 Heavy Contract 对 TASK-027/028 的最终产物执行兼容、安全、性能和浏览器组合验收。
 
 ## 工作范围
 
@@ -25,7 +33,8 @@
 - 打包进 npm 产物的自包含 HTML/CSS/JS；
 - 首屏当前工作、Task 时间泳道、步骤详情、diagnostics 和窄屏布局；
 - ETag 条件刷新、前端 current elapsed 和新增事件增量可见；
-- H1～H15 单页折叠主链、横向子 Task DAG、传递约简和原位 Task 详情；
+- H1～H15 左侧固定顺序明细、右侧横向子 Task DAG、传递约简和 Task 检查器；
+- `projects/` 本机工程集合的只读枚举、工程切换和逐工程 Snapshot；
 - 定向单元、HTTP、Playwright 与可访问性测试。
 
 ### 不包含
@@ -43,7 +52,7 @@
 4. 页面只能通过 textContent 或等价安全方式渲染项目数据，静态资源不得依赖公网 CDN。
 5. Artifact 入口只允许设计白名单类型和 Project 内逻辑引用；首版可只展示 metadata，不要求直接打开原始文件。
 6. UI 必须可用键盘完成 Task 选择、步骤展开和 Evidence 定位；状态同时使用文字/图形，不只依赖颜色。
-7. Select、Button、Segmented、Tag、Badge、Tooltip、Breadcrumb、Empty、Alert 等通用控件必须直接使用 Ant Design；H/Task 数据卡片和 DAG/SVG 节点保留领域可视化语义，不伪装成通用按钮皮肤。
+7. Layout、Header、Sider、Content、Select、Button、Segmented、Tag、Badge、Tooltip、Breadcrumb、Empty、Alert、Card、Statistic、Progress、Menu、Timeline、Descriptions、Collapse、Spin 等通用页面组件必须直接使用 Ant Design；Task 数据行和 DAG/SVG 节点保留领域可视化语义，不伪装成通用按钮皮肤。
 
 ## 验收标准
 
@@ -59,7 +68,10 @@
 - [x] AC-9：默认展示尺寸一致的 H 主链；每次原位展开一个 H，并行 Task 严格同列，冗余祖先依赖边不绘制，Task 详情可原位展开和收起。
 - [x] AC-10：Task 详情提供结论、互斥耗时构成、Round 分层时间线、覆盖率、失败/中断次数、优化提示和折叠数据来源。
 - [x] AC-11：Task 节点支持固定尺寸双行标题与完整悬停文本；完成态中性化；筛选不破坏 DAG 拓扑，并支持总耗时排序与当前任务定位。
-- [x] AC-12：所有通用操作控件统一使用本地打包的 Ant Design 6 组件，静态页面不保留原生 `select` 或手写 Segmented，CSP 支持组件动态样式且不依赖 CDN。
+- [x] AC-12：页面 Layout、通用操作控件、全局/波次统计卡、波次导航和步骤检查器统一使用本地打包的 Ant Design 6 组件，静态页面不保留原生 `select`、手写 Segmented、手写波次按钮或手写步骤 Timeline，CSP 支持组件动态样式且不依赖 CDN。
+- [ ] AC-13：桌面端左侧按 H 顺序固定展示全部波次名称、状态、Task 完成度和耗时；选中波次后右侧只更新该波次概览、Task DAG/列表及当前 Task 检查器，当前运行波次与浏览波次均清晰可辨。
+- [ ] AC-14：右侧上方固定展示全局 Airflow 总览，包括 Task 总数、各生命周期状态数量/占比、波次完成情况和当前执行位置；下方始终展示一个具体波次，首次打开默认选择当前运行波次，切换波次不重绘或替换全局总览结构。
+- [ ] AC-15：页面使用 Ant Design Select 枚举宿主 Project 与 `projects/` 下全部合法直接子工程；切换时只允许服务端工程清单中的 opaque key，保留上一帧直至新 Snapshot 到达，并在切换后重置波次/Task 浏览状态与 ETag。
 
 ## 验证计划
 
@@ -69,7 +81,8 @@
 | AC-2、AC-4 | Playwright 当前步骤和动态追加路径 | 首屏明确，elapsed/刷新正确 |
 | AC-5 | HTTP 与文件边界对抗测试 | 回环只读、无 XSS/Secret/任意文件 |
 | AC-6 | 桌面与 390px Playwright + REVIEW-1 | 功能通过且视觉获用户批准 |
-| AC-12 | 静态资源契约测试 + Playwright 键盘/弹层路径 | AntD 资源本地可用，无原生 select/手写 Segmented，弹层与焦点行为正确 |
+| AC-12 | 静态资源契约测试 + Playwright 键盘/弹层路径 | AntD 资源本地可用，无原生 select/手写 Segmented/手写波次按钮，全局 Card 与波次 Menu 组件契约完整 |
+| AC-15 | HTTP 工程目录 fixture + 前端静态契约 | 清单完整、子工程 Snapshot 可切换、非法 key/路径参数拒绝、选择器使用 AntD |
 
 ## 验证范围
 
@@ -94,7 +107,7 @@
 
 - 完成日期：核心实现完成，待视觉与正式验收关闭
 - 变更文件/交付物：`src/execution-view.ts`、`src/execution-view-server.ts`、`assets/execution-view/*`、`snapshot`/`view` CLI 与定向测试
-- 关键实现与决策：每次读取 `.spec-loop` 事实重建，无 snapshot 数据库；并集计算主动/等待时间；历史缺口显式为 unknown；页面使用稳定 revision 和结构签名区分事实变化，当前 elapsed 本地递增并原位更新数字/进度；通用控件采用本地打包的 Ant Design 6，DAG 继续由 ELK + SVG 表达领域语义。
+- 关键实现与决策：每次读取 `.spec-loop` 事实重建，无 snapshot 数据库；并集计算主动/等待时间；历史缺口显式为 unknown；页面使用稳定 revision 和结构签名区分事实变化，当前 elapsed 本地递增并原位更新数字/进度；页面骨架采用 AntD Layout，全局/波次总览采用 Card/Statistic/Progress，波次导航采用 Menu/Progress，步骤检查器采用 Timeline/Descriptions，工程切换采用保留上一帧的 Spin 遮罩，DAG 继续由 ELK + SVG 表达领域语义。
 - 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；真实 Playwright 和截图 Review 未在本轮执行。
 - 遗留风险：当前环境没有可用浏览器会话，尚未完成桌面/390px 视觉确认、键盘路径与大规模性能 Gate，工单不关闭。
 
@@ -104,6 +117,8 @@
 |---|---|---|---|---|
 | 2026-08-12 | Codex | Node 22，本地定向测试 | 通过（非正式关闭） | 相关 39 项测试通过；HTTP 覆盖 loopback、GET/HEAD、ETag、CSP、非法方法/路径，静态 JS 通过语法和安全渲染检查 |
 | 2026-08-20 | Codex | Node 22，本地定向反馈检查 | 通过（非正式关闭） | `npm run build`、`node --check assets/execution-view/app.js`、`node --test test/execution-view.test.mjs`；10/10 通过，覆盖稳定 revision、增量 patch、AntD 静态资源与 CSP |
+| 2026-08-31 | Codex | Node 22，本地 AntD 页面组件回归 | 通过（待视觉 Review） | `npm run build:execution-view`、`node --check assets/execution-view/app.js`、`node --test test/execution-view.test.mjs`；14/14 通过，覆盖 AntD Card/Menu/Progress/Statistic、局部更新、工程切换与 CSP |
+| 2026-09-04 | Codex/M（快速反馈） | Node 22，P4-B1 | 构建与 14/14 通过（非正式 Evidence） | 页面服务可在 `127.0.0.1` 启动；当前会话无可连接浏览器，未执行或冒充视觉 Review |
 
 ## 关闭检查
 
@@ -134,3 +149,10 @@
 | 2026-08-15 | 重构 Task 耗时分析面板 | 增加结论区、互斥耗时构成、Round 分层时间线、确定性优化提示、诊断筛选和中性完成态 |
 | 2026-08-20 | 改为稳定结构的局部实时更新 | 用户反馈轮询时整页元素闪烁；时钟变化只原位更新数字、进度条和节点耗时，结构变化才重绘 |
 | 2026-08-20 | 通用交互控件统一为 Ant Design 6 | 用户指出原生下拉和手写组件视觉、弹层与交互不一致；保留领域 DAG，替换通用控件 |
+| 2026-08-31 | 改为左侧完整波次目录与右侧主从工作区 | 用户要求同时掌握全局 H 顺序、当前波次状态/耗时及全部子 Task，避免顶部轨道拥挤和右侧重复铺开全部波次 |
+| 2026-08-31 | 固定全局 Airflow 总览并默认下钻当前波次 | 用户要求右侧上方持续展示全部 Task 状态与波次总况，下方只承载所选波次的 DAG、Task 和详情 |
+| 2026-08-31 | 增加本机多工程目录与页面工程切换 | 用户将工程统一迁入 `spec-loop/projects`，要求引擎页面枚举并切换所有工程 |
+| 2026-08-31 | 全局总览和左侧波次导航改用 Ant Design 页面组件 | 用户反馈只替换下拉框仍然不够统一；移除手写统计卡和波次按钮，并保持数字/进度的局部状态更新 |
+| 2026-08-31 | 完成第二轮 Ant Design 页面统一和可读性调整 | 页面骨架、波次指标、步骤检查器改用 Layout/Statistic/Timeline/Descriptions；辅助字号提升，当前波次自动定位，工程切换增加 Spin 保底状态 |
+| 2026-09-04 | 按最新版架构定义兼容收口 | 保持 v1 在途任务不迁移；v2 角色观察面下沉到 TASK-033，最终组合验收由 TASK-029 承担 |
+| 2026-09-04 | 启动 P4-B1 快速反馈检查 | 当前未提交实现构建和定向测试通过；真实浏览器反馈项保持待办 |

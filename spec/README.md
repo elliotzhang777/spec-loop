@@ -51,10 +51,11 @@ spec-loop/
 ├── src/                   产品源码
 ├── test/                  自动化、对抗和恢复测试
 ├── assets/                运行时随包资产
+├── products/              目标工程最终成品的本机统一出口
 └── spec/                  全部项目规格、设计、开发和交付说明
 ```
 
-以下目录由本地构建或 Spec-Loop 运行产生，已由 Git 忽略，不属于权威工程结构：`dist/`、`node_modules/`、`.spec-loop/`、`.spec-loop-tx/`、`.spec-loop-cross-tx/` 和 `.spec-loop-cross-tx-data/`。
+以下目录由本地构建或 Spec-Loop 运行产生，已由 Git 忽略，不属于权威工程结构，包括 `dist/`、`node_modules/`、`.spec-loop/`、`.spec-loop-tx/`、`.spec-loop-cross-tx/` 和 `.spec-loop-cross-tx-data/`。最终可安装/可分发成品统一发布到本机 `products/{project-slug}/{version}/`，其元数据格式由 `products/README.md` 定义。
 
 | 内容 | 权威位置 |
 |---|---|
@@ -66,6 +67,7 @@ spec-loop/
 | 当前执行队列 | `spec/pending-board.md` |
 | 当前验证队列 | `spec/verification-board.md` |
 | 当前运行时模板资产 | `assets/target-spec/` |
+| 目标工程最终安装包/分发包 | `products/{project-slug}/{version}/`（本机，不提交 Git） |
 | Phase 1–2 原始证据和 Dogfood | `spec/05-delivery/phase-1-2/` |
 | Phase 3 正式 Evidence 摘要 | `spec/05-delivery/phase-3/` |
 | 已撤回 Phase 3 原型 Dogfood | `spec/05-delivery/phase-3-withdrawn/` |

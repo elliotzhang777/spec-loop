@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "template_version": "2.1.0",
+  "profile": "backend",
+  "spec_root": "spec",
+  "task_root": "spec/05-task",
+  "files": [
+    { "path": "AGENT.md", "role": "agent", "kind": "document", "check_placeholders": false },
+    { "path": "spec/README.md", "role": "guide", "kind": "document", "check_placeholders": false },
+    { "path": "spec/00-conventions/development-guidelines.md", "role": "conventions", "kind": "document", "check_placeholders": true },
+    { "path": "spec/roadmap.md", "role": "roadmap", "kind": "document", "check_placeholders": true },
+    { "path": "spec/architecture.md", "role": "architecture", "kind": "document", "check_placeholders": true },
+    { "path": "spec/pending-board.md", "role": "pending-board", "kind": "document", "check_placeholders": false },
+    { "path": "spec/verification-board.md", "role": "verification-board", "kind": "document", "check_placeholders": false },
+    { "path": "spec/01-product/_template.md", "role": "product-template", "kind": "template", "check_placeholders": false },
+    { "path": "spec/02-feature/_template.md", "role": "feature-template", "kind": "template", "check_placeholders": false },
+    { "path": "spec/03-decisions/README.md", "role": "decision-guide", "kind": "document", "check_placeholders": false },
+    { "path": "spec/03-decisions/_template.md", "role": "decision-template", "kind": "template", "check_placeholders": false },
+    { "path": "spec/04-design/_template.md", "role": "design-template", "kind": "template", "check_placeholders": false },
+    { "path": "spec/05-task/_template.md", "role": "task-template", "kind": "template", "check_placeholders": false }
+  ]
+}

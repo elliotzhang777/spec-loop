@@ -9,6 +9,9 @@
 - 所属特性：[FEAT-000](../02-feature/FEAT-000-example.md)
 - 所属产品：[PROD-000](../01-product/PROD-000-example.md)
 - 依赖工单：无
+- 任务等级：Standard
+- 协议版本：P/M/V/R v2（只允许已开始的历史任务声明 v1 兼容收口）
+- 所属批次：待填写
 
 ## 目标
 
@@ -27,6 +30,13 @@
 ## 实施要求
 
 1. 待填写。
+
+## P/M/V/R 职责
+
+- P：冻结 AC、用例、工具、断言、Evidence、风险和依赖，由人批准 contract hash。
+- M：唯一可写候选的角色；提交稳定 HEAD 和自测 Evidence，不改契约、不签 PASS。
+- V：使用独立只读 invocation 按计划验收，Evidence 绑定 Contract、Plan 和 HEAD。
+- R：仅在 V PASS 后独立复核 AC 覆盖和 Evidence hash，不替 V 跑测试、不修改候选。
 
 ## 验收标准
 

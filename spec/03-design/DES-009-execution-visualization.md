@@ -3,7 +3,7 @@
 - 状态：已批准
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-08-13
+- 最后更新：2026-08-31
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 
 ## 设计目标
@@ -134,6 +134,7 @@ spec-loop snapshot $PROJECT_DIR [--json]
 
 - `GET /`：打包在 npm 产物内的静态观察面；
 - `GET /api/snapshot`：当前投影，支持 `ETag`/`If-None-Match`；
+- `GET /api/projects`：枚举宿主 Project 与其 `projects/` 下合法的直接子工程，只返回 opaque key、Project ID 和名称；`GET /api/snapshot?project={project-key}` 只解析该清单中的 key，不接收文件系统路径；
 - `GET /api/artifacts/:ref`：只返回白名单内可安全预览的文本摘要或图片，不允许任意路径。
 
 ### 启动即看与服务生命周期
@@ -157,14 +158,16 @@ spec-loop view stop $PROJECT_DIR
 
 ### 页面信息架构
 
-首版保持一个页面、三层信息：
+页面保持一个观察面、三层信息：
 
-1. 顶部“正在执行”：Task 标题、Round、生命周期、当前步骤、步骤目的、elapsed、下一动作和数据新鲜度；
-2. 默认“H1～H15 折叠式主链”：每个 H 使用同尺寸节点展示业务摘要、完成度、收口和耗时；节点纵向连成 H1→H15 主链；
-3. H 内 Task 先做传递约简，再交给本地自托管的 ELK layered 布局与 orthogonal edge routing；同列表示并行，长边自动绕开中间节点，圆角路径、节点外箭头和输入/输出端口表达方向，悬停节点时高亮关联上下游；
-4. 点击 H 只在该节点下原位展开子 Task DAG，同时收起其他 H；点击 Task 再在当前 H 内展开步骤、耗时和来源，不切换页面；
-5. Task 详情按“执行结论 → 耗时构成条 → Task→Round→活动步骤分层时间线 → 折叠数据来源”组织；时间构成使用区间切片和固定优先级互斥归类，保证并行步骤不重复累计；
-6. H 选择器只负责定位对应泳道；Task 详情通过“收起”回到完整同页视图，不维护页面级导航栈。
+1. 右侧顶部固定“全局 Airflow 总览”：展示 Project 的波次总数/完成数、Task 总数、全部生命周期状态数量与占比，并保留当前实际执行波次、Task、Round、步骤、elapsed 和下一动作；该区域不随浏览波次切换而替换结构；
+2. 桌面端左侧固定“H1～H15 完整波次明细”：严格按 H 顺序展示名称、状态、Task 完成度和耗时；当前实际运行波次与用户选中浏览波次分别编码，不能混为一个状态；
+3. 全局总览下方只展示选中波次的概览、耗时构成、子 Task DAG/列表和当前 Task 检查器，不再重复铺开全部 H；首次进入优先选择活动 Task 所属 H，没有直接归属时按运行状态和最新未完成 H 确定浏览默认值；窄屏时波次目录折叠为顶部横向滚动卡片；
+4. H 内 Task 先做传递约简，再交给本地自托管的 ELK layered 布局与 orthogonal edge routing；同列表示并行，长边自动绕开中间节点，圆角路径、节点外箭头和输入/输出端口表达方向，悬停节点时高亮关联上下游；
+5. 点击左侧 H 只更新右侧波次与 Task 区域；点击 Task 同步依赖图选中态、任务列表和检查器，不切换页面；
+6. Task 详情按“执行结论 → 耗时构成条 → Task→Round→活动步骤分层时间线 → 折叠数据来源”组织；时间构成使用区间切片和固定优先级互斥归类，保证并行步骤不重复累计；
+7. Ant Design 波次选择器保留为键盘与窄屏辅助入口；桌面主导航以左侧领域波次列表为准，Task 详情通过“收起”回到完整同页视图，不维护页面级导航栈。
+8. 顶栏使用 Ant Design 工程选择器展示宿主工程与 `projects/` 下所有合法直接子工程；切换工程时先保留上一帧并标记切换状态，新 Snapshot 到达后重置波次、Task、ELK cache 和 ETag，不能用上一工程的结构签名做增量 patch。
 
 H 状态不直接照抄路线图：所有子 Task 均为 delivered/cancelled 才显示完成；存在 verifying 则显示验证中，存在 working/iterating 则显示进行中。路线图已完成但子 Task 未完成时输出 diagnostic 和页面冲突提示。总览默认将滚动容器定位到“活动 Task 所属 H；否则最新未完成 H；否则最后一个 H”。H 内图采用标准分层 DAG：一个依赖深度对应一层、从上到下布置，只绘制真实依赖边，不生成虚假顺序边；同层节点使用父节点重心排序并为多入/多出边分配端口。
 
@@ -174,7 +177,7 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 
 刷新采用上一帧保底：snapshot 请求或渲染失败时不得清空当前 DOM，只显示局部错误并继续轮询。静态资源按请求读取，避免长驻服务继续返回启动时缓存的旧 UI。
 
-前端以稳定 revision 和结构签名划分更新边界：仅时钟推进时只原位修改 elapsed、统计数字、耗时构成条和活动节点文案；Task/H 关系或步骤结构变化时才重建对应区域。通用交互使用本地打包的 React 19 + Ant Design 6（Select、Button、Segmented、Tag、Badge、Tooltip、Breadcrumb、Empty、Alert），通过 `ConfigProvider.csp` nonce 兼容严格 CSP；ELK/SVG DAG、H 卡片和 Task 数据行继续使用领域渲染，避免把图节点错误抽象成表单按钮。
+前端以稳定 revision 和结构签名划分更新边界：仅时钟推进时只原位修改 elapsed、统计数字、耗时构成条和活动节点文案；Task/H 关系或步骤结构变化时才重建对应区域。页面骨架与通用交互使用本地打包的 React 19 + Ant Design 6：外层采用 Layout、Header、Sider、Content，全局总览和波次耗时采用 Card、Statistic、Progress、Tag、Badge，左侧波次目录采用 Menu、Progress、Tag，步骤检查器采用 Timeline、Descriptions、Collapse，工程/筛选采用 Select、Button、Segmented、Tooltip、Breadcrumb、Empty、Alert；通过 `ConfigProvider.csp` nonce 兼容严格 CSP。工程切换保留上一帧并覆盖 Spin 状态，数值原位变化只触发短时低对比高亮。ELK/SVG DAG 和 Task 领域数据行继续使用领域渲染，避免把图节点错误抽象成表单按钮。
 
 历史 Task 默认按最近活动倒序；当前 Task 固定置顶。unknown 不画成有长度的时间块，而用缺口标记；derived 使用虚线边界，避免视觉上与 exact 混淆。状态不能只靠颜色表达。
 
@@ -237,7 +240,8 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 |---|---|---|---|
 | [TASK-027](../04-task/TASK-027-execution-events.md) | 项目级事件协议、writer、全入口埋点、恢复与协议测试 | Phase 3 现有 Task/Harness | 进行中 |
 | [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 进行中 |
-| [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | 旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood | TASK-027、TASK-028 | 草稿 |
+| [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | v2 Heavy：旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood、独立 V/R | TASK-027、TASK-028 | 已批准 |
+| [TASK-033](../04-task/TASK-033-pmvr-execution-observability.md) | v2 P/M/V/R、Conflict、Inbox、Candidate 事件与观察面 | TASK-027、TASK-028、TASK-032 | 已批准 |
 
 ## 实际实现
 
@@ -258,3 +262,9 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | 2026-08-13 | 引入 ELK 分层布局与避障路由 | 跨层依赖会穿过中间节点，手工曲线无法稳定避障；ELK 只负责布局路由，节点交互继续由轻量 SVG 控制 | TASK-028 |
 | 2026-08-20 | 设计 Project 级后台 view 与启动即看入口 | Quant Dogfood 表明前台 `view` 命令不够直接，Task/Harness 启动时应自动暴露可视化 | TASK-029 |
 | 2026-08-20 | 使用稳定结构增量更新并统一 Ant Design 控件 | 用户反馈轮询整页闪烁、原生下拉和手写控件不一致；限定重绘边界并统一通用交互组件 | TASK-028 |
+| 2026-08-31 | 改为左侧全量波次明细、右侧波次与 Task 主从工作区 | 用户需要持续看到全局波次顺序，同时理解当前波次状态、耗时和子 Task；顶部细轨与右侧全量平铺均不满足该信息层级 | TASK-028 |
+| 2026-08-31 | 将右侧固定拆为全局 Airflow 总览与所选波次详情 | 全局 Task 状态和当前运行位置必须持续可见，左侧波次选择只影响下方的单波次 DAG、Task 列表和检查器 | TASK-028 |
+| 2026-08-31 | 增加 `projects/` 工程目录与安全工程切换 | 同一引擎观察面需要覆盖本机多个 Project，同时保持只读、路径不可注入和逐工程 ETag/浏览状态隔离 | TASK-028 |
+| 2026-08-31 | 将全局总览与波次目录升级为 Ant Design 页面组件 | 页面虽已使用 AntD 表单控件，但统计卡和波次列表仍是手写 DOM，视觉语言不统一且与 React 根存在更新冲突 | TASK-028 |
+| 2026-08-31 | 页面骨架、波次指标和步骤检查器统一为 Ant Design | 第二轮视觉走查发现外层布局、耗时卡和步骤时间线仍为手写组件，且辅助字号过小；改用 Layout、Statistic、Timeline、Descriptions、Spin 并提升信息可读性 | TASK-028 |
+| 2026-09-04 | 增加 v1 兼容收口与 v2 观察面桥梁 | TASK-027/028 保持在途 v1，TASK-029 使用 v2 Heavy，TASK-033 原生展示 P/M/V/R 运行事实 | TASK-027～029、033 |

@@ -153,6 +153,7 @@ export async function planTask(root: string): Promise<TaskState> {
 
 export async function startRound(root: string): Promise<TaskState> {
   const { state } = await contracts(root);
+  if (!(await exists(path.join(root, 'BUDGET.md')))) await runtimeInit(root);
   const projectRoot = managedProjectRootForTask(root);
   if (projectRoot) await (await import('./project.js')).verifyTaskDependencies(projectRoot, state.task_id);
   if ((await readUserControl(root))?.status === 'paused') throw new Error('Task is paused by a structured user decision');
@@ -178,6 +179,29 @@ export async function startRound(root: string): Promise<TaskState> {
     if (started && projectRoot) await finishExecutionStep(projectRoot, started, { outcome: 'failure', summary: 'Round 初始化失败' });
     throw error;
   }
+  return updated;
+}
+
+export async function cancelTask(root: string, cancelledAt = new Date()): Promise<TaskState> {
+  const state = await readState(root);
+  if (state.status === 'cancelled') return state;
+  if (state.status === 'delivered' || state.status === 'draft') throw new Error(`cancel is illegal from ${state.status}`);
+  const updated = stateSchema.parse({
+    ...nextState(state, 'cancel'), updated_at: cancelledAt.toISOString(), last_command: 'cancel',
+  }) as TaskState;
+  const writes:Array<{file:string;content:string}> = [
+    { file: path.join(root, 'TASK_STATE.md'), content: stringifyMarkdown(updated, '# Task State\n\nLifecycle fields are CLI-managed.') },
+    await stateHistoryWrite(root, updated),
+    ...await runtimeProjectionWrites(root, updated),
+  ];
+  if (state.current_round > 0) {
+    const roundFile = path.join(root, 'ROUNDS', `ROUND-${String(state.current_round).padStart(4, '0')}.md`);
+    if (await exists(roundFile)) {
+      const round = await readMarkdown(roundFile), data = roundSchema.parse(round.data);
+      if (data.status === 'open') writes.push({ file: roundFile, content: stringifyMarkdown({ ...data, status: 'cancelled' }, round.body) });
+    }
+  }
+  await atomicWriteMany(root, writes);
   return updated;
 }
 
@@ -404,7 +428,9 @@ export async function applyNeedsUserDecision(root: string, input: {
 
 export async function runtimeInit(root: string): Promise<void> {
   const state = await readState(root);
-  if (await exists(path.join(root, 'BUDGET.md'))) throw new Error('runtime already initialized');
+  if (await exists(path.join(root, 'BUDGET.md'))) {
+    await readBudget(root); await readLedger(root, state); return;
+  }
   const empty: Attempt[] = [];
   const budgetDoc = budgetTemplate();
   const budget = (await import('./schemas.js')).budgetSchema.parse((await import('yaml')).default.parse(budgetDoc.split('---\n')[1]));

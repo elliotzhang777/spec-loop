@@ -1,18 +1,29 @@
 # TASK-029：执行可视化兼容重建、Dogfood 与加固验收
 
-- 状态：草稿
+- 状态：进行中
 - 优先级：P1
 - 负责人：待定
 - 创建日期：2026-08-12
-- 最后更新：2026-08-12
+- 最后更新：2026-09-04
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 依赖工单：TASK-027、TASK-028
+- 任务等级：Heavy
+- 协议版本：P/M/V/R v2
+- 所属批次：P4-B4
 
 ## 目标
 
 证明执行可视化可以在旧 Project、当前 spec-loop 自托管 Project 和大规模 fixture 上安全重建，并用最终 Heavy 验收关闭兼容性、性能、隐私、故障恢复和真实使用风险。
+
+## P/M/V/R v2 对齐
+
+- P：把旧数据、自托管、性能、安全、浏览器、视觉与 view 生命周期用例冻结为完整 Heavy Contract，并由人批准精确 hash。
+- M：只在隔离 worktree 完成兼容 Adapter、加固与测试；不得修改已批准 AC 或验收计划。
+- V：独立执行 WEXEC-VIEW full Gate、Playwright、性能和对抗测试，Evidence 绑定当前 Plan/HEAD。
+- R：仅在 V PASS 后复核全部 AC、provenance、截图和 Evidence hash；R 不替 V 运行测试。
+- 双 PASS 只形成 Candidate；视觉 Review、Heavy 接受和 Delivery 仍按当前 revision 分别受控。
 
 ## 工作范围
 
@@ -50,7 +61,7 @@
 - [ ] AC-3：事件损坏、事实冲突、非法路径、XSS 和 Secret canary 全部 fail closed 或安全降级，无误导性绿色结论。
 - [ ] AC-4：桌面与窄屏四条核心浏览器路径全部通过，用户完成当前 revision 的视觉 Review 和 Heavy 人工确认。
 - [ ] AC-5：删除 UI cache/snapshot 不影响 Task、Harness、Evidence、Review 或 Delivery，重建后的 canonical snapshot 等价。
-- [ ] AC-6：Phase 1–3 全量回归与 FEAT-009 全部 Gate 在最终候选通过，独立 Verifier 确认可重建性和事实源边界。
+- [ ] AC-6：Phase 1–3 全量回归与 FEAT-009 全部 Gate 在最终候选通过；独立 V 确认可重建性和事实源边界，独立 R 复核 AC 覆盖与 Evidence 链，双 PASS 后才形成 Candidate。
 - [ ] AC-7：交互终端启动 Task/批次/Harness 时 5 秒内复用或启动唯一 Project view、打印并默认打开 URL；重复启动、僵尸 marker、端口冲突、CI、`--no-view` 和浏览器不可用路径均确定且不阻断任务。
 - [ ] AC-8：顶部当前工作优先来自最新未闭合执行步骤；多个 Task 并发时全部可见，旧 working 状态或较新的 Task State 时间不得覆盖实际运行中的 Harness/活动步骤。
 
@@ -85,17 +96,18 @@
 
 ## 交付记录
 
-- 完成日期：尚未实施
-- 变更文件/交付物：兼容 Adapter、性能/安全 Gate、Dogfood 与 Heavy 报告（待实施）
-- 关键实现与决策：按 DES-009 实施，差异在交付时记录
+- 完成日期：非 Heavy 前置实现已完成，待正式 Heavy 验收
+- 变更文件/交付物：后台 `view-control start/status/open/stop` 生命周期；兼容 Adapter、性能/安全 Gate、Dogfood 与 Heavy 报告仍待正式执行
+- 关键实现与决策：marker 绑定 Project realpath、PID 启动身份、loopback URL 与健康状态；重复 start 复用，陈旧 marker fail closed
 - 与原设计的差异：无
-- 遗留风险：无
+- 遗留风险：真实 Playwright、桌面/窄屏视觉 Review、200×200 性能 Gate、旧项目重建和最终 Heavy 尚未执行。
 
 ## 验证证据
 
 | 日期 | 验证人 | 环境 | 结果 | 证据/输出 |
 |---|---|---|---|---|
 | 尚未实施 | 未指定 | WEXEC-VIEW Heavy Gate | 待验证 | 尚无 Evidence |
+| 2026-09-04 | Codex/M（快速反馈） | Node 22，本地定向测试 | 部分实现通过，非 Heavy Evidence | 新增 `view-control start/status/open/stop`；后台 marker 绑定 Project realpath、PID 启动身份、loopback URL 与健康状态；重复 start 复用，stop 安全校验；execution-view 15/15 通过 |
 
 ## 关闭检查
 
@@ -112,3 +124,5 @@
 | 2026-08-12 | 创建 Heavy 工单草案 | 用真实旧项目和全量 Gate 证明可重建、准确与安全 |
 | 2026-08-20 | 加入启动即看与后台 view 生命周期 | Quant Dogfood 中需要另开命令和查找随机端口，查看路径不够直接 |
 | 2026-08-20 | 加入未闭合步骤优先的当前工作选择 | Quant TASK-005 Harness 运行时顶部误显示 TASK-007，暴露 lifecycle 时间排序缺陷 |
+| 2026-09-04 | 批准并对齐 P/M/V/R v2 Heavy | 作为 TASK-027/028 v1 兼容收口后的组合验收，使用独立 V/R 与 Candidate Gate |
+| 2026-09-04 | 开始非 Heavy 前置实现 | 补后台 view 生命周期与故障恢复；未运行 full Gate、性能 Gate、Playwright 或 Heavy 验收 |

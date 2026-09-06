@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { sha256, stringifyMarkdown } from './files.js';
 import type { TaskLevel, TaskState } from './model.js';
+import { guard, renderRunLog, renderSummary } from './runtime.js';
 
 export interface InitInput { id: string; title: string; level: TaskLevel; repository: string }
 
@@ -10,6 +11,7 @@ export function initialFiles(input: InitInput): Array<{ file: string; content: s
     schema_version: 1, task_id: input.id, title: input.title, level: input.level, status: 'draft', current_round: 0,
     state_version: 1, repository: input.repository, code_revision: 'UNSET', updated_at: now, last_command: 'init',
   };
+  const budget = { schema_version: 1 as const, max_attempts: 12, max_consecutive_failures: 4, max_repeated_error: 3, max_no_progress: 3, max_tokens: 500000, max_work_units: 40 };
   const files = [
     { file: 'TASK_STATE.md', content: stringifyMarkdown(state, '# Task State\n\nInitialized by spec-loop. Lifecycle fields are CLI-managed.') },
     { file: 'STATE_HISTORY.jsonl', content: `${JSON.stringify({ state_version: 1, status: 'draft', round: 0, command: 'init', state_hash: sha256(JSON.stringify(state)) })}\n` },
@@ -18,6 +20,10 @@ export function initialFiles(input: InitInput): Array<{ file: string; content: s
     { file: 'ACCEPTANCE.md', content: stringifyMarkdown({ schema_version: 1, task_id: input.id, criteria: [{ id: 'AC-1', text: 'TODO' }], human_reviews: [], web_gates: [] }, '# Acceptance Contract\n\nEach criterion requires current evidence. UI or visual tasks must declare a required visual review; Web functional tasks must declare a required Playwright Gate.') },
     { file: 'VERIFY.md', content: stringifyMarkdown({ schema_version: 1, task_id: input.id, round: 0, result: 'pending', verifier: '', independent: false, human_checked: false, signed_round: 0, evidence: [] }, '# Verification\n\nNo verification has run.') },
     { file: 'DELIVERY.md', content: stringifyMarkdown({ schema_version: 1, task_id: input.id, round: 0, code_revision: 'UNSET', mappings: [] }, '# Delivery\n\nTODO') },
+    { file: 'BUDGET.md', content: stringifyMarkdown(budget, '# Runtime Budget\n\nStrict limits enforced by `guard`.') },
+    { file: 'LOOP_LEDGER.jsonl', content: '' },
+    { file: 'RUN_LOG.md', content: renderRunLog([]) },
+    { file: 'RUN_SUMMARY.md', content: renderSummary(state, budget, [], guard(budget, [])) },
   ];
   if (input.level === 'heavy') files.push({ file: 'CONTEXT.md', content: stringifyMarkdown({ schema_version: 1, task_id: input.id }, '# Context\n\nTODO') });
   return files.map((f) => ({ file: path.normalize(f.file), content: f.content }));

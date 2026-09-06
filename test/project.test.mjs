@@ -29,6 +29,45 @@ test('proposal requires approval before task creation and registry rebuilds from
   const tasks=JSON.parse(cli(['tasks','list',root,'--json']).stdout);assert.equal(tasks.length,1);assert.equal(tasks[0].task_id,'TASK-PROJECT-1');assert.equal(tasks[0].status,'draft');
 });
 
+test('project default protocol requires complete v2 contracts without migrating existing v1 tasks',async()=>{
+  const root=await tempRoot('project-protocol-'),repo=path.join(root,'repo');await mkdir(repo);
+  assert.equal(cli(['project','init',root,'--id','PROJ-PROTOCOL','--name','Protocol','--repository',repo]).code,0);
+  assert.equal(JSON.parse(cli(['project','protocol',root,'--json']).stdout).default_task_protocol,'v1');
+  const legacy=cli(['triage','propose',root,'--source','legacy approved source','--goal','Keep v1 task','--reason','Compatibility proof','--ac','legacy behavior remains readable']);
+  assert.equal(legacy.code,0,legacy.stderr);assert.equal(cli(['triage','approve',root,legacy.stdout.trim(),'--by','owner']).code,0);
+  assert.equal(cli(['triage','create-task',root,legacy.stdout.trim(),'--id','TASK-LEGACY-1','--title','Keep v1 task']).code,0);
+  assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
+  assert.equal(JSON.parse(cli(['project','protocol',root,'--json']).stdout).default_task_protocol,'v2');
+  const missing=cli(['triage','propose',root,'--source','new approved source','--goal','Require v2 task','--reason','New default protocol','--ac','must be rejected']);
+  assert.notEqual(missing.code,0);assert.match(missing.stderr,/requires a P-prepared v2 Acceptance Contract/);
+  const contractFile=path.join(root,'contract.json');
+  await writeFile(contractFile,JSON.stringify({
+    schema_version:2,task_id:'TASK-V2-1',version:1,risk:'standard',critical_path:false,depends_on:[],
+    criteria:[{id:'AC-1',text:'v2 contract is enforced',risk_tags:['functional'],waivable:true}],
+    use_cases:[{id:'UC-1',ac:['AC-1'],scenario:'create a task under the v2 project default'}],
+    tools:[{id:'contract-test',kind:'unit',gate_id:'project-protocol-test',command:['node','--test','test/project.test.mjs'],playwright:null}],
+    assertions:[{id:'AS-1',ac:['AC-1'],tool_id:'contract-test',operator:'exit_code_zero',expected:'exit code 0'}],
+    evidence_requirements:[{id:'ER-1',ac:['AC-1'],tool_id:'contract-test',kind:'test_report',required:true}],
+    budgets:{max_semantic_reworks:2,max_infrastructure_retries_per_stage:1,repeated_failure_limit:2},
+  },null,2));
+  const proposal=cli(['triage','propose',root,'--source','v2 approved source','--goal','Create v2 task','--risk','standard','--reason','Exercise v2 project default','--contract',contractFile]);
+  assert.equal(proposal.code,0,proposal.stderr);assert.equal(cli(['triage','approve',root,proposal.stdout.trim(),'--by','owner']).code,0);
+  assert.equal(cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-V2-1','--title','Create v2 task']).code,0);
+  await readFile(path.join(root,'.spec-loop','tasks','task-v2-1','ACCEPTANCE_CONTRACT_V2.md'),'utf8');
+  await assert.rejects(readFile(path.join(root,'.spec-loop','tasks','task-legacy-1','ACCEPTANCE_CONTRACT_V2.md'),'utf8'));
+  assert.match(await readFile(path.join(repo,'spec','04-task','TASK-V2-1.md'),'utf8'),/协议版本：P\/M\/V\/R v2/);
+  let tasks=JSON.parse(cli(['tasks','list',root,'--json']).stdout);
+  assert.deepEqual(tasks.map(item=>[item.task_id,item.protocol,item.protocol_stage]),[
+    ['TASK-LEGACY-1','v1',null],['TASK-V2-1','v2','contract_approved'],
+  ]);
+  assert.match(cli(['project','status',root]).stdout,/default_protocol=v2/);
+  const doctor=JSON.parse(cli(['project','doctor',root,'--json']).stdout);
+  assert.equal(doctor.ok,true);assert.equal(doctor.default_task_protocol,'v2');assert.equal(doctor.tasks[1].blocking_reason,null);
+  assert.equal(cli(['project','protocol',root,'--set','v1']).code,0);
+  tasks=JSON.parse(cli(['tasks','list',root,'--json']).stdout);
+  assert.deepEqual(tasks.map(item=>[item.task_id,item.protocol]),[['TASK-LEGACY-1','v1'],['TASK-V2-1','v2']]);
+});
+
 test('approved proposal explicitly adopts a matching draft target task', async()=>{
   const root=await tempRoot('project-adopt-');const repo=path.join(root,'repo');await mkdir(repo);
   cli(['project','init',root,'--id','PROJ-ADOPT','--name','Adopt','--repository',repo]);

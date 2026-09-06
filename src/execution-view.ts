@@ -8,19 +8,33 @@ import { readProject, scanTasks, selectActiveTask } from './project.js';
 import { readState } from './task.js';
 
 const precisionSchema = z.enum(['exact', 'derived', 'unknown']);
-const stepStatusSchema = z.enum(['running', 'waiting', 'succeeded', 'failed', 'interrupted', 'noted', 'unknown']);
+const stepStatusSchema = z.enum(['running', 'waiting', 'succeeded', 'failed', 'cancelled', 'interrupted', 'noted', 'unknown']);
+const MAX_DASHBOARD_STEPS_PER_TASK = 20;
+const MAX_DASHBOARD_REFS_PER_STEP = 10;
+const MAX_DASHBOARD_DIAGNOSTICS = 50;
+export const MAX_EXECUTION_SNAPSHOT_BYTES = 262_144;
 export const executionStepSnapshotSchema = z.object({
-  id: z.string(), type: z.string(), round: z.number().int().nonnegative().nullable(), label: z.string(), summary: z.string(), status: stepStatusSchema,
+  id: z.string(), type: z.string(), round: z.number().int().nonnegative().nullable(), label: z.string().max(120), summary: z.string().max(500), status: stepStatusSchema,
   started_at: z.iso.datetime().nullable(), ended_at: z.iso.datetime().nullable(), duration_ms: z.number().int().nonnegative().nullable(),
-  precision: precisionSchema, source: z.string(), outcome: z.string().nullable(), refs: z.array(z.string()), order: z.number(),
+  precision: precisionSchema, source: z.string(), outcome: z.string().nullable(), refs: z.array(z.string().max(200)).max(MAX_DASHBOARD_REFS_PER_STEP), order: z.number(),
 }).strict();
 const durationBreakdownSchema = z.object({
   reproduce_ms: z.number().int().nonnegative(), analyze_ms: z.number().int().nonnegative(), change_ms: z.number().int().nonnegative(),
   test_ms: z.number().int().nonnegative(), wait_ms: z.number().int().nonnegative(), other_ms: z.number().int().nonnegative(),
   unattributed_ms: z.number().int().nonnegative(),
 }).strict();
+const acceptanceProjectionSchema=z.object({
+  stage:z.string(),run_id:z.string(),contract_hash:z.string().length(64),plan_hash:z.string().length(64).nullable(),head:z.string().nullable(),
+  semantic_reworks_used:z.number().int().nonnegative(),infrastructure_retries:z.object({V:z.number().int().nonnegative(),R:z.number().int().nonnegative()}).strict(),
+  last_m_invocation:z.string().nullable(),last_v_invocation:z.string().nullable(),last_r_invocation:z.string().nullable(),
+  v_evidence_set_hash:z.string().length(64).nullable(),r_evidence_set_hash:z.string().length(64).nullable(),
+  active_conflict_id:z.string().nullable(),candidate_id:z.string().nullable(),fresh:z.boolean(),diagnostics:z.array(z.string()),
+}).strict();
 export const executionTaskSnapshotSchema = z.object({
   task_id: z.string(), title: z.string(), level: z.string(), status: z.string(), round: z.number().int().nonnegative(),
+  protocol:z.enum(['v1','v2']),acceptance:acceptanceProjectionSchema.nullable(),
+  record_kind:z.enum(['current_run','historical_runtime','historical_no_runtime','never_started','specification_only']),
+  runtime:z.object({role:z.enum(['M','V','R']),invocation_id:z.string(),state:z.enum(['prepared','running','awaiting_ingestion']),heartbeat_at:z.iso.datetime().nullable(),heartbeat_age_ms:z.number().int().nonnegative().nullable(),deadline_at:z.iso.datetime().nullable(),remaining_ms:z.number().int().nonnegative().nullable(),usage_total_tokens:z.number().int().nonnegative().nullable(),token_limit:z.number().int().positive().nullable()}).strict().nullable(),
   depends_on: z.array(z.string()), blocked_by: z.array(z.string()), managed: z.boolean(),
   updated_at: z.iso.datetime(), current: z.boolean(), wall_clock_ms: z.number().int().nonnegative().nullable(),
   active_ms: z.number().int().nonnegative(), waiting_ms: z.number().int().nonnegative(), untracked_ms: z.number().int().nonnegative().nullable(),
@@ -56,6 +70,14 @@ export type ExecutionStepSnapshot = z.infer<typeof executionStepSnapshotSchema>;
 export type ExecutionWaveSnapshot = z.infer<typeof executionWaveSnapshotSchema>;
 
 type Interval = { start: number; end: number };
+
+function dashboardText(value: string, max = 500): string {
+  return value.length <= max ? value : `${value.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function dashboardRefs(values: string[]): string[] {
+  return [...new Set(values)].slice(-MAX_DASHBOARD_REFS_PER_STEP).map((value) => dashboardText(value, 200));
+}
 
 const labels: Record<string, string> = {
   plan: '规格与计划', round: '本轮实现', 'verify-pass': '验证通过', 'verify-fail': '验证失败', deliver: '交付关闭',
@@ -103,6 +125,7 @@ function eventStatus(start: ExecutionEvent, end: ExecutionEvent | undefined): Ex
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'interrupted'; }
     return start.kind === 'wait_started' ? 'waiting' : 'running';
   }
+  if (end.outcome === 'cancelled') return 'cancelled';
   if (end.kind === 'step_succeeded' || end.kind === 'wait_ended') return 'succeeded';
   if (end.kind === 'step_failed') return 'failed';
   return 'interrupted';
@@ -118,7 +141,7 @@ function eventSteps(events: ExecutionEvent[], now: number, currentRound: number)
       result.push({
         id: `event-${event.sequence}`, type: 'annotation', round: event.round, label: event.label, summary: event.summary, status: 'noted',
         started_at: event.occurred_at, ended_at: event.occurred_at, duration_ms: 0, precision: 'exact',
-        source: 'EXECUTION_EVENTS.jsonl', outcome: null, refs: event.refs, order: event.sequence,
+        source: 'EXECUTION_EVENTS.jsonl', outcome: null, refs: dashboardRefs(event.refs), order: event.sequence,
       });
       continue;
     }
@@ -137,10 +160,44 @@ function eventSteps(events: ExecutionEvent[], now: number, currentRound: number)
       started_at: event.occurred_at, ended_at: endedAt, duration_ms: orphaned ? null : Math.max(0, endTime - startTime),
       precision: superseding || orphaned || end?.kind === 'step_interrupted' ? 'derived' : 'exact', source: 'EXECUTION_EVENTS.jsonl',
       outcome: end?.outcome ?? (superseding || orphaned ? 'interrupted' : null),
-      refs: [...new Set([...event.refs, ...(end?.refs ?? [])])], order: event.sequence,
+      refs: dashboardRefs([...event.refs, ...(end?.refs ?? [])]), order: event.sequence,
     });
   }
   return result;
+}
+
+async function acceptanceProjection(projectRoot:string,taskRoot:string):Promise<{protocol:'v1'|'v2';acceptance:z.infer<typeof acceptanceProjectionSchema>|null}>{
+  const contractFile=path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md'),runFile=path.join(taskRoot,'ACCEPTANCE_RUN.json');
+  const hasContract=await exists(contractFile),hasRun=await exists(runFile);if(!hasContract&&!hasRun)return{protocol:'v1',acceptance:null};
+  const diagnostics:string[]=[];
+  try{
+    const contract=(await readMarkdown(contractFile)).data as Record<string,unknown>;
+    const storedContractHash=typeof contract.contract_hash==='string'?contract.contract_hash:'',approval=contract.approval as {contract_hash?:unknown}|undefined;
+    const {contract_hash:_stored,approval:_approval,...contractInput}=contract,computedContractHash=sha256(JSON.stringify(contractInput));
+    if(storedContractHash!==computedContractHash||approval?.contract_hash!==computedContractHash)diagnostics.push('Acceptance Contract hash 不匹配。');
+    if(!hasRun)return{protocol:'v2',acceptance:acceptanceProjectionSchema.parse({stage:'contract_approved',run_id:'not-started',contract_hash:storedContractHash,plan_hash:null,head:null,semantic_reworks_used:0,infrastructure_retries:{V:0,R:0},last_m_invocation:null,last_v_invocation:null,last_r_invocation:null,v_evidence_set_hash:null,r_evidence_set_hash:null,active_conflict_id:null,candidate_id:null,fresh:diagnostics.length===0,diagnostics})};
+    const run=JSON.parse(await readFile(runFile,'utf8')) as Record<string,any>;
+    if(run.contract_hash!==storedContractHash)diagnostics.push('Run 与 Acceptance Contract hash 不匹配。');
+    let planHash:string|null=typeof run.plan_hash==='string'?run.plan_hash:null;
+    if(planHash){
+      const planFile=path.join(projectRoot,'.spec-loop','output',`${run.task_id}-acceptance-v2`,'EXECUTION_PLAN.json'),plan=JSON.parse(await readFile(planFile,'utf8')) as Record<string,unknown>;
+      const {plan_hash:_plan,...planInput}=plan,computedPlanHash=sha256(JSON.stringify(planInput));
+      if(plan.plan_hash!==computedPlanHash||plan.plan_hash!==planHash||plan.contract_hash!==storedContractHash||plan.head!==run.current_head)diagnostics.push('Execution Plan 与当前 Contract/HEAD 绑定不新鲜。');
+    }
+    if(run.candidate_id){
+      const candidateFile=path.join(projectRoot,'.spec-loop','output',`${run.task_id}-acceptance-v2`,'CANDIDATE.json'),candidate=JSON.parse(await readFile(candidateFile,'utf8')) as Record<string,unknown>;
+      if(candidate.candidate_id!==run.candidate_id||candidate.contract_hash!==storedContractHash||candidate.plan_hash!==planHash||candidate.head!==run.current_head||candidate.v_evidence_set_hash!==run.last_v_evidence_set_hash||candidate.r_evidence_set_hash!==run.last_r_evidence_set_hash)diagnostics.push('Candidate 与当前 Contract/Plan/HEAD/Evidence 绑定不新鲜。');
+    }
+    if(run.active_conflict_id){
+      const inboxFile=path.join(projectRoot,'.spec-loop','REVIEW_INBOX.json'),inbox=JSON.parse(await readFile(inboxFile,'utf8')) as {items?:Array<{conflict_id?:string}>};
+      if(!inbox.items?.some(item=>item.conflict_id===run.active_conflict_id))diagnostics.push('Active Conflict 未出现在 Review Inbox。');
+    }
+    if(run.stage==='cancelled'&&run.stopped_head&&run.current_head&&run.stopped_head!==run.current_head)diagnostics.push('停止时 Worktree HEAD 已前进；观察面显示停止时实际 HEAD，旧 Candidate 绑定不得复用。');
+    return{protocol:'v2',acceptance:acceptanceProjectionSchema.parse({stage:run.stage,run_id:run.run_id,contract_hash:storedContractHash,plan_hash:planHash,head:run.stage==='cancelled'?(run.stopped_head??run.current_head??null):(run.current_head??null),semantic_reworks_used:run.semantic_reworks_used??0,infrastructure_retries:run.infrastructure_retries??{V:0,R:0},last_m_invocation:run.last_m_invocation??null,last_v_invocation:run.last_v_invocation??null,last_r_invocation:run.last_r_invocation??null,v_evidence_set_hash:run.last_v_evidence_set_hash??null,r_evidence_set_hash:run.last_r_evidence_set_hash??null,active_conflict_id:run.active_conflict_id??null,candidate_id:run.candidate_id??null,fresh:diagnostics.length===0,diagnostics})};
+  }catch(error){
+    diagnostics.push(`v2 投影不可验证：${(error as Error).message}`);
+    return{protocol:'v2',acceptance:acceptanceProjectionSchema.parse({stage:'invalid',run_id:'unknown',contract_hash:'0'.repeat(64),plan_hash:null,head:null,semantic_reworks_used:0,infrastructure_retries:{V:0,R:0},last_m_invocation:null,last_v_invocation:null,last_r_invocation:null,v_evidence_set_hash:null,r_evidence_set_hash:null,active_conflict_id:null,candidate_id:null,fresh:false,diagnostics})};
+  }
 }
 
 const legacyGateSchema = z.object({
@@ -187,7 +244,7 @@ async function legacyAttemptSteps(taskRoot: string, hasEvents: boolean): Promise
     assertNoSecrets(attempt.action, `legacy Attempt ${attempt.attempt}`);
     return ({
     id: `attempt-${attempt.attempt}`, type: 'task.attempt', round: attempt.round, label: `Attempt ${attempt.attempt}`,
-    summary: attempt.action, status: attempt.outcome === 'success' ? 'succeeded' : attempt.outcome === 'failure' ? 'failed' : 'interrupted',
+    summary: dashboardText(attempt.action), status: attempt.outcome === 'success' ? 'succeeded' : attempt.outcome === 'failure' ? 'failed' : 'interrupted',
     started_at: attempt.timestamp, ended_at: null, duration_ms: null, precision: 'unknown' as const,
     source: 'LOOP_LEDGER.jsonl', outcome: attempt.outcome, refs: [], order: (hasEvents ? 200_000 : 10_000) + attempt.attempt,
     });
@@ -266,6 +323,8 @@ async function targetSpecTasks(repositoryRoot: string, specRoot: string): Promis
       const level = levelValue ?? (/\bHeavy\b/i.test(heading[2]) ? 'heavy' : 'standard');
       result.push(executionTaskSnapshotSchema.parse({
         task_id: heading[1], title: heading[2].trim(), level, status: targetStatus(content), round: 0,
+        protocol:/^- 协议版本：P\/M\/V\/R v2$/m.test(content)?'v2':'v1',acceptance:null,
+        record_kind:targetStatus(content)==='delivered'?'historical_no_runtime':'specification_only',runtime:null,
         depends_on: dependencyIds(content), blocked_by: [], managed: false, updated_at: updated ? `${updated}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z',
         current: false, wall_clock_ms: null, active_ms: 0, waiting_ms: 0, untracked_ms: null,
         round_work_ms: 0, round_detail_ms: 0, round_waiting_ms: 0, round_unattributed_ms: 0,
@@ -276,6 +335,14 @@ async function targetSpecTasks(repositoryRoot: string, specRoot: string): Promis
     }
   }
   return result;
+}
+
+async function roleRuntime(projectRoot:string,taskId:string,now:number):Promise<z.infer<typeof executionTaskSnapshotSchema>['runtime']>{
+  const directory=path.join(projectRoot,'.spec-loop','output',`${taskId}-acceptance-v2`,'invocations'),entries=await readdir(directory,{withFileTypes:true}).catch(()=>[]),records:Array<Record<string,any>>=[];
+  for(const entry of entries)if(entry.isDirectory()){const file=path.join(directory,entry.name,'INVOCATION.json'),record=await readFile(file,'utf8').then(raw=>JSON.parse(raw) as Record<string,any>).catch(()=>null);if(record)records.push(record)}
+  const latest=records.sort((left,right)=>String(left.created_at).localeCompare(String(right.created_at))).reverse().find(item=>item.status==='prepared'||item.status==='running'||item.status==='succeeded'&&item.result_status==='awaiting_ingestion');if(!latest)return null;
+  const heartbeat=await readFile(path.join(directory,latest.invocation_id,'HEARTBEAT.json'),'utf8').then(raw=>JSON.parse(raw) as Record<string,any>).catch(()=>null),deadline=typeof heartbeat?.deadline_at==='string'?heartbeat.deadline_at:null,heartbeatAt=typeof heartbeat?.heartbeat_at==='string'?heartbeat.heartbeat_at:null;
+  return{role:latest.role,invocation_id:latest.invocation_id,state:latest.status==='succeeded'?'awaiting_ingestion':latest.status,heartbeat_at:heartbeatAt,heartbeat_age_ms:heartbeatAt?Math.max(0,now-Date.parse(heartbeatAt)):null,deadline_at:deadline,remaining_ms:deadline?Math.max(0,Date.parse(deadline)-now):null,usage_total_tokens:typeof heartbeat?.usage?.total_tokens==='number'?heartbeat.usage.total_tokens:latest.usage?.total_tokens??null,token_limit:latest.token_limit??null};
 }
 
 async function projectWaves(repositoryRoot: string, specRoot: string, tasks: ExecutionTaskSnapshot[]): Promise<ExecutionWaveSnapshot[]> {
@@ -322,7 +389,8 @@ async function projectWaves(repositoryRoot: string, specRoot: string, tasks: Exe
     const timedTasks = waveTasks.filter((task) => task.wall_clock_ms !== null);
     const unfinishedTasks = waveTasks.filter((task) => !['delivered', 'cancelled'].includes(task.status));
     const declaredStatus = roadmapRow?.status ?? 'unknown';
-    const effectiveStatus = waveTasks.length && !unfinishedTasks.length ? 'delivered'
+    const effectiveStatus = waveTasks.length && waveTasks.every((task) => task.status === 'cancelled') ? 'cancelled'
+      : waveTasks.length && !unfinishedTasks.length ? 'delivered'
       : unfinishedTasks.length && unfinishedTasks.every((task) => task.status === 'verifying') ? 'verifying'
       : unfinishedTasks.some((task) => ['working', 'verifying', 'iterating'].includes(task.status)) ? 'working'
       : unfinishedTasks.length ? 'planned' : declaredStatus;
@@ -353,7 +421,8 @@ async function projectWaves(repositoryRoot: string, specRoot: string, tasks: Exe
     const unfinishedTasks = waveTasks.filter((task) => !['delivered', 'cancelled'].includes(task.status));
     const timedTasks = waveTasks.filter((task) => task.wall_clock_ms !== null);
     const declaredStatus = targetStatus(waveStatus);
-    const effectiveStatus = waveTasks.length && !unfinishedTasks.length ? 'delivered'
+    const effectiveStatus = waveTasks.length && waveTasks.every((task) => task.status === 'cancelled') ? 'cancelled'
+      : waveTasks.length && !unfinishedTasks.length ? 'delivered'
       : unfinishedTasks.some((task) => ['working', 'verifying', 'iterating'].includes(task.status)) ? 'working'
       : unfinishedTasks.length ? 'planned' : declaredStatus;
     const summary = waveStatus.match(/^## 批次目标\s*$\s*([^\n]+)/m)?.[1]?.trim() ?? '规格中未记录波次摘要';
@@ -388,8 +457,8 @@ function breakdownCategory(step: ExecutionStepSnapshot): keyof DurationBreakdown
   if (step.type === 'wait.user' || step.status === 'waiting') return 'wait_ms';
   if (step.type === 'work.reproduce') return 'reproduce_ms';
   if (step.type === 'work.analyze') return 'analyze_ms';
-  if (step.type === 'work.change' || step.type === 'harness.execute') return 'change_ms';
-  if (step.type.startsWith('gate.') || step.type === 'task.verify') return 'test_ms';
+  if (step.type === 'work.change' || step.type === 'harness.execute' || step.type === 'role.m') return 'change_ms';
+  if (step.type.startsWith('gate.') || step.type === 'task.verify' || step.type === 'role.v' || step.type === 'role.r') return 'test_ms';
   if (['round.work', 'annotation', 'task.lifecycle', 'task.attempt'].includes(step.type)) return null;
   return 'other_ms';
 }
@@ -418,7 +487,9 @@ function durationBreakdown(steps: ExecutionStepSnapshot[], wallStart: number | n
 }
 
 function nextAction(state: TaskState, current?: ExecutionStepSnapshot): string {
-  if (current?.type === 'harness.execute') return '收集 worktree 改动';
+  if (current?.type === 'harness.execute' || current?.type === 'role.m') return '收集并提交稳定候选';
+  if (current?.type === 'role.v') return '等待独立 V 结构化结论';
+  if (current?.type === 'role.r') return '等待独立 R Evidence 复核';
   if (current?.type === 'harness.collect') return '执行确定性 Gate';
   if (current?.type.startsWith('gate.')) return '生成 Harness Report';
   if (current?.type === 'wait.user') return '等待用户完成当前确认';
@@ -429,21 +500,27 @@ function nextAction(state: TaskState, current?: ExecutionStepSnapshot): string {
 }
 
 async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoot: string, state: TaskState, taskEvents: ExecutionEvent[], current: boolean, now: number): Promise<ExecutionTaskSnapshot> {
-  const fromEvents = eventSteps(taskEvents, now, state.current_round), diagnostics: string[] = [], dependsOn = await taskDependencies(repositoryRoot, taskRoot);
+  const fromEvents = eventSteps(taskEvents, now, state.current_round), diagnostics: string[] = [], dependsOn = await taskDependencies(repositoryRoot, taskRoot),acceptanceFacts=await acceptanceProjection(projectRoot,taskRoot),runtime=await roleRuntime(projectRoot,state.task_id,now);
+  if(acceptanceFacts.acceptance)diagnostics.push(...acceptanceFacts.acceptance.diagnostics);
   const gates = await legacyGateSteps(projectRoot, state.task_id, state.current_round, fromEvents);
   const attempts = await legacyAttemptSteps(taskRoot, taskEvents.length > 0);
   const lifecycle = await legacyStateSteps(taskRoot, taskEvents.length > 0);
-  const steps = [...fromEvents, ...gates, ...attempts, ...lifecycle].sort((left, right) => {
+  let steps = [...fromEvents, ...gates, ...attempts, ...lifecycle].sort((left, right) => {
     const leftTime = left.started_at ? Date.parse(left.started_at) : Number.POSITIVE_INFINITY;
     const rightTime = right.started_at ? Date.parse(right.started_at) : Number.POSITIVE_INFINITY;
     return leftTime - rightTime || left.order - right.order;
   });
+  if (steps.length > MAX_DASHBOARD_STEPS_PER_TASK) {
+    diagnostics.push(`Dashboard 仅返回最近 ${MAX_DASHBOARD_STEPS_PER_TASK} 个步骤；完整事实保留在 Event Log 和 Evidence 中。`);
+    steps = steps.slice(-MAX_DASHBOARD_STEPS_PER_TASK);
+  }
+  steps = steps.map((step) => executionStepSnapshotSchema.parse({ ...step, label: dashboardText(step.label, 120), summary: dashboardText(step.summary), refs: dashboardRefs(step.refs) }));
   if (!taskEvents.length) diagnostics.push('旧 Task 没有执行事件；仅已有 Gate 耗时为精确值，其余阶段可能未知。');
   const intervals = stepIntervals(steps, now), waitingMs = measure(intervals.waiting);
   const activeMs = Math.max(0, measure(intervals.active) - overlap(intervals.active, intervals.waiting));
   const roundIntervals = steps.filter((step) => step.type === 'round.work' && step.started_at && step.duration_ms !== null)
     .map((step) => ({ start: Date.parse(step.started_at as string), end: step.ended_at ? Date.parse(step.ended_at) : now }));
-  const detailIntervals = steps.filter((step) => ['work.reproduce', 'work.analyze', 'work.change', 'harness.execute', 'harness.collect', 'harness.report', 'gate.command', 'gate.playwright'].includes(step.type)
+  const detailIntervals = steps.filter((step) => ['work.reproduce', 'work.analyze', 'work.change', 'harness.execute', 'harness.collect', 'harness.report', 'gate.command', 'gate.playwright', 'role.m', 'role.v', 'role.r'].includes(step.type)
     && step.started_at && step.duration_ms !== null)
     .map((step) => ({ start: Date.parse(step.started_at as string), end: step.ended_at ? Date.parse(step.ended_at) : now }));
   const roundWorkMs = measure(roundIntervals), roundDetailIntervals = intersection(roundIntervals, detailIntervals);
@@ -455,7 +532,8 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
   let untracked: number | null = null, timing: 'exact' | 'derived' | 'unknown' = 'unknown';
   if (taskEventTimes.length) {
     const start = Math.min(...taskEventTimes), delivered = taskEvents.find((item) => item.label === '交付关闭' && item.kind === 'step_succeeded');
-    const end = delivered ? Date.parse(delivered.occurred_at) : state.status === 'delivered' ? Date.parse(state.updated_at) : now;
+    const cancelled = taskEvents.find((item) => item.label === 'Task 已取消' && item.kind === 'annotation');
+    const end = delivered ? Date.parse(delivered.occurred_at) : cancelled ? Date.parse(cancelled.occurred_at) : ['delivered','cancelled'].includes(state.status) ? Date.parse(state.updated_at) : now;
     wallStart = start; wallEnd = Math.max(start, end); wallClock = wallEnd - wallStart;
     untracked = Math.max(0, wallClock - activeMs - waitingMs); timing = delivered || state.status !== 'delivered' ? 'exact' : 'derived';
   }
@@ -472,11 +550,13 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
     .sort((left, right) => (right.duration_ms as number) - (left.duration_ms as number))[0] ?? null;
   return executionTaskSnapshotSchema.parse({
     task_id: state.task_id, title: state.title, level: state.level, status: state.status, round: state.current_round, depends_on: dependsOn, blocked_by: [], managed: true,
+    record_kind:taskEvents.length?(['delivered','cancelled'].includes(state.status)?'historical_runtime':'current_run'):['delivered','cancelled'].includes(state.status)?'historical_no_runtime':state.current_round===0?'never_started':'current_run',runtime,
+    ...acceptanceFacts,
     updated_at: state.updated_at, current, wall_clock_ms: wallClock, active_ms: activeMs, waiting_ms: waitingMs,
     untracked_ms: untracked, round_work_ms: roundWorkMs, round_detail_ms: roundDetailMs,
     round_waiting_ms: roundWaitingMs, round_unattributed_ms: roundUnattributedMs,
     recording_coverage_pct: recordingCoverage, detail_coverage_pct: detailCoverage, retry_count: retryCount, duration_breakdown: breakdown,
-    timing_precision: timing, bottleneck_step_id: bottleneck?.id ?? null, steps, diagnostics,
+    timing_precision: timing, bottleneck_step_id: bottleneck?.id ?? null, steps, diagnostics: diagnostics.map((item) => dashboardText(item, 1_000)),
   });
 }
 
@@ -523,10 +603,10 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
       feature_id: wave.feature_id, summary: wave.summary, task_ids: wave.task_ids, heavy_task_ids: wave.heavy_task_ids,
       completed_tasks: wave.completed_tasks, unfinished_task_ids: wave.unfinished_task_ids,
     })),
-    tasks: tasks.map((task) => ({ task_id: task.task_id, title: task.title, status: task.status, level: task.level, managed: task.managed,
+    tasks: tasks.map((task) => ({ task_id: task.task_id, title: task.title, status: task.status, level: task.level, protocol:task.protocol,acceptance:task.acceptance,managed: task.managed,
       updated_at: task.updated_at, depends_on: task.depends_on, steps: task.steps.map((step) => ({ id: step.id, ended_at: step.ended_at, duration_ms: step.ended_at ? step.duration_ms : null, source: step.source })) })),
   };
-  return executionSnapshotSchema.parse({
+  const snapshot=executionSnapshotSchema.parse({
     schema_version: 1, revision: sha256(JSON.stringify(revisionFacts)), generated_at: now.toISOString(),
     project: { project_id: project.project_id, name: project.name },
     active_task: active && activeSnapshot ? {
@@ -539,6 +619,7 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
         ? `等待前置 ${activeSnapshot.blocked_by.join('、')} 完成；当前 Task 不应继续执行`
         : nextAction(active.state, currentStep ?? undefined),
     } : null,
-    waves, tasks, diagnostics,
+    waves, tasks, diagnostics: diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS).map((item) => dashboardText(item, 1_000)),
   });
+  const bytes=Buffer.byteLength(JSON.stringify(snapshot));if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)throw new Error(`Dashboard Snapshot exceeds ${MAX_EXECUTION_SNAPSHOT_BYTES} bytes (${bytes}); reduce bounded summaries before publishing`);return snapshot;
 }

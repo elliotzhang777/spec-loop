@@ -61,3 +61,11 @@ Roadmap → Product → Feature → Design → Task → 实现与验证
 - 已完成工单不得删除；纠正时追加变更记录或建立新工单。
 - Provider、Toolchain、任务治理等级和自动化等级是独立概念。
 - Web 系统的功能 AC 不能只依赖编译或单元测试；应使用目标工程本地 Playwright 执行真实浏览器路径并归档报告、截图和哈希。人工视觉 Review 不能替代功能测试，Playwright PASS 也不能替代主观效果确认。
+
+## 成品产出规则
+
+- 所有目标工程可直接交付或安装的最终成品统一发布到根目录 `products/<project-slug>/<version>/`。
+- 每个版本目录至少包含成品文件、`manifest.json` 和 `SHA256SUMS`；同一版本一经交付不得原位覆盖，修订时发布新版本。
+- APK、IPA、DMG、EXE、ZIP、镜像导出包等二进制成品默认只保存在本机 `products/`，不提交 Git；`products/README.md` 是目录与元数据规范。
+- 项目内的 `build/`、`dist/`、`.spec-loop/output/` 仍是临时构建或 Evidence 目录，不作为最终成品入口。
+- 发布到 `products/` 不等于完成正式 Delivery；任务状态、Gate、Evidence 和人工验收仍按原流程管理。

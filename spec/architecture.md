@@ -62,6 +62,21 @@ waiting_human_review + Conflict Record + Review Inbox
 
 Loop 不是同一个 Agent 反复尝试并自行宣布完成，而是 Controller 根据 V/R 独立反馈持续纠正偏差。M、Gate、V、R 和 Guard 的职责分离，是避免自我验收的核心条件。协议 v2 使用旁路运行工件；已开始的 v1 Task 不自动迁移、不重启，旧 `VERIFY.md` 生命周期继续可读。
 
+### 当前工单到最新版架构的映射
+
+| 架构层 | 工单 |
+|---|---|
+| v1 兼容事实底座 | TASK-027 执行事件、TASK-028 本地观察面 |
+| v2 状态机内核 | TASK-030 Contract/Plan/V/R/预算/Conflict/Candidate |
+| P 契约与新任务接入 | TASK-031 |
+| M/V/R 物理隔离和 Controller 调度 | TASK-032 |
+| v2 执行事件与观察面 | TASK-033 |
+| report-only 与受控 Scheduling | TASK-034、TASK-035 |
+| Gate Planner 与首个 T2 Toolchain | TASK-036 |
+| 专项与 Phase 最终 Heavy | TASK-026、TASK-029、TASK-037 |
+
+TASK-027/028 已经开始，因此按 v1 完成并由后续 v2 Heavy 工单复核；TASK-026 尚未进入 Round，TASK-029 和 TASK-031～037 均按 P/M/V/R v2 创建或重写。
+
 ## 验证范围与运行时机
 
 验证范围由“改动影响、任务风险、当前时机”共同决定，不按历史 Task 数量机械展开，也不要求每次用户反馈后都运行完整交付闭环。

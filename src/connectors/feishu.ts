@@ -915,6 +915,9 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
       for (const record of recoveredActions) await resultHandler(record);
       for (const record of await callbacks.reconcileFeishuActions(projectRoot, confirmationController)) await resultHandler(record);
     }
+    await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
+    if (signal.aborted) return;
+    acceptingActions = true;
     const connectPromise = transport.connect(async (action) => {
       if (signal.aborted || !acceptingActions || !lease) return;
       try {
@@ -936,8 +939,6 @@ export async function runFeishuConnector(projectRoot: string, options: RunFeishu
     ]);
     if (connectAbortListener) signal.removeEventListener('abort', connectAbortListener);
     if (!connected || signal.aborted) return;
-    await renewFeishuLease(projectRoot, lease.token, ttlMs).catch(() => controller.abort());
-    acceptingActions = !signal.aborted;
     if (acceptingActions) await operations.writeFeishuOperationalState(projectRoot, {
       status: 'connected', attempt: 0, last_transition_at: new Date().toISOString(), last_connected_at: new Date().toISOString(),
       next_retry_at: null, failure_category: null, error_summary: null,

@@ -77,7 +77,7 @@ function failingTransport(error) {
 
 test('progress snapshot and card expose only the required project facts', () => {
   const value = snapshot({ nextUserIntervention: 'authorize_verification', nextAction: 'wait_for_verification_authorization' })
-  assert.deepEqual(value.task_counts, { draft: 0, pending: 1, running: 1, verifying: 0, blocked: 0, completed: 1 })
+  assert.deepEqual(value.task_counts, { draft: 0, pending: 1, running: 1, verifying: 0, blocked: 0, completed: 1, cancelled: 0 })
   assert.deepEqual(value.current, { task_id: 'TASK-022', round: 1, harness_step: 'executed' })
   const rendered = JSON.stringify(renderProgressCard(value))
   assert.match(rendered, /1\/3/)

@@ -35,7 +35,7 @@ export const planSchema = z.object({
 }).strict();
 
 export const roundSchema = z.object({
-  schema_version: z.literal(1), task_id: z.string(), round: z.number().int().positive(), status: z.enum(['open', 'verified_pass', 'verified_fail']),
+  schema_version: z.literal(1), task_id: z.string(), round: z.number().int().positive(), status: z.enum(['open', 'verified_pass', 'verified_fail', 'cancelled']),
 }).strict();
 
 export const verifySchema = z.object({

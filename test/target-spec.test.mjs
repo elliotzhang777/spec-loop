@@ -50,20 +50,22 @@ test('published target-spec releases remain byte-for-byte immutable',async()=>{
   const lock=JSON.parse(await readFile(path.join(root,'releases.json'),'utf8'));
   assert.equal(lock.schema_version,1);
   assert.equal(lock.algorithm,'sha256-path-content-v1');
-  assert.deepEqual(Object.keys(lock.releases),['v1','v2','v3','v4']);
+  assert.deepEqual(Object.keys(lock.releases),['v1','v2','v3','v4','v5']);
   for(const [version,expected] of Object.entries(lock.releases))assert.equal(await digestRelease(path.join(root,version)),expected,`${version} was modified after release`);
 });
 
 test('current backend, frontend and fullstack profiles load the split source specification libraries',async()=>{
   const backend=await loadTargetSpecBundle('backend'),frontend=await loadTargetSpecBundle('frontend'),fullstack=await loadTargetSpecBundle('fullstack');
-  assert.equal(backend.template_version,'2.0.3');
+  assert.equal(backend.template_version,'2.1.0');
   assert.equal(backend.primary_spec_root,'spec');
   assert.equal(backend.backend_task_root,'spec/05-task');
   assert.equal(backend.frontend_task_root,null);
   assert.ok(backend.assets.some(item=>item.install_path==='AGENT.md'));
   assert.ok(backend.assets.some(item=>item.install_path==='spec/03-decisions/_template.md'));
+  assert.match(backend.assets.find(item=>item.install_path==='spec/05-task/_template.md').content,/P\/M\/V\/R v2/);
   assert.equal(frontend.frontend_task_root,'spec/05-task');
   assert.ok(frontend.assets.some(item=>item.install_path==='spec/05-task/_template.md'));
+  assert.match(frontend.assets.find(item=>item.install_path==='spec/05-task/_template.md').content,/contract hash/);
   assert.equal(fullstack.primary_spec_root,'backend/spec');
   assert.equal(fullstack.backend_task_root,'backend/spec/05-task');
   assert.equal(fullstack.frontend_task_root,'frontend/spec/05-task');
