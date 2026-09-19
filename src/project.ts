@@ -260,8 +260,14 @@ export async function unfinishedTaskDependencies(root:string,taskId:string):Prom
   const repository=path.resolve(project.repository),target=path.resolve(repository,spec.target_spec);
   if(target!==repository&&!target.startsWith(`${repository}${path.sep}`))throw new Error('target spec path escapes the repository');
   const info=await lstat(target).catch(()=>null);if(!info)return[];if(!info.isFile()||info.isSymbolicLink())throw new Error('target spec path is invalid');
-  const dependencies=declaredTaskDependencies(await readFile(target,'utf8')),byId=new Map(tasks.map(task=>[task.task_id,task.status]));
-  return dependencies.filter(id=>byId.has(id)&&!['delivered','cancelled'].includes(byId.get(id) as string));
+  const dependencies=declaredTaskDependencies(await readFile(target,'utf8')),byId=new Map(tasks.map(task=>[task.task_id,task]));
+  return dependencies.filter(id=>{
+    const dependency=byId.get(id);
+    if(!dependency)return false;
+    return dependency.protocol==='v2'
+      ? dependency.protocol_stage!=='candidate'
+      : !['delivered','cancelled'].includes(dependency.status);
+  });
 }
 export async function verifyTaskDependencies(root:string,taskId:string):Promise<void>{
   const unfinished=await unfinishedTaskDependencies(root,taskId);if(unfinished.length)throw new Error(`${taskId}: blocked by unfinished dependencies: ${unfinished.join(', ')}`);

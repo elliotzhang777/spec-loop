@@ -17,6 +17,7 @@ import { cancelTask } from '../dist/task.js'
 import { finishWorkActivity, runWorkCommand, startWorkActivity } from '../dist/work-activity.js'
 import { buildExecutionSnapshot, MAX_EXECUTION_SNAPSHOT_BYTES } from '../dist/execution-view.js'
 import { closeExecutionViewServer, executionViewStatus, startExecutionViewServer, startManagedExecutionView, stopManagedExecutionView } from '../dist/execution-view-server.js'
+import { unfinishedTaskDependencies } from '../dist/project.js'
 
 async function projectFixture(name = 'execution-view-') {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
@@ -267,6 +268,28 @@ Measure execution dependencies before starting work.
   const snapshot = await buildExecutionSnapshot(root)
   assert.deepEqual(snapshot.tasks.find((task) => task.task_id === 'TASK-VIEW').blocked_by, ['TASK-BASE'])
   assert.equal(snapshot.active_task.task_id, 'TASK-BASE')
+})
+
+test('a v2 Candidate satisfies target task dependency checks even when its v1 lifecycle remains planned', async () => {
+  const { root, repository, taskRoot } = await projectFixture('execution-view-v2-candidate-dependency-')
+  const dependencyRoot = path.join(root, '.spec-loop', 'tasks', 'task-base')
+  assert.equal(cli(['init', dependencyRoot, '--level', 'standard', '--id', 'TASK-BASE', '--title', 'Base task', '--repository', repository]).code, 0)
+  await writeFile(path.join(dependencyRoot, 'ACCEPTANCE_CONTRACT_V2.md'), '---\nschema_version: 2\n---\n')
+  await writeFile(path.join(dependencyRoot, 'ACCEPTANCE_RUN.json'), `${JSON.stringify({ protocol_version: 2, stage: 'candidate' }, null, 2)}\n`)
+  await writeFile(path.join(repository, 'TASK-VIEW.md'), '# TASK-VIEW：Measure execution\n\n- 依赖任务：TASK-BASE\n')
+  await writeFile(path.join(taskRoot, 'SPEC.md'), `---
+schema_version: 1
+task_id: TASK-VIEW
+title: Measure execution
+level: standard
+target_spec: TASK-VIEW.md
+---
+
+# Goal
+
+Treat an accepted v2 Candidate as a finished dependency.
+`)
+  assert.deepEqual(await unfinishedTaskDependencies(root, 'TASK-VIEW'), [])
 })
 
 test('target-only Heavy Tasks remain visible without fabricated execution timing', async () => {
