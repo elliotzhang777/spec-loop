@@ -13,6 +13,7 @@ import {
   recordRResult,
   recordVResult,
   resolveAcceptanceConflict,
+  runControlledV,
   startAcceptanceRun,
   submitMakerCandidate,
 } from '../dist/acceptance-loop.js'
@@ -294,6 +295,19 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
   const reconciled = await reconcileRoleInvocation(f.root, f.taskId, reviewer.invocation_id)
   assert.equal(reconciled.status, 'interrupted')
   assert.match(reconciled.last_error, /result remains unknown/)
+})
+
+test('Controlled V freezes a clean v2 candidate without a legacy Harness run', async () => {
+  const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', {}, true)
+  const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+  assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')
+  const result = await runControlledV(f.root, f.taskId, invocation.invocation_id)
+  assert.equal(result.run.stage, 'v_passed')
+  assert.equal(result.gates.length, 1)
+  assert.equal(result.gates[0].exit_code, 0)
+  const harness = JSON.parse(await readFile(path.join(f.root, '.spec-loop', 'output', `${f.taskId}-harness-state.json`), 'utf8'))
+  assert.equal(harness.stage, 'verified')
+  assert.equal(harness.head, git(f.workspace, ['rev-parse', 'HEAD']))
 })
 
 test('Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access', async () => {

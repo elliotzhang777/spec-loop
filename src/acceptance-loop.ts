@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
-import { readGateConfig, readWorkspace, runGates, type GateResult } from './execution.js';
+import { freezeControlledVerificationCandidate, readGateConfig, readWorkspace, runGates, type GateResult } from './execution.js';
 import { readProject, scanTasks, verifyTaskExecutionApproval, verifyExecutionPreflight } from './project.js';
 import { readState } from './task.js';
 import { finishExecutionStep, startExecutionStep, type ExecutionStepType } from './execution-events.js';
@@ -544,7 +544,7 @@ export async function recordVResult(root: string, taskId: string, sourceFile: st
 export async function runControlledV(root: string, taskId: string, invocationId: string): Promise<{ gates: GateResult[]; run: AcceptanceRun }> {
   const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
   if (run.stage !== 'plan_compiled') throw new Error(`V is illegal from ${run.stage}`);
-  const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);
+  const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);await freezeControlledVerificationCandidate(root,taskId);
   const gates = await runGates(root, taskId);
   const gateFile = path.join(control(root), 'output', `${taskId}-gates.json`);
   const input = vInputSchema.parse({

@@ -316,6 +316,21 @@ export async function collectHarness(root:string,taskId:string){
   });
 }
 
+export async function freezeControlledVerificationCandidate(root:string,taskId:string):Promise<HarnessState>{
+  const m=await readWorkspace(root,taskId);await verifyTaskExecutionApproval(root,taskId);
+  const statePath=stateFile(root,taskId),current=await exists(statePath)?await readHarnessState(root,taskId):null;
+  const head=await git(m.worktree,['rev-parse','HEAD']),status=await worktreeStatus(m.worktree),fingerprint=await worktreeFingerprint(m.worktree);
+  if(status)throw new Error('Controlled V requires a clean candidate worktree');
+  if(current?.stage==='collected'&&current.workspace===m.worktree&&current.base_commit===m.base_commit&&current.head===head)return current;
+  if(current&&['prepared','executed'].includes(current.stage))throw new Error(`cannot freeze Controlled V from incomplete Harness stage ${current.stage}`);
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path);
+  return observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'harness.collect',label:'冻结 V 候选',summary:'为 v2 Controlled V 记录干净候选 HEAD、diff 和内容指纹',refs:[`.spec-loop/output/${taskId}-collect.json`]},async()=>{
+    const value=collectSchema.parse({schema_version:1,task_id:taskId,workspace:m.worktree,base_commit:m.base_commit,head,status:[],diff_stat:await git(m.worktree,['diff','--stat',m.base_commit]),worktree_fingerprint:fingerprint,collected_at:new Date().toISOString()}),serialized=JSON.stringify(value,null,2)+'\n';
+    const next=harnessStateSchema.parse({schema_version:1,task_id:taskId,stage:'collected',workspace:m.worktree,base_commit:m.base_commit,head,sequence:(current?.sequence??0)+1,evidence_hashes:{...(current?.evidence_hashes??{}),collect:sha256(serialized)},updated_at:new Date().toISOString(),last_error:null});
+    await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-collect.json`),content:serialized},{file:statePath,content:JSON.stringify(next,null,2)+'\n'}]);return next;
+  });
+}
+
 function playwrightPackageRoots(worktree:string,gate:z.infer<typeof playwrightGateSchema>):string[]{
   const roots=new Set<string>([path.resolve(worktree)]);
   const inputs=[...(gate.config?[gate.config]:[]),...gate.tests];
