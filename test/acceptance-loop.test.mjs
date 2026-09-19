@@ -329,6 +329,18 @@ test('Controlled V passes only explicitly named task-scoped environment variable
   }
 })
 
+test('Controlled V ignores numbered environment variables belonging to other tasks', async () => {
+  const f = await fixture('acceptance-controlled-env-scope-', 'TASK-003', {}, true, true, [], ['TASK002_MYSQL_URL', 'TASK003_MYSQL_URL'])
+  const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+  assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')
+  process.env.TASK003_MYSQL_URL = 'fixture-value'
+  try {
+    assert.equal((await runControlledV(f.root, f.taskId, invocation.invocation_id)).run.stage, 'v_passed')
+  } finally {
+    delete process.env.TASK003_MYSQL_URL
+  }
+})
+
 test('Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access', async () => {
   const f = await fixture('acceptance-runtime-probe-', 'TASK-RUNTIME-PROBE-1', {}, true)
   const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md'), fakeCodex = path.join(f.root, 'codex'), count = path.join(f.root, 'probe-count.txt')
