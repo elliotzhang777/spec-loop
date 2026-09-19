@@ -256,8 +256,12 @@ export async function ingestSucceededRoleResult(root:string,taskId:string,id:str
   if(invocation.result_status==='ingested')return invocation;
   try{
     if(invocation.role==='M'){
-      const evidence=await regularEvidenceFiles(invocation.evidence_root);if(!evidence.length)throw new Error('M succeeded but produced no self-test Evidence');
-      await (await import('./acceptance-loop.js')).submitMakerCandidate(root,taskId,evidence,id);await (await import('./acceptance-loop.js')).compileAcceptancePlan(root,taskId);
+      const acceptance=await import('./acceptance-loop.js'),run=await acceptance.readAcceptanceRun(root,taskId);
+      if(run.stage==='m_working'){
+        const evidence=await regularEvidenceFiles(invocation.evidence_root);if(!evidence.length)throw new Error('M succeeded but produced no self-test Evidence');
+        await acceptance.submitMakerCandidate(root,taskId,evidence,id);
+      }else if(!['m_submitted','plan_compiled'].includes(run.stage))throw new Error(`M result ingestion is illegal from ${run.stage}`);
+      if((await acceptance.readAcceptanceRun(root,taskId)).stage==='m_submitted')await acceptance.compileAcceptancePlan(root,taskId);
     }else{
       const resultFile=path.join(invocation.evidence_root,'RESULT.json');if(!(await exists(resultFile))){invocation=invocationSchema.parse({...invocation,result_status:'awaiting_ingestion',result_error:'Provider succeeded without Evidence/RESULT.json'});await writeInvocation(root,invocation);return invocation}
       if(invocation.role==='V')await (await import('./acceptance-loop.js')).recordVResult(root,taskId,resultFile);else await (await import('./acceptance-loop.js')).recordRResult(root,taskId,resultFile);

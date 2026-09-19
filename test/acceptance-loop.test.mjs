@@ -488,6 +488,29 @@ test('M role cannot commit a modification to the approved formal Task specificat
   assert.match(result.last_error, /modified the approved formal Task specification/)
 })
 
+test('M result ingestion resumes plan compilation after a control-plane Gate configuration repair', async () => {
+  const f = await fixture('acceptance-m-ingest-resume-', 'TASK-M-INGEST-RESUME', {}, true, false)
+  await startAcceptanceRun(f.root, f.taskId)
+  const workspaceResult = cli(['workspace', 'create', f.root, f.taskId, '--json'])
+  assert.equal(workspaceResult.code, 0, workspaceResult.stderr)
+  const maker = await prepareRoleInvocation(f.root, f.taskId, 'M')
+  assert.equal((await runRoleInvocation(f.root, f.taskId, maker.invocation_id)).status, 'succeeded')
+  const gatesFile = path.join(f.root, '.spec-loop', 'GATES.md')
+  const validGates = await readFile(gatesFile, 'utf8')
+  await writeMd(gatesFile, {
+    schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    gates: [{ id: 'unrelated-test', ac: ['AC-1'], command: [process.execPath, '--version'], timeout_seconds: 30 }],
+  }, '# Gates\n\nTemporarily missing the approved Gate to exercise repair.')
+  let result = await ingestSucceededRoleResult(f.root, f.taskId, maker.invocation_id)
+  assert.equal(result.result_status, 'invalid')
+  assert.match(result.result_error, /is not configured/)
+  assert.equal((await readAcceptanceRun(f.root, f.taskId)).stage, 'm_submitted')
+  await writeFile(gatesFile, validGates)
+  result = await ingestSucceededRoleResult(f.root, f.taskId, maker.invocation_id)
+  assert.equal(result.result_status, 'ingested')
+  assert.equal((await readAcceptanceRun(f.root, f.taskId)).stage, 'plan_compiled')
+})
+
 test('M rework requires a new HEAD and the third semantic repair enters Review Inbox', async () => {
   const f = await fixture('acceptance-budget-')
   const failureMessages = ['boundary condition is incorrect', 'regression branch is incorrect', 'fallback behavior is incorrect']
