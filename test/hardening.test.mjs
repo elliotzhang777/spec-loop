@@ -77,6 +77,13 @@ test('Harness report rejects tampered gate artifact',async()=>{
   const f=await throughCollect('TAMPER');assert.equal(cli(['gate','run',f.root,f.taskId]).code,0);const gates=JSON.parse(await readFile(path.join(f.root,'.spec-loop','output',`${f.taskId}-gates.json`),'utf8'));await writeFile(path.join(f.root,gates[0].artifact),'forged');const report=cli(['harness','report',f.root,f.taskId]);assert.notEqual(report.code,0);assert.match(report.stderr,/(artifact hash mismatch|Evidence hash chain mismatch)/);
 });
 
+test('Gate stability runs reject a check that only passes once',async()=>{
+  const f=await throughCollect('STABILITY'),script=path.join(f.root,'flaky-check.mjs'),counter=path.join(f.root,'flaky-count.txt');
+  await writeFile(script,`import { readFileSync, writeFileSync } from 'node:fs'\nconst file=process.argv[2]\nlet count=0\ntry { count=Number(readFileSync(file,'utf8')) } catch {}\ncount += 1\nwriteFileSync(file,String(count))\nprocess.exit(count===1?0:1)\n`);
+  await writeMd(path.join(f.root,'.spec-loop','GATES.md'),{schema_version:1,gates:[{id:'stable',evidence_class:'behavior',stability_runs:2,command:[process.execPath,script,counter],timeout_seconds:30}]},'# Gates\n\nThe same check must pass twice.');
+  const result=cli(['gate','run',f.root,f.taskId,'--json']);assert.notEqual(result.code,0);const gate=JSON.parse(result.stdout)[0];assert.equal(gate.exit_code,1);assert.equal(gate.stability_runs,2);assert.equal(await readFile(counter,'utf8'),'2');
+});
+
 test('target spec check rejects placeholders and symlinked required files',async()=>{
   const f=await fixture('SPEC');const roadmap=path.join(f.repo,'spec','roadmap.md');await writeFile(roadmap,'# Roadmap\n\nTODO\n');let result=cli(['project','spec-check',f.root,'--json']);assert.notEqual(result.code,0);assert.match(result.stdout,/placeholder content/);await writeFile(roadmap,'# Valid Roadmap\n\nA maintained and approved direction without placeholders.\n');const broken=path.join(f.repo,'spec','02-feature','FEAT-001-broken.md');await writeFile(broken,'# FEAT-001：Broken trace\n\n- 状态：草稿\n\n## 用户价值\n\nA feature without an upstream product reference.\n');result=cli(['project','spec-check',f.root,'--json']);assert.notEqual(result.code,0);assert.match(result.stdout,/missing upstream trace/);spawnSync('rm',[broken]);const board=path.join(f.repo,'spec','pending-board.md');await writeFile(path.join(f.repo,'outside.md'),'# Outside\n\nExternal content that must not be trusted.\n');spawnSync('rm',[board]);await symlink(path.join(f.repo,'outside.md'),board);result=cli(['project','spec-check',f.root,'--json']);assert.notEqual(result.code,0);assert.match(result.stdout,/symbolic link/);
 });

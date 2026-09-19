@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { atomicWriteMany } from './files.js';
 import { readProject } from './project.js';
+import { processMatches, processStartedAt, signalProcessTree, terminateProcessTree } from './process-control.js';
+import { runRetentionMaintenance } from './maintenance.js';
 
 const supervisorMarkerSchema = z.object({
   schema_version: z.literal(1),
@@ -19,11 +21,15 @@ const supervisorMarkerSchema = z.object({
   iteration: z.number().int().nonnegative(),
   state: z.enum(['starting', 'checking', 'healthy', 'degraded', 'stopping']),
   worker_pid: z.number().int().positive().nullable(),
+  worker_process_started_at: z.string().nullable().default(null),
   last_check_at: z.iso.datetime().nullable(),
   last_check_ok: z.boolean().nullable(),
   last_unhealthy_count: z.number().int().nonnegative().nullable(),
   last_stopped_tasks: z.array(z.string()),
   last_error: z.string().max(1000).nullable(),
+  last_maintenance_at: z.iso.datetime().nullable().default(null),
+  last_maintenance_archived: z.number().int().nonnegative().default(0),
+  last_maintenance_errors: z.number().int().nonnegative().default(0),
 }).strict();
 
 type SupervisorMarker = z.infer<typeof supervisorMarkerSchema>;
@@ -33,32 +39,12 @@ const lockDir = (root: string) => path.join(root, '.spec-loop', 'locks', 'schedu
 const lockOwnerFile = (root: string) => path.join(lockDir(root), 'owner.json');
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-async function processStartedAt(pid: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('/bin/ps', ['-p', String(pid), '-o', 'lstart='], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '', settled = false;
-    const finish = (error?: Error, value?: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      error ? reject(error) : resolve(value as string);
-    };
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new Error('process identity check timed out')); }, 5000);
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', (error) => finish(error));
-    child.on('close', (code) => code === 0 && stdout.trim()
-      ? finish(undefined, stdout.trim())
-      : finish(new Error(stderr.trim() || 'process is not running')));
-  });
-}
-
 async function readMarker(root: string): Promise<SupervisorMarker> {
   return supervisorMarkerSchema.parse(JSON.parse(await readFile(markerFile(root), 'utf8')));
 }
 
 async function matchingProcess(pid: number, startedAt: string): Promise<boolean> {
-  return (await processStartedAt(pid).catch(() => null)) === startedAt;
+  return processMatches(pid, startedAt);
 }
 
 async function acquireSupervisorLock(root: string, processStart: string): Promise<void> {
@@ -96,6 +82,7 @@ async function watchdogCycle(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'scheduler', 'control', 'watchdog', root, '--stale-seconds', String(staleSeconds), '--apply', '--json'], {
       cwd: root,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '', settled = false;
@@ -107,16 +94,16 @@ async function watchdogCycle(
       void onWorker(null).finally(() => error ? reject(error) : resolve(value!));
     };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      signalProcessTree(child.pid,'SIGKILL');
       finish(new Error(`watchdog cycle exceeded ${timeoutSeconds}s and was killed`));
     }, timeoutSeconds * 1000);
     child.stdout.on('data', (chunk) => {
       stdout += chunk;
-      if (Buffer.byteLength(stdout) > 1_000_000) { child.kill('SIGKILL'); finish(new Error('watchdog cycle output exceeded 1 MB')); }
+      if (Buffer.byteLength(stdout) > 1_000_000) { signalProcessTree(child.pid,'SIGKILL'); finish(new Error('watchdog cycle output exceeded 1 MB')); }
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
-      if (Buffer.byteLength(stderr) > 100_000) { child.kill('SIGKILL'); finish(new Error('watchdog cycle error output exceeded 100 KB')); }
+      if (Buffer.byteLength(stderr) > 100_000) { signalProcessTree(child.pid,'SIGKILL'); finish(new Error('watchdog cycle error output exceeded 100 KB')); }
     });
     child.on('error', (error) => finish(error));
     child.on('close', (code, signal) => {
@@ -153,14 +140,16 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: { i
   if (!Number.isInteger(staleSeconds) || staleSeconds < 3 || staleSeconds > 3600) throw new Error('stale heartbeat threshold must be 3–3600 seconds');
   if (!Number.isInteger(cycleTimeoutSeconds) || cycleTimeoutSeconds < 3 || cycleTimeoutSeconds > 600) throw new Error('watchdog cycle timeout must be 3–600 seconds');
   const processStart = await processStartedAt(process.pid);
+  if (!processStart) throw new Error('cannot establish scheduler Supervisor process identity');
   await acquireSupervisorLock(root, processStart);
   let stopping = false, worker: ChildProcess | null = null, writeTail = Promise.resolve();
   let marker: SupervisorMarker = supervisorMarkerSchema.parse({
     schema_version: 1, project_root: root, pid: process.pid, process_started_at: processStart,
     interval_seconds: intervalSeconds, stale_seconds: staleSeconds, cycle_timeout_seconds: cycleTimeoutSeconds,
     started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), iteration: 0,
-    state: 'starting', worker_pid: null, last_check_at: null, last_check_ok: null,
+    state: 'starting', worker_pid: null, worker_process_started_at: null, last_check_at: null, last_check_ok: null,
     last_unhealthy_count: null, last_stopped_tasks: [], last_error: null,
+    last_maintenance_at: null, last_maintenance_archived: 0, last_maintenance_errors: 0,
   });
   const persist = async (change: Partial<SupervisorMarker> = {}) => {
     marker = supervisorMarkerSchema.parse({ ...marker, ...change, heartbeat_at: new Date().toISOString() });
@@ -168,35 +157,39 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: { i
     writeTail = writeTail.then(() => atomicWriteMany(root, [{ file: markerFile(root), content: `${JSON.stringify(snapshot, null, 2)}\n` }]));
     await writeTail;
   };
-  const stop = () => { stopping = true; worker?.kill('SIGTERM'); };
+  const stop = () => { stopping = true; signalProcessTree(worker?.pid,'SIGTERM'); };
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
   await persist();
   try {
     while (!stopping) {
       marker.iteration += 1;
-      await persist({ state: 'checking', worker_pid: null });
-      const heartbeat = setInterval(() => { void persist().catch(() => { stopping = true; worker?.kill('SIGKILL'); }); }, Math.min(2000, intervalSeconds * 1000));
+      await persist({ state: 'checking', worker_pid: null, worker_process_started_at: null });
+      const heartbeat = setInterval(() => { void persist().catch(() => { stopping = true; signalProcessTree(worker?.pid,'SIGKILL'); }); }, Math.min(2000, intervalSeconds * 1000));
       try {
         const result = await watchdogCycle(root, staleSeconds, cycleTimeoutSeconds, async (current) => {
           worker = current;
-          await persist({ worker_pid: current?.pid ?? null });
+          await persist({ worker_pid: current?.pid ?? null, worker_process_started_at: current?.pid ? await processStartedAt(current.pid) : null });
         });
         await persist({
-          state: 'healthy', worker_pid: null, last_check_at: new Date().toISOString(), last_check_ok: result.ok,
+          state: 'healthy', worker_pid: null, worker_process_started_at: null, last_check_at: new Date().toISOString(), last_check_ok: result.ok,
           last_unhealthy_count: result.unhealthy.length,
           last_stopped_tasks: result.stopped_tasks.length
             ? result.stopped_tasks.flatMap((item) => typeof item.task_id === 'string' ? [item.task_id] : [])
             : marker.last_stopped_tasks,
           last_error: null,
         });
+        if(!marker.last_maintenance_at||Date.now()-Date.parse(marker.last_maintenance_at)>=24*60*60*1000){
+          const maintenance=await runRetentionMaintenance(root,5);
+          await persist({last_maintenance_at:maintenance.ran_at,last_maintenance_archived:maintenance.archived.length,last_maintenance_errors:maintenance.errors.length});
+        }
       } catch (error) {
-        if (!stopping) await persist({ state: 'degraded', worker_pid: null, last_check_at: new Date().toISOString(), last_check_ok: false, last_error: (error as Error).message.slice(0, 1000) });
+        if (!stopping) await persist({ state: 'degraded', worker_pid: null, worker_process_started_at: null, last_check_at: new Date().toISOString(), last_check_ok: false, last_error: (error as Error).message.slice(0, 1000) });
       } finally { clearInterval(heartbeat); worker = null; }
       if (stopping) break;
       const until = Date.now() + intervalSeconds * 1000;
       while (!stopping && Date.now() < until) await delay(Math.min(200, until - Date.now()));
     }
-    await persist({ state: 'stopping', worker_pid: null });
+    await persist({ state: 'stopping', worker_pid: null, worker_process_started_at: null });
   } finally {
     await writeTail.catch(() => {});
     await releaseSupervisorFiles(root, processStart);
@@ -231,23 +224,14 @@ export async function stopManagedSchedulerSupervisor(projectRoot: string) {
     if (!owner?.pid || !owner.process_started_at || !(await matchingProcess(owner.pid, owner.process_started_at))) await rm(lockDir(root), { recursive: true, force: true });
     return { stopped: false, reason: status.reason };
   }
-  process.kill(status.marker.pid, 'SIGTERM');
-  for (let attempt = 0; attempt < 200; attempt++) {
-    await delay(25);
-    if (!(await matchingProcess(status.marker.pid, status.marker.process_started_at))) {
-      await releaseSupervisorFiles(root, status.marker.process_started_at).catch(() => {});
-      return { stopped: true, reason: 'stopped' as const };
-    }
+  if (status.marker.worker_pid && status.marker.worker_process_started_at) {
+    const workerStop = await terminateProcessTree(status.marker.worker_pid, status.marker.worker_process_started_at, 500);
+    if (!workerStop.stopped) throw new Error(`scheduler watchdog worker did not stop safely: ${workerStop.reason}`);
   }
-  process.kill(status.marker.pid, 'SIGKILL');
-  for (let attempt = 0; attempt < 80; attempt++) {
-    await delay(25);
-    if (!(await matchingProcess(status.marker.pid, status.marker.process_started_at))) {
-      await rm(markerFile(root), { force: true }); await rm(lockDir(root), { recursive: true, force: true });
-      return { stopped: true, reason: 'killed_after_timeout' as const };
-    }
-  }
-  throw new Error('scheduler Supervisor did not stop safely');
+  const stopped = await terminateProcessTree(status.marker.pid, status.marker.process_started_at, 5_000);
+  if (!stopped.stopped) throw new Error(`scheduler Supervisor did not stop safely: ${stopped.reason}`);
+  await rm(markerFile(root), { force: true }); await rm(lockDir(root), { recursive: true, force: true });
+  return { stopped: true, reason: stopped.reason };
 }
 
 function xml(value:string):string{return value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;')}
@@ -255,4 +239,21 @@ export async function schedulerSupervisorLaunchdPlan(projectRoot:string){
   const root=await realpath(projectRoot),project=await readProject(root),here=path.dirname(fileURLToPath(import.meta.url)),templateFile=path.resolve(here,'..','assets','launchd','com.spec-loop.scheduler-supervisor.plist.template'),cli=fileURLToPath(new URL('./cli.js',import.meta.url)),label=`com.spec-loop.scheduler-supervisor.${project.project_id.toLowerCase().replace(/[^a-z0-9.-]/g,'-')}`,destination=path.join(process.env.HOME??'', 'Library','LaunchAgents',`${label}.plist`),logs=path.join(root,'.spec-loop','logs');
   const template=await readFile(templateFile,'utf8'),plist=template.replaceAll('__LABEL__',xml(label)).replaceAll('__NODE__',xml(process.execPath)).replaceAll('__CLI__',xml(cli)).replaceAll('__PROJECT_ROOT__',xml(root)).replaceAll('__LOG_OUT__',xml(path.join(logs,'supervisor.out.log'))).replaceAll('__LOG_ERR__',xml(path.join(logs,'supervisor.err.log')));
   return{schema_version:1,label,destination,plist,install_commands:[`mkdir -p ${JSON.stringify(logs)} ${JSON.stringify(path.dirname(destination))}`,`# save the returned plist to ${JSON.stringify(destination)}`,`launchctl bootstrap gui/$(id -u) ${JSON.stringify(destination)}`],uninstall_command:`launchctl bootout gui/$(id -u) ${JSON.stringify(destination)}`,installed:false,destructive_action_performed:false};
+}
+
+async function launchctl(args:string[]):Promise<{code:number;stdout:string;stderr:string}>{return new Promise(resolve=>{const child=spawn('/bin/launchctl',args,{stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',chunk=>stdout+=chunk);child.stderr.on('data',chunk=>stderr+=chunk);child.on('error',error=>resolve({code:127,stdout,stderr:error.message}));child.on('close',code=>resolve({code:code??1,stdout:stdout.trim(),stderr:stderr.trim()}))})}
+
+export async function installSchedulerSupervisorLaunchd(projectRoot:string){
+  if(process.platform!=='darwin')throw new Error('launchd installation is supported only on macOS');
+  const plan=await schedulerSupervisorLaunchdPlan(projectRoot),home=process.env.HOME;if(!home)throw new Error('HOME is unavailable');const allowed=path.join(home,'Library','LaunchAgents')+path.sep;if(!plan.destination.startsWith(allowed))throw new Error('launchd destination escapes ~/Library/LaunchAgents');
+  const existing=await readFile(plan.destination,'utf8').catch(()=>null);if(existing!==null&&existing!==plan.plist)throw new Error(`launchd plist already exists with different content: ${plan.destination}`);
+  await mkdir(path.dirname(plan.destination),{recursive:true});await mkdir(path.join(path.resolve(projectRoot),'.spec-loop','logs'),{recursive:true});if(existing===null)await writeFile(plan.destination,plan.plist,{mode:0o644,flag:'wx'});
+  const domain=`gui/${process.getuid?.()??0}`,printed=await launchctl(['print',`${domain}/${plan.label}`]);if(printed.code!==0){const loaded=await launchctl(['bootstrap',domain,plan.destination]);if(loaded.code!==0)throw new Error(`launchctl bootstrap failed: ${loaded.stderr||loaded.stdout||loaded.code}`)}
+  return{...plan,installed:true,destructive_action_performed:true,installed_at:new Date().toISOString()};
+}
+
+export async function uninstallSchedulerSupervisorLaunchd(projectRoot:string){
+  if(process.platform!=='darwin')throw new Error('launchd removal is supported only on macOS');
+  const plan=await schedulerSupervisorLaunchdPlan(projectRoot),domain=`gui/${process.getuid?.()??0}`,loaded=await launchctl(['print',`${domain}/${plan.label}`]);if(loaded.code===0){const stopped=await launchctl(['bootout',domain,plan.destination]);if(stopped.code!==0)throw new Error(`launchctl bootout failed: ${stopped.stderr||stopped.stdout||stopped.code}`)}
+  await rm(plan.destination,{force:true});return{schema_version:1,label:plan.label,destination:plan.destination,installed:false,destructive_action_performed:true,uninstalled_at:new Date().toISOString()};
 }

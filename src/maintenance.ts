@@ -81,6 +81,20 @@ export async function archiveAcceptanceEvidence(projectRoot:string,taskId:string
   const manifest={schema_version:1,task_id:taskId,run_id:run.run_id,created_at:new Date().toISOString(),total_bytes:total,files:files.map(({source:_,...item})=>item),excluded:['role candidate snapshots'],destructive_action_performed:false};await atomicWriteMany(root,[{file:manifestFile,content:`${JSON.stringify(manifest,null,2)}\n`}]);return manifest;
 }
 
+export async function runRetentionMaintenance(projectRoot:string,maxTasks=5){
+  if(!Number.isInteger(maxTasks)||maxTasks<1||maxTasks>100)throw new Error('retention maintenance maxTasks must be 1–100');
+  const terminal=(await scanTasks(projectRoot)).filter(task=>['delivered','cancelled'].includes(task.status)),archived:Array<Record<string,unknown>>=[],skipped:Array<Record<string,unknown>>=[],errors:Array<Record<string,unknown>>=[];let attempted=0;
+  for(const task of terminal){
+    const runFile=path.join(task.path,'ACCEPTANCE_RUN.json');if(!(await exists(runFile))){skipped.push({task_id:task.task_id,reason:'no_acceptance_run'});continue}
+    const run=await readFile(runFile,'utf8').then(raw=>JSON.parse(raw) as {run_id?:string}).catch(()=>null);if(!run?.run_id){errors.push({task_id:task.task_id,error:'invalid Acceptance Run identity'});continue}
+    if(await exists(path.join(projectRoot,'.spec-loop','evidence-archive',task.task_id,run.run_id,'MANIFEST.json'))){skipped.push({task_id:task.task_id,reason:'already_archived'});continue}
+    if(attempted>=maxTasks){skipped.push({task_id:task.task_id,reason:'cycle_limit'});continue}attempted+=1;
+    try{const manifest=await archiveAcceptanceEvidence(projectRoot,task.task_id);archived.push({task_id:task.task_id,run_id:manifest.run_id,total_bytes:manifest.total_bytes})}
+    catch(error){errors.push({task_id:task.task_id,error:(error as Error).message.slice(0,1000)})}
+  }
+  return{schema_version:1,ran_at:new Date().toISOString(),max_tasks:maxTasks,terminal_tasks:terminal.length,archived,skipped,errors,destructive_action_performed:false};
+}
+
 async function activeTaskFacts(projectRoot: string, taskId: string) {
   const effects: string[] = [], leases: string[] = [];
   const effectDir = path.join(projectRoot, '.spec-loop', 'active-effects');

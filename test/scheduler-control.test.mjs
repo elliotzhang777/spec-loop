@@ -6,8 +6,9 @@ import { spawn } from 'node:child_process'
 
 import { cli, fillContracts, tempRoot, writeMd } from './helpers.mjs'
 import { startAcceptanceRun } from '../dist/acceptance-loop.js'
-import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, stopTaskExecution } from '../dist/scheduler-control.js'
+import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileInterruptedWaves, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, stopTaskExecution } from '../dist/scheduler-control.js'
 import { schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor } from '../dist/scheduler-supervisor.js'
+import { processStartedAt } from '../dist/process-control.js'
 import { readState } from '../dist/task.js'
 import { buildExecutionSnapshot } from '../dist/execution-view.js'
 import { readExecutionEvents } from '../dist/execution-events.js'
@@ -29,7 +30,7 @@ async function useFixtureProvider(root) {
   await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: codex', 'executable: /usr/bin/true'))
 }
 
-test('scheduler leases fence stale workers, serialize conflicting resources, and honor Pause/Kill', async () => {
+test('scheduler leases fence stale workers, serialize conflicting resources, and honor Pause/Kill', async (t) => {
   const root = await tempRoot('scheduler-control-'), repository = path.join(root, 'repo'); await mkdir(repository)
   assert.equal(cli(['project', 'init', root, '--id', 'PROJ-CONTROL', '--name', 'Scheduler control', '--repository', repository]).code, 0)
   assert.equal(cli(['project', 'protocol', root, '--set', 'v2']).code, 0)
@@ -63,12 +64,17 @@ test('scheduler leases fence stale workers, serialize conflicting resources, and
   await mkdir(staleDriverLock, { recursive: true })
   await writeFile(path.join(staleDriverLock, 'owner.json'), `${JSON.stringify({ pid: 99999999 })}\n`)
   const effect = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  t.after(() => { try { effect.kill('SIGKILL') } catch {} })
   const activeEffects = path.join(root, '.spec-loop', 'active-effects'); await mkdir(activeEffects, { recursive: true })
-  await writeFile(path.join(activeEffects, 'TASK-LEASE-1-effect.json'), `${JSON.stringify({ schema_version: 1, effect_id: 'effect-under-stop', task_id: 'TASK-LEASE-1', kind: 'gate', pid: effect.pid, process_group: false, heartbeat_at: new Date().toISOString() })}\n`)
+  const effectMarker = path.join(activeEffects, 'TASK-LEASE-1-effect.json')
+  await writeFile(effectMarker, `${JSON.stringify({ schema_version: 2, effect_id: 'effect-under-stop', task_id: 'TASK-LEASE-1', kind: 'gate', pid: effect.pid, process_started_at: await processStartedAt(effect.pid), process_group: false, started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), idle_timeout_seconds: 10 })}\n`)
   const health = await inspectSchedulerLiveness(root, 3)
   assert.equal(health.effects.find(item => item.effect_id === 'effect-under-stop').status, 'healthy')
-  assert.equal(health.drivers.find(item => item.task_id === 'TASK-LEASE-1').status, 'dead')
-  assert.equal((await runSchedulerWatchdog(root, 3, false)).action, 'inspection_only')
+  assert.equal(health.drivers.find(item => item.task_id === 'TASK-LEASE-1').status, 'dead_or_pid_reused')
+  const marker = JSON.parse(await readFile(effectMarker, 'utf8')); marker.last_progress_at = new Date(Date.now() - 20_000).toISOString(); marker.heartbeat_at = new Date().toISOString(); await writeFile(effectMarker, `${JSON.stringify(marker)}\n`)
+  const inspection = await runSchedulerWatchdog(root, 3, false)
+  assert.equal(inspection.action, 'inspection_only')
+  assert.equal(inspection.effects.find(item => item.effect_id === 'effect-under-stop').status, 'no_progress')
   assert.equal((await runSchedulerWatchdog(root, 3, true)).stopped_tasks.length, 1)
   await killSchedulerControl(root)
   assert.equal((await readState(path.join(root, '.spec-loop', 'tasks', 'task-lease-1'))).status, 'cancelled')
@@ -117,6 +123,7 @@ test('wave executor concurrently dispatches Ready Tasks within elapsed, token an
   assert.equal(wave.results.length, 2)
   assert.equal(wave.usage.total_tokens, 20, JSON.stringify(wave.results))
   assert.equal(wave.usage.cost_usd, 0.02)
+  assert.ok(wave.results.reduce((sum, item) => sum + item.reservation.tokens, 0) <= wave.budget.max_tokens)
   assert.equal((await readFile(starts, 'utf8')).trim().split('\n').length, 2)
   assert.deepEqual((await planReadyWave(root)).ready.map(item => [item.task_id, item.role]), [['TASK-WAVE-1', 'V'], ['TASK-WAVE-2', 'V']])
 
@@ -130,6 +137,19 @@ test('wave executor concurrently dispatches Ready Tasks within elapsed, token an
   assert.equal(unknown.status, 'usage_unknown')
   assert.equal(unknown.results.length, 1)
   assert.equal(unknown.usage.recorded, false)
+})
+
+test('dead wave drivers are reconciled into an explicit requeue state', async () => {
+  const root = await tempRoot('scheduler-wave-recovery-'), repository = path.join(root, 'repo'); await mkdir(repository)
+  assert.equal(cli(['project', 'init', root, '--id', 'PROJ-WAVE-RECOVERY', '--name', 'Wave recovery', '--repository', repository]).code, 0)
+  const runs = path.join(root, '.spec-loop', 'scheduler', 'wave-runs'); await mkdir(runs, { recursive: true })
+  const file = path.join(runs, 'WAVE-DEAD.json')
+  await writeFile(file, `${JSON.stringify({ schema_version: 2, wave_id: 'WAVE-DEAD', status: 'running', driver: { pid: 99999999, process_started_at: 'never' }, started_at: new Date(Date.now() - 60_000).toISOString(), heartbeat_at: new Date(Date.now() - 60_000).toISOString(), planned_tasks: [], results: [] }, null, 2)}\n`)
+  const inspected = await reconcileInterruptedWaves(root, false)
+  assert.equal(inspected.waves[0].status, 'dead_driver')
+  const applied = await reconcileInterruptedWaves(root, true)
+  assert.equal(applied.waves[0].status, 'interrupted_requeued')
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).status, 'interrupted_requeued')
 })
 
 test('independent Supervisor survives its caller and automatically closes a dead Driver task', async () => {

@@ -5,7 +5,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 
 import { cli, fillContracts, tempRoot } from './helpers.mjs'
-import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree } from '../dist/maintenance.js'
+import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree, runRetentionMaintenance } from '../dist/maintenance.js'
 import { cancelTask } from '../dist/task.js'
 
 function git(cwd, args) {
@@ -75,6 +75,7 @@ test('retention policy uses shared dependency caches and archives bounded author
   assert.equal(cli(['project', 'init', root, '--id', 'PROJ-ARCHIVE', '--name', 'Archive fixture', '--repository', repository]).code, 0)
   const taskId = 'TASK-ARCHIVE-1', taskRoot = path.join(root, '.spec-loop', 'tasks', taskId.toLowerCase())
   assert.equal(cli(['init', taskRoot, '--level', 'standard', '--id', taskId, '--title', 'Archive evidence', '--repository', repository]).code, 0)
+  await fillContracts(taskRoot, { id: taskId, title: 'Archive evidence', level: 'standard' }); assert.equal(cli(['plan', taskRoot]).code, 0)
   await writeFile(path.join(taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), 'contract evidence\n')
   await writeFile(path.join(taskRoot, 'ACCEPTANCE_RUN.json'), `${JSON.stringify({ run_id: 'RUN-TASK-ARCHIVE-1-1' })}\n`)
   const output = path.join(root, '.spec-loop', 'output', `${taskId}-acceptance-v2`); await mkdir(path.join(output, 'invocations', 'INV-1', 'candidate'), { recursive: true }); await mkdir(path.join(output, 'V'), { recursive: true })
@@ -83,8 +84,14 @@ test('retention policy uses shared dependency caches and archives bounded author
   const policy = await retentionPolicy(root)
   assert.match(policy.shared_cache_root, /\.spec-loop\/shared-cache$/)
   assert.equal(policy.snapshot_max_bytes, 262_144)
+  await cancelTask(taskRoot)
+  const scheduled = await runRetentionMaintenance(root, 5)
+  assert.deepEqual(scheduled.archived.map(item => item.task_id), [taskId])
+  assert.equal(scheduled.errors.length, 0)
+  assert.equal(scheduled.destructive_action_performed, false)
   const archived = await archiveAcceptanceEvidence(root, taskId)
   assert.equal(archived.files.some(item => item.relative.includes('candidate')), false)
   assert.equal(archived.files.some(item => item.relative.endsWith('V/result.json')), true)
   assert.deepEqual(await archiveAcceptanceEvidence(root, taskId), archived)
+  assert.equal((await runRetentionMaintenance(root, 5)).skipped.find(item => item.task_id === taskId).reason, 'already_archived')
 })

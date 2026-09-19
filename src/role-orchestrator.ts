@@ -4,11 +4,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { atomicWriteMany, exists, readMarkdown, sha256 } from './files.js';
-import { readProviderConfig, scanTasks } from './project.js';
+import { providerDoctor, providerForRole, readProviderConfig, scanTasks } from './project.js';
 import { readWorkspace } from './execution.js';
 import { finishExecutionStep, reconcileInterruptedExecutionSteps, startExecutionStep } from './execution-events.js';
 import { readState, runtimeInit } from './task.js';
 import { readBudget } from './runtime.js';
+import { processMatches, processStartedAt, signalProcessTree, terminateProcessTree } from './process-control.js';
 
 const roleSchema=z.enum(['M','V','R']);
 const statusSchema=z.enum(['prepared','running','succeeded','failed','timed_out','cancelled','interrupted']);
@@ -23,15 +24,16 @@ const invocationSchema=z.object({
   provider:z.string(),provider_identity:z.object({executable:z.string(),resolved:z.string(),args_sha256:hashSchema,version:z.string().nullable()}).strict().nullable().default(null),candidate:z.object({path:z.string(),access:z.enum(['read_write','read_only_snapshot']),head:z.string().min(7),fingerprint:hashSchema}).strict(),
   evidence_root:z.string(),context:z.array(z.object({file:z.string(),sha256:hashSchema}).strict()).min(2),
   forbidden_actions:z.array(z.enum(['merge','push','deploy','credential_write','production_data','external_side_effect'])).length(6),
-  prompt_hash:hashSchema,pid:z.number().int().positive().nullable(),exit_code:z.number().int().nullable(),timed_out:z.boolean(),
+  prompt_hash:hashSchema,pid:z.number().int().positive().nullable(),process_started_at:z.string().nullable().default(null),exit_code:z.number().int().nullable(),timed_out:z.boolean(),
   output_sha256:hashSchema.nullable(),output_truncated:z.boolean().default(false),usage:usageSchema.default(emptyUsage),failure_fingerprint:hashSchema.nullable().default(null),created_at:z.iso.datetime(),started_at:z.iso.datetime().nullable(),finished_at:z.iso.datetime().nullable(),last_error:z.string().nullable(),
-  heartbeat_at:z.iso.datetime().nullable().default(null),
+  heartbeat_at:z.iso.datetime().nullable().default(null),last_progress_at:z.iso.datetime().nullable().default(null),progress_sequence:z.number().int().nonnegative().default(0),
   runtime_probe_hash:hashSchema.nullable().default(null),token_limit:z.number().int().positive().nullable().default(null),cost_limit_usd:z.number().positive().nullable().default(null),
   result_status:resultStatusSchema.default('none'),result_error:z.string().max(1000).nullable().default(null),
 }).strict();
 
 export type RoleInvocation=z.infer<typeof invocationSchema>;
 export type AcceptanceRole=z.infer<typeof roleSchema>;
+export type RoleRunLimits={maxTokens?:number;maxCostUsd?:number;onUsage?:(usage:z.infer<typeof usageSchema>)=>string|null};
 
 const control=(root:string)=>path.join(root,'.spec-loop');
 const acceptanceOutput=(root:string,taskId:string)=>path.join(control(root),'output',`${taskId}-acceptance-v2`);
@@ -45,6 +47,15 @@ async function treeFingerprint(root:string):Promise<string>{
   const entries:Array<{file:string;kind:string;sha256:string|null}>=[];
   async function walk(dir:string):Promise<void>{for(const entry of await readdir(dir,{withFileTypes:true})){const target=path.join(dir,entry.name),relative=path.relative(root,target).split(path.sep).join('/');if(entry.isDirectory())await walk(target);else if(entry.isSymbolicLink())entries.push({file:relative,kind:'symlink',sha256:sha256(await readlink(target))});else if(entry.isFile())entries.push({file:relative,kind:'file',sha256:sha256(await readFile(target))});else throw new Error(`unsupported candidate entry: ${relative}`)}}
   await walk(root);entries.sort((left,right)=>left.file.localeCompare(right.file));return sha256(JSON.stringify(entries));
+}
+
+async function candidateQuality(worktree:string,base:string,head:string,level:string){
+  const limits=level==='light'?{files:40,lines:5_000}:level==='heavy'?{files:200,lines:50_000}:{files:100,lines:20_000};
+  const numstat=await git(worktree,['diff','--numstat',`${base}..${head}`]),entries=numstat.split('\n').filter(Boolean).map(line=>{const [added,deleted,...name]=line.split('\t');return{file:name.join('\t'),added,deleted}});
+  const binary=entries.filter(item=>item.added==='-'||item.deleted==='-').map(item=>item.file),sensitive=entries.map(item=>item.file).filter(file=>/(^|\/)(?:\.env(?:\.|$)|id_rsa$|id_ed25519$)|\.(?:pem|p12|pfx|key)$/i.test(file));
+  const lines=entries.reduce((sum,item)=>sum+(Number(item.added)||0)+(Number(item.deleted)||0),0),whitespace=await git(worktree,['diff','--check',`${base}..${head}`]).catch(error=>(error as Error).message);
+  const violations:string[]=[],warnings:string[]=[];if(entries.length>limits.files)violations.push(`changed files ${entries.length}/${limits.files}`);if(lines>limits.lines)violations.push(`changed lines ${lines}/${limits.lines}`);if(binary.length)warnings.push(`binary changes require explicit review: ${binary.slice(0,5).join(', ')}`);if(sensitive.length)violations.push(`sensitive file changes are forbidden: ${sensitive.join(', ')}`);if(whitespace)violations.push(`git diff --check failed: ${whitespace.slice(0,500)}`);
+  return{schema_version:1,base_head:base,candidate_head:head,level,changed_files:entries.length,changed_lines:lines,binary_files:binary,sensitive_files:sensitive,limits,verdict:violations.length?'fail':'pass',violations,warnings,review_required:binary.length>0,checked_at:new Date().toISOString()};
 }
 
 async function extractSnapshot(worktree:string,head:string,destination:string):Promise<void>{
@@ -85,17 +96,13 @@ function providerUsage(stdout:string){const found:Array<Record<string,unknown>>=
 function providerEnvironment(root:string,extra:Record<string,string>={}):NodeJS.ProcessEnv{
   const locale=[process.env.LC_ALL,process.env.LANG].find(value=>value&&/utf-?8/i.test(value))??'en_US.UTF-8';
   const shared=path.join(root,'.spec-loop','shared-cache');
-  return{PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:path.join(shared,'tmp'),LANG:locale,LC_ALL:locale,
+  return{PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:path.join(shared,'tmp'),LANG:locale,LC_ALL:locale,...(process.env.JAVA_HOME?{JAVA_HOME:process.env.JAVA_HOME}:{}),
     npm_config_cache:path.join(shared,'npm'),MAVEN_OPTS:[process.env.MAVEN_OPTS,`-Dmaven.repo.local=${path.join(shared,'maven')}`].filter(Boolean).join(' '),SPEC_LOOP_SHARED_CACHE_ROOT:shared,...extra};
 }
 
-function signalProcessTree(pid:number|null|undefined,signal:NodeJS.Signals):void{if(!pid)return;try{if(process.platform==='win32')process.kill(pid,signal);else process.kill(-pid,signal)}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')try{process.kill(pid,signal)}catch{/* already stopped */}}}
-async function processAlive(pid:number):Promise<boolean>{try{process.kill(pid,0);return true}catch{return false}}
-async function terminateProcessTree(pid:number|null|undefined):Promise<void>{if(!pid)return;signalProcessTree(pid,'SIGTERM');for(let attempt=0;attempt<20&&await processAlive(pid);attempt++)await new Promise(resolve=>setTimeout(resolve,50));if(await processAlive(pid))signalProcessTree(pid,'SIGKILL')}
-
 async function ensureCodexRuntimeProbe(root:string,role:AcceptanceRole,resolved:string,version:string|null,args:string[]):Promise<string|null>{
   if(path.basename(resolved)!=='codex')return null;
-  const env=providerEnvironment(root),identity={resolved,version,args,role,platform:process.platform,arch:process.arch,node:process.version,LANG:env.LANG,LC_ALL:env.LC_ALL},hash=sha256(JSON.stringify(identity));
+  const env=providerEnvironment(root),codexHome=path.resolve(process.env.CODEX_HOME??path.join(process.env.HOME??root,'.codex')),metadata=[] as Array<{file:string;size:number;mtime_ms:number}>;for(const name of ['config.toml','auth.json']){const file=path.join(codexHome,name),info=await lstat(file).catch(()=>null);if(info?.isFile()&&!info.isSymbolicLink())metadata.push({file:name,size:info.size,mtime_ms:Math.trunc(info.mtimeMs)})}const identity={resolved,version,args,role,platform:process.platform,arch:process.arch,node:process.version,LANG:env.LANG,LC_ALL:env.LC_ALL,codex_home:codexHome,credential_source:{api_key_present:Boolean(process.env.OPENAI_API_KEY),files:metadata}},hash=sha256(JSON.stringify(identity));
   const probeRoot=path.join(control(root),'provider-probes'),recordFile=path.join(probeRoot,`${hash}.json`),cached=await readFile(recordFile,'utf8').then(raw=>JSON.parse(raw) as {ok?:boolean;expires_at?:string;error?:string}).catch(()=>null);
   if(cached&&Date.parse(cached.expires_at??'')>Date.now()){if(cached.ok)return hash;throw new Error(`cached Codex runtime probe failed: ${cached.error??'unknown failure'}`)}
   const workspace=path.join(probeRoot,'workspace'),evidence=path.join(probeRoot,`evidence-${hash}`);await mkdir(workspace,{recursive:true});await mkdir(evidence,{recursive:true});for(const directory of [path.join(control(root),'shared-cache','tmp'),path.join(control(root),'shared-cache','npm'),path.join(control(root),'shared-cache','maven')])await mkdir(directory,{recursive:true});
@@ -104,7 +111,7 @@ async function ensureCodexRuntimeProbe(root:string,role:AcceptanceRole,resolved:
   const probeArgs=buildProviderArgs('codex',args,role,workspace,prompt,evidence);let stdout='',stderr='',settled=false,timedOut=false;
   const result=await new Promise<{code:number}>((resolve)=>{const child=spawn(resolved,probeArgs,{cwd:workspace,detached:process.platform!=='win32',env:providerEnvironment(root,{SPEC_LOOP_ROLE:role,SPEC_LOOP_INVOCATION_ID:`PROBE-${hash}`,SPEC_LOOP_EVIDENCE_ROOT:evidence}),stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;signalProcessTree(child.pid,'SIGTERM');setTimeout(()=>signalProcessTree(child.pid,'SIGKILL'),1000).unref()},20_000);child.stdout.on('data',chunk=>{if(stdout.length<64_000)stdout+=chunk});child.stderr.on('data',chunk=>{if(stderr.length<64_000)stderr+=chunk});child.on('error',error=>{stderr+=error.message});child.on('close',code=>{if(settled)return;settled=true;clearTimeout(timer);resolve({code:timedOut?124:(code??1)})})});
   const evidenceOk=await readFile(path.join(evidence,'probe-ok.txt'),'utf8').then(value=>value.trim()==='SPEC_LOOP_PROBE_OK').catch(()=>false),ok=result.code===0&&evidenceOk&&stdout.includes('SPEC_LOOP_PROBE_OK'),error=ok?null:(timedOut?'probe timed out after 20s':(stderr.trim()||`probe exited ${result.code} or did not write its Evidence sentinel`).slice(0,1000));
-  const now=Date.now(),record={schema_version:1,identity_hash:hash,ok,error,checked_at:new Date(now).toISOString(),expires_at:new Date(now+(ok?24*60*60*1000:10*60*1000)).toISOString()};await atomicWriteMany(root,[{file:recordFile,content:`${JSON.stringify(record,null,2)}\n`}]);if(!ok)throw new Error(`Codex runtime probe failed: ${error}`);return hash;
+  const now=Date.now(),record={schema_version:2,identity_hash:hash,ok,error,checked_at:new Date(now).toISOString(),expires_at:new Date(now+(ok?60*60*1000:5*60*1000)).toISOString()};await atomicWriteMany(root,[{file:recordFile,content:`${JSON.stringify(record,null,2)}\n`}]);if(!ok)throw new Error(`Codex runtime probe failed: ${error}`);return hash;
 }
 
 export async function summarizeRoleUsage(root:string,taskId?:string){
@@ -134,13 +141,13 @@ export async function prepareRoleInvocation(root:string,taskId:string,roleValue:
   else{candidatePath=path.join(base,'candidate');access='read_only_snapshot';await extractSnapshot(workspace.worktree,actualHead,candidatePath);fingerprint=await treeFingerprint(candidatePath);await makeReadOnly(candidatePath)}
   const files=[path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md'),runPath];if(role!=='M')files.push(path.join(acceptanceOutput(root,taskId),'EXECUTION_PLAN.json'));if(role==='R')files.push(path.join(acceptanceOutput(root,taskId),'V'));
   const context=[] as Array<{file:string;sha256:string}>;for(const file of files){const info=await lstat(file).catch(()=>null);if(!info)throw new Error(`${role} context is missing: ${path.relative(root,file)}`);if(info.isDirectory()){for(const name of (await readdir(file)).filter(item=>item.endsWith('.json')&&!item.startsWith('controlled-input-')).sort())context.push(await contextRecord(root,path.join(file,name)))}else context.push(await contextRecord(root,file))}
-  const prompt=rolePrompt({taskId,role,head:actualHead,contextRoot:root,context,evidenceRoot}),now=new Date().toISOString(),cfg=await readProviderConfig(root),provider=cfg.active_provider,doctor=(await (await import('./project.js')).providerDoctor(root)).find(item=>item.active);if(!doctor?.resolved||!doctor.available||!doctor.compatible)throw new Error(`active Provider is not runnable: ${doctor?.reason??'missing diagnostic'}`);const providerConfig=cfg.providers[provider],probeHash=provider==='codex'?await ensureCodexRuntimeProbe(root,role,doctor.resolved,doctor.version,providerConfig.args):null;
-  const invocation=invocationSchema.parse({schema_version:2,invocation_id:id,task_id:taskId,run_id:run.run_id,role,status:'prepared',provider,provider_identity:{executable:providerConfig.executable,resolved:doctor.resolved,args_sha256:sha256(JSON.stringify(providerConfig.args)),version:doctor.version},candidate:{path:candidatePath,access,head:actualHead,fingerprint},evidence_root:evidenceRoot,context,forbidden_actions:['merge','push','deploy','credential_write','production_data','external_side_effect'],prompt_hash:sha256(prompt),pid:null,exit_code:null,timed_out:false,output_sha256:null,output_truncated:false,usage:emptyUsage,failure_fingerprint:null,created_at:now,started_at:null,finished_at:null,last_error:null,heartbeat_at:null,runtime_probe_hash:probeHash,token_limit:Math.max(1,budget.max_tokens-knownTokens),cost_limit_usd:null,result_status:'none',result_error:null});
+  const prompt=rolePrompt({taskId,role,head:actualHead,contextRoot:root,context,evidenceRoot}),now=new Date().toISOString(),cfg=await readProviderConfig(root),selected=providerForRole(cfg,role),provider=selected.id,doctor=(await providerDoctor(root)).find(item=>item.id===provider);if(!doctor?.resolved||!doctor.available||!doctor.compatible)throw new Error(`${role} Provider ${provider} is not runnable: ${doctor?.reason??'missing diagnostic'}`);const providerConfig=selected.config,probeHash=provider==='codex'?await ensureCodexRuntimeProbe(root,role,doctor.resolved,doctor.version,providerConfig.args):null;
+  const invocation=invocationSchema.parse({schema_version:2,invocation_id:id,task_id:taskId,run_id:run.run_id,role,status:'prepared',provider,provider_identity:{executable:providerConfig.executable,resolved:doctor.resolved,args_sha256:sha256(JSON.stringify(providerConfig.args)),version:doctor.version},candidate:{path:candidatePath,access,head:actualHead,fingerprint},evidence_root:evidenceRoot,context,forbidden_actions:['merge','push','deploy','credential_write','production_data','external_side_effect'],prompt_hash:sha256(prompt),pid:null,process_started_at:null,exit_code:null,timed_out:false,output_sha256:null,output_truncated:false,usage:emptyUsage,failure_fingerprint:null,created_at:now,started_at:null,finished_at:null,last_error:null,heartbeat_at:null,last_progress_at:null,progress_sequence:0,runtime_probe_hash:probeHash,token_limit:Math.max(1,budget.max_tokens-knownTokens),cost_limit_usd:null,result_status:'none',result_error:null});
   await atomicWriteMany(root,[{file:path.join(base,'PROMPT.txt'),content:prompt},{file:invocationFile(root,taskId,id),content:`${JSON.stringify(invocation,null,2)}\n`}]);return invocation;
 }
 
 export function buildProviderArgs(provider:string,args:string[],role:AcceptanceRole,candidate:string,prompt:string,evidenceRoot?:string):string[]{
-  if(provider!=='codex')throw new Error(`${provider} does not declare an enforceable role sandbox adapter`);
+  if(provider!=='codex')return [...args,prompt];
   const updated=[...args],index=updated.indexOf('--sandbox');if(index>=0&&updated[index+1])updated[index+1]='workspace-write';else updated.push('--sandbox','workspace-write');
   if(evidenceRoot)updated.push('--add-dir',evidenceRoot);
   if(role!=='M'){
@@ -150,19 +157,19 @@ export function buildProviderArgs(provider:string,args:string[],role:AcceptanceR
   return ['-C',candidate,...updated,prompt];
 }
 
-async function runRoleInvocationInternal(root:string,taskId:string,id:string,limits:{maxTokens?:number;maxCostUsd?:number}={}):Promise<RoleInvocation>{
+async function runRoleInvocationInternal(root:string,taskId:string,id:string,limits:RoleRunLimits={}):Promise<RoleInvocation>{
   let invocation=await readRoleInvocation(root,taskId,id);if(invocation.status!=='prepared'&&invocation.status!=='interrupted')throw new Error(`role invocation is not runnable from ${invocation.status}`);
-  const cfg=await readProviderConfig(root),provider=cfg.providers[cfg.active_provider];if(invocation.provider!==cfg.active_provider)throw new Error('active provider changed after role preparation');
-  const doctor=(await (await import('./project.js')).providerDoctor(root)).find(item=>item.active);if(!doctor?.resolved||!doctor.available||!doctor.compatible)throw new Error(`active Provider preflight failed: ${doctor?.reason??'missing diagnostic'}`);const identity={executable:provider.executable,resolved:doctor.resolved,args_sha256:sha256(JSON.stringify(provider.args)),version:doctor.version};if(invocation.provider_identity&&JSON.stringify(invocation.provider_identity)!==JSON.stringify(identity))throw new Error('Provider executable, version, or arguments changed after role preparation; prepare a new invocation');
+  const cfg=await readProviderConfig(root),selected=providerForRole(cfg,invocation.role),provider=selected.config;if(invocation.provider!==selected.id)throw new Error(`${invocation.role} provider changed after role preparation`);
+  const doctor=(await providerDoctor(root)).find(item=>item.id===selected.id);if(!doctor?.resolved||!doctor.available||!doctor.compatible)throw new Error(`${invocation.role} Provider preflight failed: ${doctor?.reason??'missing diagnostic'}`);const identity={executable:provider.executable,resolved:doctor.resolved,args_sha256:sha256(JSON.stringify(provider.args)),version:doctor.version};if(invocation.provider_identity&&JSON.stringify(invocation.provider_identity)!==JSON.stringify(identity))throw new Error('Provider executable, version, or arguments changed after role preparation; prepare a new invocation');
   const prompt=await readFile(path.join(invocationRoot(root,taskId,id),'PROMPT.txt'),'utf8');if(sha256(prompt)!==invocation.prompt_hash)throw new Error('role prompt integrity failure');
-  const args=buildProviderArgs(cfg.active_provider,provider.args,invocation.role,invocation.candidate.path,prompt,invocation.evidence_root),startedAt=new Date().toISOString(),deadlineAt=new Date(Date.now()+provider.timeout_seconds*1000).toISOString();
+  const args=buildProviderArgs(selected.id,provider.args,invocation.role,invocation.candidate.path,prompt,invocation.evidence_root),startedAt=new Date().toISOString(),deadlineAt=new Date(Date.now()+provider.timeout_seconds*1000).toISOString();
   for(const directory of [path.join(control(root),'shared-cache','tmp'),path.join(control(root),'shared-cache','npm'),path.join(control(root),'shared-cache','maven')])await mkdir(directory,{recursive:true});
   const child=spawn(provider.executable,args,{cwd:invocation.candidate.path,detached:process.platform!=='win32',env:providerEnvironment(root,{SPEC_LOOP_ROLE:invocation.role,SPEC_LOOP_INVOCATION_ID:id,SPEC_LOOP_EVIDENCE_ROOT:invocation.evidence_root}),stdio:['ignore','pipe','pipe']});
   const tokenLimit=Math.min(invocation.token_limit??Number.MAX_SAFE_INTEGER,limits.maxTokens??Number.MAX_SAFE_INTEGER),costLimit=Math.min(invocation.cost_limit_usd??Number.MAX_VALUE,limits.maxCostUsd??Number.MAX_VALUE);
-  let stdout='',stderr='',stdoutBytes=0,stderrBytes=0,outputTruncated=false,timedOut=false,settled=false,usageScan='',liveUsage=usageSchema.parse(emptyUsage),fuseReason:string|null=null;
+  let stdout='',stderr='',stdoutBytes=0,stderrBytes=0,outputTruncated=false,timedOut=false,settled=false,usageScan='',liveUsage=usageSchema.parse(emptyUsage),fuseReason:string|null=null,lastProgressAt=startedAt,progressSequence=0;
   const trip=(reason:string)=>{if(fuseReason||settled)return;fuseReason=reason;signalProcessTree(child.pid,'SIGTERM');setTimeout(()=>{if(!settled)signalProcessTree(child.pid,'SIGKILL')},1000).unref()};
-  const inspectUsage=(text:string)=>{usageScan=(usageScan+text).slice(-262_144);const observed=providerUsage(usageScan);if(observed.recorded)liveUsage=observed;if(observed.total_tokens!==null&&observed.total_tokens>=tokenLimit)trip(`live token budget reached (${observed.total_tokens}/${tokenLimit})`);if(observed.cost_usd!==null&&observed.cost_usd>=costLimit)trip(`live cost budget reached (${observed.cost_usd}/${costLimit})`)};
-  const collect=(target:'stdout'|'stderr',chunk:Buffer)=>{const used=target==='stdout'?stdoutBytes:stderrBytes,remaining=Math.max(0,MAX_PROVIDER_OUTPUT_BYTES-used);if(remaining<chunk.length)outputTruncated=true;const text=chunk.subarray(0,remaining).toString();if(target==='stdout'){stdout+=text;stdoutBytes+=Math.min(remaining,chunk.length);inspectUsage(chunk.toString())}else{stderr+=text;stderrBytes+=Math.min(remaining,chunk.length)}};
+  const inspectUsage=(text:string)=>{usageScan=(usageScan+text).slice(-262_144);const observed=providerUsage(usageScan);if(observed.recorded){const changed=observed.total_tokens!==liveUsage.total_tokens||observed.cost_usd!==liveUsage.cost_usd;liveUsage=observed;if(changed){lastProgressAt=new Date().toISOString();progressSequence+=1}const externalReason=limits.onUsage?.(observed);if(externalReason)trip(externalReason)}if(observed.total_tokens!==null&&observed.total_tokens>=tokenLimit)trip(`live token budget reached (${observed.total_tokens}/${tokenLimit})`);if(observed.cost_usd!==null&&observed.cost_usd>=costLimit)trip(`live cost budget reached (${observed.cost_usd}/${costLimit})`)};
+  const collect=(target:'stdout'|'stderr',chunk:Buffer)=>{lastProgressAt=new Date().toISOString();progressSequence+=1;const used=target==='stdout'?stdoutBytes:stderrBytes,remaining=Math.max(0,MAX_PROVIDER_OUTPUT_BYTES-used);if(remaining<chunk.length)outputTruncated=true;const text=chunk.subarray(0,remaining).toString();if(target==='stdout'){stdout+=text;stdoutBytes+=Math.min(remaining,chunk.length);inspectUsage(chunk.toString())}else{stderr+=text;stderrBytes+=Math.min(remaining,chunk.length)}};
   let timer:NodeJS.Timeout;
   const completion=new Promise<{code:number;stdout:string;stderr:string;timedOut:boolean}>((resolve,reject)=>{
     timer=setTimeout(()=>{timedOut=true;trip(`Provider timeout reached (${provider.timeout_seconds}s)`)},provider.timeout_seconds*1000);
@@ -170,20 +177,25 @@ async function runRoleInvocationInternal(root:string,taskId:string,id:string,lim
     child.on('error',error=>{if(settled)return;settled=true;clearTimeout(timer);resolve({code:127,stdout,stderr:`${stderr}\n${error.message}`.trim(),timedOut:false})});
     child.on('close',code=>{if(settled)return;settled=true;clearTimeout(timer);resolve({code:timedOut?124:fuseReason?125:(code??1),stdout,stderr,timedOut})});
   });
-  invocation=invocationSchema.parse({...invocation,status:'running',pid:child.pid,started_at:startedAt,heartbeat_at:startedAt,last_error:null,token_limit:Number.isFinite(tokenLimit)?tokenLimit:null,cost_limit_usd:Number.isFinite(costLimit)?costLimit:null});
-  const heartbeatValue=(active:boolean,at=new Date().toISOString())=>`${JSON.stringify({schema_version:1,invocation_id:id,task_id:taskId,role:invocation.role,pid:child.pid,active,phase:active?'provider_running':'provider_stopped',heartbeat_at:at,deadline_at:deadlineAt,remaining_ms:active?Math.max(0,Date.parse(deadlineAt)-Date.now()):0,usage:liveUsage,token_limit:invocation.token_limit,cost_limit_usd:invocation.cost_limit_usd},null,2)}\n`;
+  // Register stdout/stderr/error/close listeners before the first await. Very fast
+  // providers can exit while PID identity is being queried; missing that close
+  // event would otherwise leave the invocation waiting until its hard timeout.
+  const processStart=child.pid?await processStartedAt(child.pid):null;
+  invocation=invocationSchema.parse({...invocation,status:'running',pid:child.pid,process_started_at:processStart,started_at:startedAt,heartbeat_at:startedAt,last_progress_at:lastProgressAt,progress_sequence:progressSequence,last_error:null,token_limit:Number.isFinite(tokenLimit)?tokenLimit:null,cost_limit_usd:Number.isFinite(costLimit)?costLimit:null});
+  const heartbeatValue=(active:boolean,at=new Date().toISOString())=>`${JSON.stringify({schema_version:2,invocation_id:id,task_id:taskId,role:invocation.role,pid:child.pid,process_started_at:processStart,active,phase:active?'provider_running':'provider_stopped',heartbeat_at:at,last_progress_at:lastProgressAt,progress_sequence:progressSequence,output_bytes:stdoutBytes+stderrBytes,idle_timeout_seconds:provider.idle_timeout_seconds,deadline_at:deadlineAt,remaining_ms:active?Math.max(0,Date.parse(deadlineAt)-Date.now()):0,usage:liveUsage,token_limit:invocation.token_limit,cost_limit_usd:invocation.cost_limit_usd},null,2)}\n`;
   await atomicWriteMany(root,[
     {file:heartbeatFile(root,taskId,id),content:heartbeatValue(true,startedAt)},
     {file:invocationFile(root,taskId,id),content:`${JSON.stringify(invocation,null,2)}\n`},
   ]);
-  let heartbeatTimer:NodeJS.Timeout|undefined,heartbeatWork:Promise<void>=Promise.resolve();const heartbeat=async(active:boolean)=>atomicWriteMany(root,[{file:heartbeatFile(root,taskId,id),content:heartbeatValue(active)}]);const scheduleHeartbeat=()=>{heartbeatTimer=setTimeout(()=>{heartbeatWork=heartbeat(true).catch(()=>undefined).finally(()=>{if(!settled)scheduleHeartbeat()})},2_000)};scheduleHeartbeat();
+  let heartbeatTimer:NodeJS.Timeout|undefined,heartbeatWork:Promise<void>=Promise.resolve();const heartbeat=async(active:boolean)=>atomicWriteMany(root,[{file:heartbeatFile(root,taskId,id),content:heartbeatValue(active)}]);const scheduleHeartbeat=()=>{heartbeatTimer=setTimeout(()=>{if(Date.now()-Date.parse(lastProgressAt)>=provider.idle_timeout_seconds*1000)trip(`Provider made no observable progress for ${provider.idle_timeout_seconds}s`);heartbeatWork=heartbeat(true).catch(()=>undefined).finally(()=>{if(!settled)scheduleHeartbeat()})},2_000)};scheduleHeartbeat();
   const result=await completion;if(heartbeatTimer)clearTimeout(heartbeatTimer);await heartbeatWork;await heartbeat(false).catch(()=>undefined);
   let boundaryError:string|null=null;
   if(invocation.role==='M'&&result.code===0&&!result.timedOut){
     const workspace=await readWorkspace(root,taskId),head=await git(workspace.worktree,['rev-parse','HEAD']),status=await git(workspace.worktree,['status','--porcelain=v1','--untracked-files=all']);
     const mergeCommits=head===invocation.candidate.head?'':await git(workspace.worktree,['rev-list','--merges',`${invocation.candidate.head}..${head}`]);
-    const task=(await scanTasks(root)).find(item=>item.task_id===taskId),spec=task?await readMarkdown(path.join(task.path,'SPEC.md')):null,targetSpec=spec?z.object({target_spec:z.string().optional()}).passthrough().parse(spec.data).target_spec?.split(path.sep).join('/')??null:null,changed=head===invocation.candidate.head?[]:(await git(workspace.worktree,['diff','--name-only',`${invocation.candidate.head}..${head}`])).split('\n').filter(Boolean);
-    if(status)boundaryError='M invocation left an uncommitted candidate';else if(head===invocation.candidate.head)boundaryError='M invocation did not produce a new HEAD';else if(mergeCommits)boundaryError='M invocation produced a forbidden merge commit';else if(targetSpec&&changed.includes(targetSpec))boundaryError=`M invocation modified the approved formal Task specification: ${targetSpec}`;else invocation=invocationSchema.parse({...invocation,candidate:{...invocation.candidate,head,fingerprint:sha256(await git(workspace.worktree,['ls-tree','-r','--full-tree',head]))}});
+    const task=(await scanTasks(root)).find(item=>item.task_id===taskId),spec=task?await readMarkdown(path.join(task.path,'SPEC.md')):null,targetSpec=spec?z.object({target_spec:z.string().optional()}).passthrough().parse(spec.data).target_spec?.split(path.sep).join('/')??null:null,changed=head===invocation.candidate.head?[]:(await git(workspace.worktree,['diff','--name-only',`${invocation.candidate.head}..${head}`])).split('\n').filter(Boolean),quality=head===invocation.candidate.head?null:await candidateQuality(workspace.worktree,invocation.candidate.head,head,task?.level??'standard');
+    if(quality)await atomicWriteMany(root,[{file:path.join(invocationRoot(root,taskId,id),'CANDIDATE_QUALITY.json'),content:`${JSON.stringify(quality,null,2)}\n`}]);
+    if(status)boundaryError='M invocation left an uncommitted candidate';else if(head===invocation.candidate.head)boundaryError='M invocation did not produce a new HEAD';else if(mergeCommits)boundaryError='M invocation produced a forbidden merge commit';else if(targetSpec&&changed.includes(targetSpec))boundaryError=`M invocation modified the approved formal Task specification: ${targetSpec}`;else if(quality?.verdict==='fail')boundaryError=`candidate quality policy failed: ${quality.violations.join('; ')}`;else invocation=invocationSchema.parse({...invocation,candidate:{...invocation.candidate,head,fingerprint:sha256(await git(workspace.worktree,['ls-tree','-r','--full-tree',head]))}});
   }else if(invocation.role!=='M'){
     const workspace=await readWorkspace(root,taskId),head=await git(workspace.worktree,['rev-parse','HEAD']),status=await git(workspace.worktree,['status','--porcelain=v1','--untracked-files=all']);
     if(head!==invocation.candidate.head||status)boundaryError='verification role observed a changed source candidate';
@@ -191,11 +203,11 @@ async function runRoleInvocationInternal(root:string,taskId:string,id:string,lim
   }
   const finalUsage=providerUsage(result.stdout),usage=finalUsage.recorded?finalUsage:liveUsage,failureMessage=fuseReason??result.stderr,failureFingerprint=result.code===0&&!result.timedOut?null:providerFailureFingerprint(invocation.role,result.code,result.timedOut,failureMessage),output=`OUTPUT_TRUNCATED ${outputTruncated}\nUSAGE_RECORDED ${usage.recorded}\nFUSE ${fuseReason??'none'}\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}`,outputFile=path.join(invocationRoot(root,taskId,id),'PROVIDER.txt');await atomicWriteMany(root,[{file:outputFile,content:output}]);
   const controllerState=await readRoleInvocation(root,taskId,id);
-  if(controllerState.status==='cancelled'){invocation=invocationSchema.parse({...controllerState,candidate:invocation.candidate,pid:null,exit_code:result.code,timed_out:result.timedOut,output_sha256:sha256(output),output_truncated:outputTruncated,usage,failure_fingerprint:failureFingerprint,finished_at:controllerState.finished_at??new Date().toISOString()});await writeInvocation(root,invocation);return invocation}
-  const status=result.timedOut?'timed_out':result.code!==0||boundaryError?'failed':'succeeded';invocation=invocationSchema.parse({...invocation,status,pid:null,exit_code:result.code,timed_out:result.timedOut,output_sha256:sha256(output),output_truncated:outputTruncated,usage,failure_fingerprint:boundaryError?providerFailureFingerprint(invocation.role,result.code,result.timedOut,boundaryError):failureFingerprint,finished_at:new Date().toISOString(),last_error:boundaryError??fuseReason??(result.code===0?null:`provider exit ${result.code}`),result_status:status==='succeeded'?'awaiting_ingestion':'none',result_error:null});await writeInvocation(root,invocation);return invocation;
+  if(controllerState.status==='cancelled'){invocation=invocationSchema.parse({...controllerState,candidate:invocation.candidate,pid:null,last_progress_at:lastProgressAt,progress_sequence:progressSequence,exit_code:result.code,timed_out:result.timedOut,output_sha256:sha256(output),output_truncated:outputTruncated,usage,failure_fingerprint:failureFingerprint,finished_at:controllerState.finished_at??new Date().toISOString()});await writeInvocation(root,invocation);return invocation}
+  const status=result.timedOut?'timed_out':result.code!==0||boundaryError?'failed':'succeeded';invocation=invocationSchema.parse({...invocation,status,pid:null,last_progress_at:lastProgressAt,progress_sequence:progressSequence,exit_code:result.code,timed_out:result.timedOut,output_sha256:sha256(output),output_truncated:outputTruncated,usage,failure_fingerprint:boundaryError?providerFailureFingerprint(invocation.role,result.code,result.timedOut,boundaryError):failureFingerprint,finished_at:new Date().toISOString(),last_error:boundaryError??fuseReason??(result.code===0?null:`provider exit ${result.code}`),result_status:status==='succeeded'?'awaiting_ingestion':'none',result_error:null});await writeInvocation(root,invocation);return invocation;
 }
 
-export async function runRoleInvocation(root:string,taskId:string,id:string,limits:{maxTokens?:number;maxCostUsd?:number}={}):Promise<RoleInvocation>{
+export async function runRoleInvocation(root:string,taskId:string,id:string,limits:RoleRunLimits={}):Promise<RoleInvocation>{
   const invocation=await readRoleInvocation(root,taskId,id),task=(await scanTasks(root)).find(item=>item.task_id===taskId);if(!task)throw new Error(`task not found: ${taskId}`);const state=await readState(task.path);
   const stepType=invocation.role==='M'?'role.m':invocation.role==='V'?'role.v':'role.r',ref=path.relative(root,invocationFile(root,taskId,id)).split(path.sep).join('/');
   const started=await startExecutionStep(root,{taskId,round:state.current_round,runId:invocation.run_id,stepType,label:`${invocation.role} invocation`,summary:`${invocation.role} 在隔离权限边界中运行 ${id}`,refs:[ref]});
@@ -208,13 +220,15 @@ export async function runRoleInvocation(root:string,taskId:string,id:string,limi
 export async function cancelRoleInvocation(root:string,taskId:string,id:string):Promise<RoleInvocation>{
   let invocation=await readRoleInvocation(root,taskId,id);if(invocation.status==='cancelled')return invocation;if(['succeeded','failed','timed_out'].includes(invocation.status))return invocation;
   const pid=invocation.pid;
-  await terminateProcessTree(pid);
-  invocation=invocationSchema.parse({...invocation,status:'cancelled',pid:null,finished_at:new Date().toISOString(),last_error:'cancelled by controller'});await writeInvocation(root,invocation);await atomicWriteMany(root,[{file:heartbeatFile(root,taskId,id),content:`${JSON.stringify({schema_version:1,invocation_id:id,task_id:taskId,pid,active:false,heartbeat_at:new Date().toISOString()},null,2)}\n`}]).catch(()=>undefined);return invocation;
+  if(pid&&!invocation.process_started_at&&await processMatches(pid))throw new Error('Provider stop incomplete: legacy invocation has no process identity');
+  const termination=await terminateProcessTree(pid,invocation.process_started_at);
+  if(!termination.stopped)throw new Error(`Provider stop incomplete: ${termination.reason}`);
+  invocation=invocationSchema.parse({...invocation,status:'cancelled',pid:null,finished_at:new Date().toISOString(),last_error:`cancelled by controller (${termination.reason})`});await writeInvocation(root,invocation);await atomicWriteMany(root,[{file:heartbeatFile(root,taskId,id),content:`${JSON.stringify({schema_version:2,invocation_id:id,task_id:taskId,pid,process_started_at:invocation.process_started_at,active:false,heartbeat_at:new Date().toISOString(),last_progress_at:invocation.last_progress_at,progress_sequence:invocation.progress_sequence,stop_verified:true,stop_reason:termination.reason},null,2)}\n`}]).catch(()=>undefined);return invocation;
 }
 
 export async function reconcileRoleInvocation(root:string,taskId:string,id:string):Promise<RoleInvocation>{
   let invocation=await readRoleInvocation(root,taskId,id);if(invocation.status!=='running'||!invocation.pid)return invocation;
-  let alive=true;try{process.kill(invocation.pid,0)}catch{alive=false}if(alive)return invocation;
+  if(await processMatches(invocation.pid,invocation.process_started_at))return invocation;
   invocation=invocationSchema.parse({...invocation,status:'interrupted',pid:null,finished_at:new Date().toISOString(),last_error:'provider process disappeared; result remains unknown'});await writeInvocation(root,invocation);
   await reconcileInterruptedExecutionSteps(root,{taskId,stepTypes:[invocation.role==='M'?'role.m':invocation.role==='V'?'role.v':'role.r'],summary:'角色 Provider 进程已消失；结果保持 unknown'});return invocation;
 }

@@ -7,7 +7,7 @@ import { LEVELS } from './model.js';
 import { atomicWriteMany, assertNoSecrets } from './files.js';
 import { appendAttempt, checkTask, deliverTask, initTask, planTask, readState, runtimeInit, startRound, verifyTask } from './task.js';
 import { guard, readBudget, readLedger, renderSummary } from './runtime.js';
-import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider, setDefaultTaskProtocol } from './project.js';
+import { approveProposal, checkTargetSpecLibrary, createProposal, createTaskFromProposal, initProject, initTargetSpecLibrary, providerDoctor, readProject, readProjectState, scanTasks, setActiveProvider, setDefaultTaskProtocol, setRoleProvider } from './project.js';
 import { collectHarness, createWorkspace, executeHarness, prepareHarness, reconcileHarness, reportHarness, runGates, writebackDelivery } from './execution.js';
 import { decideVisualReview, readVisualReviews, requestVisualReview } from './review.js';
 import { disableFeishuConnector, feishuConnectorStatus, initFeishuConfig, readFeishuConfig, superviseFeishuConnector, stopFeishuConnector } from './connectors/feishu.js';
@@ -24,10 +24,10 @@ import {
 } from './acceptance-loop.js';
 import { cancelRoleInvocation, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
 import { initReportScheduler, readReportSchedulerStatus, runReportScheduler, setReportSchedulerPaused } from './report-scheduler.js';
-import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
-import { schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor } from './scheduler-supervisor.js';
+import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileInterruptedWaves, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
+import { installSchedulerSupervisorLaunchd, schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor, uninstallSchedulerSupervisorLaunchd } from './scheduler-supervisor.js';
 import { collectSpringEvidence, detectSpringBoot, planV2Gates, verifySpringEvidence, verifyV2GatePlan } from './toolchain.js';
-import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree } from './maintenance.js';
+import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree, runRetentionMaintenance } from './maintenance.js';
 
 const program = new Command();
 program.name('spec-loop').description('Specification-driven local task loops').version('0.1.0');
@@ -232,6 +232,7 @@ triage.command('create-task').argument('<project-dir>').argument('<proposal-id>'
 const providers=program.command('providers').description('Provider configuration and diagnostics');
 providers.command('show').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>{const results=await providerDoctor(root(dir));print(results,o.json)}));
 providers.command('set').argument('<project-dir>').addOption(new Option('--active <provider>').choices(['codex','claude-code','qoder']).makeOptionMandatory()).action((dir,o)=>action(async()=>{await setActiveProvider(root(dir),o.active);console.log(`active provider: ${o.active}`)}));
+providers.command('set-role').argument('<project-dir>').addOption(new Option('--role <role>').choices(['M','V','R']).makeOptionMandatory()).addOption(new Option('--provider <provider>').choices(['codex','claude-code','qoder']).makeOptionMandatory()).action((dir,o)=>action(async()=>{await setRoleProvider(root(dir),o.role,o.provider);console.log(`${o.role} provider: ${o.provider}`)}));
 
 const connectors=program.command('connectors').description('External notification and confirmation connectors');
 const feishu=connectors.command('feishu').description('Feishu enterprise app bot connector');
@@ -380,11 +381,14 @@ schedulerControl.command('supervisor-status')
     if (!result.running || !result.healthy) process.exitCode = 5;
   }));
 schedulerControl.command('supervisor-launchd-plan').description('Print an optional macOS launchd auto-restart plan without installing it').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerSupervisorLaunchdPlan(root(dir)),o.json)));
+schedulerControl.command('supervisor-launchd-install').description('Preview by default; --apply installs and bootstraps the audited macOS launchd Supervisor').argument('<project-dir>').option('--apply','write and bootstrap the launchd service').option('--json').action((dir,o)=>action(async()=>print(o.apply?await installSchedulerSupervisorLaunchd(root(dir)):await schedulerSupervisorLaunchdPlan(root(dir)),o.json)));
+schedulerControl.command('supervisor-launchd-uninstall').description('Requires --apply; boot out and remove only this Project Supervisor plist').argument('<project-dir>').option('--apply','perform the scoped uninstall').option('--json').action((dir,o)=>action(async()=>{if(!o.apply)throw new Error('launchd uninstall requires --apply');print(await uninstallSchedulerSupervisorLaunchd(root(dir)),o.json)}));
 schedulerControl.command('supervisor-stop')
   .description('Stop the managed watchdog Supervisor without starting or cancelling business work')
   .argument('<project-dir>').option('--json')
   .action((dir, o) => action(async () => print(await stopManagedSchedulerSupervisor(root(dir)), o.json)));
 schedulerControl.command('reconcile').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await reconcileSchedulerControl(root(dir)),o.json)));
+schedulerControl.command('reconcile-waves').description('Inspect interrupted waves by default; --apply reconciles invocations and requeues safe work').argument('<project-dir>').option('--apply','persist interrupted/requeued state').option('--json').action((dir,o)=>action(async()=>print(await reconcileInterruptedWaves(root(dir),Boolean(o.apply)),o.json)));
 schedulerControl.command('status').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerControlStatus(root(dir)),o.json)));
 
 const toolchain=program.command('toolchain').description('Read-only Gate planning and native evidence adapters');
@@ -398,6 +402,7 @@ const maintenance=program.command('maintenance').description('Read-only artifact
 maintenance.command('inspect').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await inspectArtifacts(root(dir)),o.json)));
 maintenance.command('retention-plan').description('Show bounded artifact, shared-cache and retirement policy without deleting data').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await retentionPolicy(root(dir)),o.json)));
 maintenance.command('archive-evidence').description('Copy bounded authoritative Acceptance facts into a persistent hash manifest').argument('<project-dir>').argument('<task-id>').option('--json').action((dir,id,o)=>action(async()=>print(await archiveAcceptanceEvidence(root(dir),id),o.json)));
+maintenance.command('enforce-retention').description('Archive bounded terminal Evidence without deleting worktrees or history').argument('<project-dir>').option('--max-tasks <n>','maximum Tasks archived in one cycle','5').option('--json').action((dir,o)=>action(async()=>print(await runRetentionMaintenance(root(dir),Number(o.maxTasks)),o.json)));
 maintenance.command('retire-worktree').description('Preview by default; --apply removes only a clean terminal Worktree while preserving its branch and records').argument('<project-dir>').argument('<task-id>').option('--expected-head <commit>').option('--apply','perform the validated retirement').option('--json').action((dir,id,o)=>action(async()=>{
   if(o.apply&&!o.expectedHead)throw new Error('--apply requires --expected-head');
   print(o.apply?await retireWorktree(root(dir),id,o.expectedHead):await planWorktreeRetirement(root(dir),id,o.expectedHead),o.json);

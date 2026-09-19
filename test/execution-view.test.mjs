@@ -104,10 +104,10 @@ test('Dashboard distinguishes historical records and exposes bounded live role h
   const invocationId = 'INV-TASK-VIEW-V-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', base = path.join(root, '.spec-loop', 'output', 'TASK-VIEW-acceptance-v2', 'invocations', invocationId), now = new Date('2026-09-06T08:00:00.000Z')
   await mkdir(base, { recursive: true })
   await writeFile(path.join(base, 'INVOCATION.json'), `${JSON.stringify({ invocation_id: invocationId, role: 'V', status: 'running', result_status: 'none', created_at: new Date(now.getTime() - 5_000).toISOString(), token_limit: 1000, usage: { total_tokens: 120 } }, null, 2)}\n`)
-  await writeFile(path.join(base, 'HEARTBEAT.json'), `${JSON.stringify({ heartbeat_at: new Date(now.getTime() - 2_000).toISOString(), deadline_at: new Date(now.getTime() + 30_000).toISOString(), usage: { total_tokens: 120 } }, null, 2)}\n`)
+  await writeFile(path.join(base, 'HEARTBEAT.json'), `${JSON.stringify({ heartbeat_at: new Date(now.getTime() - 2_000).toISOString(), last_progress_at: new Date(now.getTime() - 3_000).toISOString(), progress_sequence: 4, output_bytes: 2048, idle_timeout_seconds: 300, deadline_at: new Date(now.getTime() + 30_000).toISOString(), usage: { total_tokens: 120 } }, null, 2)}\n`)
   const snapshot = await buildExecutionSnapshot(root, now), task = snapshot.tasks.find(item => item.task_id === 'TASK-VIEW')
   assert.equal(task.record_kind, 'current_run')
-  assert.deepEqual(task.runtime, { role: 'V', invocation_id: invocationId, state: 'running', heartbeat_at: '2026-09-06T07:59:58.000Z', heartbeat_age_ms: 2000, deadline_at: '2026-09-06T08:00:30.000Z', remaining_ms: 30000, usage_total_tokens: 120, token_limit: 1000 })
+  assert.deepEqual(task.runtime, { role: 'V', invocation_id: invocationId, state: 'running', heartbeat_at: '2026-09-06T07:59:58.000Z', heartbeat_age_ms: 2000, last_progress_at: '2026-09-06T07:59:57.000Z', progress_age_ms: 3000, progress_sequence: 4, output_bytes: 2048, idle_timeout_ms: 300000, deadline_at: '2026-09-06T08:00:30.000Z', remaining_ms: 30000, usage_total_tokens: 120, token_limit: 1000 })
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) <= MAX_EXECUTION_SNAPSHOT_BYTES)
 })
 

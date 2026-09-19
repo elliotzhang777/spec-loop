@@ -50,10 +50,11 @@ Pause 阻止新 Triage/Task/Round，允许安全 Gate 收尾。Kill 取消 Agent
 
 ### 常驻监督、恢复与产物保留
 
-- `run-ready --execute` 必须绑定健康的独立 Supervisor；Supervisor 使用 PID 启动身份、单实例锁和自身心跳，每个 watchdog cycle 由独立超时子进程承担。
+- `run-ready --execute` 必须绑定健康的独立 Supervisor；Supervisor 使用 PID 启动身份、单实例锁和自身心跳，每个 watchdog cycle 由独立超时子进程承担。Controller 心跳与 Provider/Effect 的真实 stdout、stderr、usage 进展分开记录；只有心跳而长期无进展也会熔断。
 - Candidate baseline 漂移会保留旧 Candidate 事实、作废旧 V/R 绑定并自动重新排队，不静默复用 PASS。成功 invocation 若尚未摄入，明确进入等待摄入而不是继续计时。
 - Project 级 `.spec-loop/shared-cache/` 复用 npm/Maven 下载；Evidence archive 只复制 Contract、Run、Plan、角色 manifest、Gate 与 hash Evidence，排除可重建候选快照。
-- Dashboard Snapshot 上限 256 KiB；历史/当前/未启动状态分离。macOS 可审核 `launchd` 模板用于重启后恢复 Supervisor，但安装和卸载始终由用户显式执行。
+- 波次预算先按并发槽位从同一剩余 Token/费用中 reservation；波次 Driver 记录 PID 启动身份和心跳，崩溃后对账角色结果并进入 `interrupted_requeued`，不得重复使用旧的运行中投影。
+- Dashboard Snapshot 上限 256 KiB；历史/当前/未启动状态分离。macOS 可审核 `launchd` 模板用于重启后恢复 Supervisor，安装和卸载必须由用户显式 `--apply`；Supervisor 每日只做有界、非破坏性的终态 Evidence 归档，不自动删除历史或 worktree。
 
 ## 风险与回滚
 

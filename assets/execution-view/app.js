@@ -187,9 +187,11 @@ function runtimeLabel(runtime) {
   if (!runtime) return '无活动角色';
   const state = runtime.state === 'awaiting_ingestion' ? '等待结果摄入' : runtime.state === 'running' ? '运行中' : '已准备';
   const heartbeat = runtime.heartbeat_age_ms === null ? '心跳未记录' : `心跳 ${duration(runtime.heartbeat_age_ms)} 前`;
+  const progress = runtime.progress_age_ms === null ? '真实进展未记录' : `真实进展 ${duration(runtime.progress_age_ms)} 前${runtime.idle_timeout_ms ? `/${duration(runtime.idle_timeout_ms)} 熔断` : ''}`;
+  const output = runtime.output_bytes === null ? '' : ` · 输出 ${runtime.output_bytes} B · 序号 ${runtime.progress_sequence}`;
   const remaining = runtime.remaining_ms === null ? '无截止时间' : `熔断剩余 ${duration(runtime.remaining_ms)}`;
   const usage = runtime.usage_total_tokens === null ? 'Token 未记录' : `Token ${runtime.usage_total_tokens}${runtime.token_limit ? `/${runtime.token_limit}` : ''}`;
-  return `${runtime.role} ${state} · ${heartbeat} · ${remaining} · ${usage}`;
+  return `${runtime.role} ${state} · ${heartbeat} · ${progress}${output} · ${remaining} · ${usage}`;
 }
 
 function taskTimingBreakdownLabel(task) {

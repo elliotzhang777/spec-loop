@@ -4,7 +4,7 @@
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-09-04
-- 最后更新：2026-09-06
+- 最后更新：2026-09-19
 - 所属设计：[DES-005](../03-design/DES-005-scheduling-worktree-coordination.md)
 - 所属特性：[FEAT-005](../02-feature/FEAT-005-scheduling-isolation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -63,7 +63,13 @@ P 定义资源和安全断言；M 实现；V 运行并发/故障注入；R 复�
 - 为 Git、Candidate snapshot 与维护控制命令增加 30～60 秒硬超时，避免非 Provider 子进程无限等待。
 - Dashboard Snapshot 收紧为每 Task 最近 20 个步骤和 256 KiB 硬上限；实时角色状态携带心跳、deadline、剩余时间、usage 与摄入状态。
 - 新增只读 retention plan、幂等 Evidence archive、Project 共享 npm/Maven cache 和可审核但不自动安装的 macOS launchd 模板。
+- 2026-09-19 防卡死加固：心跳拆分为 Controller 存活与 Provider 真实输出/usage 进展；默认 300 秒无进展即 TERM→KILL，并用 PID+启动时间防止复用误杀。
+- 波次记录增加独立心跳、活动/待派发任务、全局 usage reservation 与有界 ledger；Driver 崩溃后显式对账为 `interrupted_requeued`，不把旧运行继续投影为活跃。
+- 默认波次预算收紧为并发 2、20 分钟、25 万 Token 和 10 美元；并发 Worker 从同一个剩余额度预留，不能各自获得整波次预算。
+- Supervisor 支持显式 `--apply` 安装/卸载 launchd，且每天最多为 5 个终态 Task 执行非破坏性 Evidence 归档；不自动删除 worktree 或历史。
+- 增加快速退出 Provider 竞态回归：在任何异步 PID 查询前注册 stdout/stderr/error/close，避免退出事件丢失后等待到硬超时。
 - 2026-09-04 快速反馈：编译通过；`test/scheduler-control.test.mjs` 1/1 通过。尚未执行正式独立 V/R。
+- 2026-09-19 快速反馈：`npm test` 215/215 通过；未启动业务波次，未执行新的正式独立 V/R，工单仍保持“待验证”。
 
 ## 2026-09-06 专项正式验证记录
 
@@ -80,3 +86,4 @@ P 定义资源和安全断言；M 实现；V 运行并发/故障注入；R 复�
 | 2026-09-04 | 实现候选进入待验证 | lease、fencing、资源协调、Pause/Kill/reconcile 和 denylist 完成 |
 | 2026-09-06 | 故障加固 | 增加 Task 停止闭环、取消竞态 HEAD 对账、Driver 锁回收与只读产物盘点 |
 | 2026-09-06 | 专项正式 V/R | 独立 Supervisor、波次绑定、熔断和有界子进程在同一候选 HEAD 上通过 |
+| 2026-09-19 | 防卡死与质量加固 | 增加真实进展熔断、PID 身份停止、波次崩溃恢复、全局预算 reservation、定时非破坏性归档与故障注入回归 |

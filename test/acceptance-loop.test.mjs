@@ -415,6 +415,16 @@ test('scope, executable and Java requirements fail before an acceptance Run or r
   const heavy = await fixture('acceptance-preflight-heavy-', 'TASK-PREFLIGHT-HEAVY', { risk: 'heavy' }, false, false)
   await assert.rejects(startAcceptanceRun(heavy.root, heavy.taskId), /Heavy Task requires at least one wave\/full Gate before M starts/)
   assert.equal(await lstat(path.join(heavy.taskRoot, 'ACCEPTANCE_RUN.json')).catch(() => null), null)
+  await writeMd(path.join(heavy.root, '.spec-loop', 'GATES.md'), {
+    schema_version: 1, scope_kind: 'wave', wave_id: 'WPMVR', coverage: 'full', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], evidence_class: 'behavior', command: [process.execPath, 'check.mjs'], timeout_seconds: 30 }],
+  }, '# Gates\n\nA Heavy Task needs mutation-strength evidence.')
+  await assert.rejects(startAcceptanceRun(heavy.root, heavy.taskId), /Heavy Task requires .*mutation-class Gate.*before M starts/)
+  await writeMd(path.join(heavy.root, '.spec-loop', 'GATES.md'), {
+    schema_version: 1, scope_kind: 'wave', wave_id: 'WPMVR', coverage: 'full', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], evidence_class: 'mutation', stability_runs: 2, command: [process.execPath, 'check.mjs'], timeout_seconds: 30 }],
+  }, '# Gates\n\nA Heavy Task has full mutation-strength evidence.')
+  assert.equal((await startAcceptanceRun(heavy.root, heavy.taskId)).stage, 'm_working')
 
   const missing = await fixture('acceptance-preflight-command-', 'TASK-PREFLIGHT-CMD', {}, false, false)
   await writeMd(path.join(missing.root, '.spec-loop', 'GATES.md'), {

@@ -86,8 +86,9 @@ R: independent evidence review → Candidate | M | V | human
 
 ### Provider 运行门禁与在线预算
 
-- 真实 Codex 在语义身份变化后执行最长 20 秒的同参数 runtime probe，验证 UTF-8 locale、sandbox、Evidence 写区和最小响应；成功缓存 24 小时，确定性失败缓存 10 分钟，避免重复消耗。
-- invocation 心跳携带角色阶段、deadline、剩余时间、最新 usage 和角色预算。stdout 的结构化 usage 流达到 Token/费用上限时，Controller 先 TERM、后 KILL 整个进程组。
+- 真实 Codex 在语义身份变化后执行最长 20 秒的同参数 runtime probe，验证 UTF-8 locale、sandbox、Evidence 写区和最小响应；成功缓存 1 小时，确定性失败缓存 5 分钟，避免长期复用过期环境结论。
+- invocation 心跳携带角色阶段、deadline、剩余时间、最新 usage、角色预算和最后真实进展。stdout/stderr 或 usage 长期无变化时，即使 Controller 心跳仍正常也按无进展熔断；达到 Token/费用上限时先 TERM、后 KILL 完整进程树，并用 PID 启动身份验证退出对象。
+- M/V/R 可分别绑定已启用的 Provider；全局切换会同步三个角色映射，避免默认 Provider 与角色配置互相冲突。
 - M 成功后自动收集受管 Evidence、提交候选并编译计划；V/R 只在独立 Evidence 根提供合法 `RESULT.json` 时自动摄入。无结果使用 `awaiting_ingestion`，无效结果使用 `invalid`，均不得投影成运行中或 PASS。
 - 相对 Evidence 路径以 Project 根为基准，仍要求常规非符号链接文件且 realpath 不得逃逸。
 

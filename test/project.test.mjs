@@ -13,7 +13,7 @@ test('project init, provider doctor and rebuildable task queries', async()=>{
   assert.notEqual(cli(['project','spec-check',root,'--json']).code,0);
   assert.equal(cli(['project','spec-init',root]).code,0);
   assert.equal(cli(['project','spec-check',root,'--json']).code,0);
-  const providers=cli(['providers','show',root,'--json']);assert.equal(providers.code,0);const p=JSON.parse(providers.stdout);assert.equal(p.find(x=>x.id==='codex').active,true);assert.notEqual(cli(['providers','set',root,'--active','qoder']).code,0);
+  const providers=cli(['providers','show',root,'--json']);assert.equal(providers.code,0);const p=JSON.parse(providers.stdout);assert.equal(p.find(x=>x.id==='codex').active,true);assert.deepEqual(p.find(x=>x.id==='codex').roles,['M','V','R']);assert.equal(cli(['providers','set-role',root,'--role','V','--provider','codex']).code,0);assert.notEqual(cli(['providers','set-role',root,'--role','V','--provider','qoder']).code,0);assert.notEqual(cli(['providers','set',root,'--active','qoder']).code,0);
   const list=cli(['tasks','list',root,'--json']);assert.equal(list.code,0);assert.deepEqual(JSON.parse(list.stdout),[]);
 });
 

@@ -110,11 +110,18 @@ Scheduler Supervisor 和产物维护入口：
 spec-loop scheduler control supervisor-start projects/demo --json
 spec-loop scheduler control supervisor-status projects/demo --json
 spec-loop scheduler control supervisor-launchd-plan projects/demo --json
+spec-loop scheduler control supervisor-launchd-install projects/demo --apply --json
+spec-loop scheduler control reconcile-waves projects/demo --apply --json
 spec-loop maintenance retention-plan projects/demo --json
 spec-loop maintenance archive-evidence projects/demo TASK-CHECKOUT-1 --json
+spec-loop maintenance enforce-retention projects/demo --max-tasks 5 --json
 ```
 
-`supervisor-launchd-plan` 只生成可审核的 macOS 配置和命令，不会自动安装；Evidence 归档排除可重建的候选快照并生成 SHA-256 manifest。npm/Maven 下载统一复用 Project 级 `.spec-loop/shared-cache/`，不再复制到每个 invocation。
+`supervisor-launchd-plan` 只生成可审核的 macOS 配置和命令，不会自动安装；安装必须显式给出 `--apply`，已有不同内容的 plist 会拒绝覆盖。Supervisor 每天执行一次非破坏性 Evidence 归档（单轮最多 5 个 Task），排除可重建的候选快照并生成 SHA-256 manifest，不会自动删除历史或 worktree。npm/Maven 下载统一复用 Project 级 `.spec-loop/shared-cache/`，不再复制到每个 invocation。
+
+默认波次预算为并发 2、20 分钟、25 万 Token、10 美元。并发任务先从同一全局余额中获得 reservation，实时 usage 会触发整波次熔断；Provider 连续 300 秒没有 stdout、stderr 或 usage 变化也会被判定为无进展。PID 与进程启动时间共同校验，停止采用 TERM→KILL 并验证退出，避免 PID 复用误杀。崩溃遗留的运行中波次可由 `reconcile-waves` 对账并明确标记为 `interrupted_requeued`。
+
+M/V/R 默认使用同一个 Provider，也可以隔离配置，例如 `spec-loop providers set-role projects/demo --role V --provider claude-code`。目标 Provider 必须先在 `PROVIDERS.md` 启用；`providers set --active ...` 会把三个角色一起切换，避免默认 Provider 与角色映射互相冲突。
 
 当前运行中的 v1 Task 继续使用 `TASK_STATE.md / VERIFY.md`；安装或构建新版本不会修改其状态，也不会自动重启已有 `view` 进程。
 
@@ -188,7 +195,8 @@ gates:
 ```
 
 `coverage: targeted` 是 Light/Standard Task 的强制默认值。只有整轮最终 Heavy Task
-才可以使用 `scope_kind: wave` 与 `coverage: full`。`database.lifecycle:
+才可以使用 `scope_kind: wave` 与 `coverage: full`；Heavy 还必须至少配置一个
+`evidence_class: mutation` 且 `stability_runs >= 2` 的 Gate。高波动行为也可设置 `stability_runs: 2` 或 `3`，任何一次失败都使 Gate 失败。`database.lifecycle:
 persistent` 表示复用工程长期验证数据库，Gate 不得执行 `docker run/rm` 或
 `docker compose up/down/rm`；迁移、初始化或升级/回滚类 Heavy 验证需要一次性
 干净数据库时，改为 `disposable` 并填写 `reason`。
