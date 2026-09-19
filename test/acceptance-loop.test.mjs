@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { chmod, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 
 import { cli, fillContracts, tempRoot, writeMd } from './helpers.mjs'
@@ -263,6 +263,8 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
 
   const corrupted = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.equal(corrupted.candidate.access, 'read_only_snapshot')
+  assert.equal(await realpath(git(corrupted.candidate.path, ['rev-parse', '--show-toplevel'])), await realpath(corrupted.candidate.path))
+  assert.equal(git(corrupted.candidate.path, ['rev-parse', 'HEAD']), corrupted.candidate.head)
   await chmod(corrupted.candidate.path, 0o755)
   await writeFile(path.join(corrupted.candidate.path, 'tampered.txt'), 'tampered snapshot\n')
   const rejected = await runRoleInvocation(f.root, f.taskId, corrupted.invocation_id)

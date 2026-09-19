@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, readdir, readlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
@@ -71,6 +71,17 @@ async function extractSnapshot(worktree:string,head:string,destination:string):P
     archive.stdout.pipe(extract.stdin);archive.stderr.on('data',chunk=>archiveError+=chunk);extract.stderr.on('data',chunk=>extractError+=chunk);
     archive.on('error',error=>{if(settled)return;settled=true;clearTimeout(timer);reject(error)});extract.on('error',error=>{if(settled)return;settled=true;clearTimeout(timer);reject(error)});archive.on('close',code=>{archiveCode=code??1;finish()});extract.on('close',code=>{extractCode=code??1;finish()});
   });
+  // Give the archive its own Git boundary. Without this, Git invoked inside a
+  // snapshot nested below another repository walks upward and reports that
+  // unrelated repository's HEAD, which can mislead V/R provenance checks.
+  await git(destination,['init','--quiet']);
+  const sourceObjects=path.resolve(worktree,await git(worktree,['rev-parse','--git-path','objects']));
+  const alternates=path.join(destination,'.git','objects','info','alternates');
+  await mkdir(path.dirname(alternates),{recursive:true});
+  await writeFile(alternates,`${sourceObjects}\n`);
+  await git(destination,['update-ref','refs/heads/spec-loop-snapshot',head]);
+  await git(destination,['symbolic-ref','HEAD','refs/heads/spec-loop-snapshot']);
+  await git(destination,['read-tree',head]);
 }
 
 async function makeReadOnly(root:string):Promise<void>{
