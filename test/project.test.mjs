@@ -68,16 +68,29 @@ test('project default protocol requires complete v2 contracts without migrating 
   assert.deepEqual(tasks.map(item=>[item.task_id,item.protocol]),[['TASK-LEGACY-1','v1'],['TASK-V2-1','v2']]);
 });
 
-test('approved proposal explicitly adopts a matching draft target task', async()=>{
+test('approved proposal explicitly adopts a matching named draft target task', async()=>{
   const root=await tempRoot('project-adopt-');const repo=path.join(root,'repo');await mkdir(repo);
   cli(['project','init',root,'--id','PROJ-ADOPT','--name','Adopt','--repository',repo]);
-  const target=path.join(repo,'spec','04-task','TASK-ADOPT-1.md');
+  const target=path.join(repo,'spec','04-task','TASK-ADOPT-1-existing-draft.md');
   await writeFile(target,'# TASK-ADOPT-1：Adopt draft\n\n- 状态：草稿\n- 所属设计：[DES-001](../03-design/DES-001-example.md)\n\n## 目标\n\nAdopt safely.\n\n## 验收标准\n\n- [ ] AC-1：matching acceptance；\n');
   const proposal=cli(['triage','propose',root,'--source','approved product plan','--goal','Adopt safely','--reason','Draft was written before execution','--ac','matching acceptance']);assert.equal(proposal.code,0,proposal.stderr);
   cli(['triage','approve',root,proposal.stdout.trim(),'--by','zhangbo']);
   const rejected=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-1','--title','Adopt draft']);assert.notEqual(rejected.code,0);assert.match(rejected.stderr,/--adopt-existing/);
   const adopted=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-1','--title','Adopt draft','--adopt-existing']);assert.equal(adopted.code,0,adopted.stderr);
   const content=await readFile(target,'utf8');assert.match(content,/- 状态：已批准/);assert.match(content,/- Proposal：PROP-1/);assert.match(content,/- Spec-Loop Task：/);assert.match(content,/所属设计/);
+  assert.match(await readFile(path.join(root,'.spec-loop','tasks','task-adopt-1','SPEC.md'),'utf8'),/target_spec: spec\/04-task\/TASK-ADOPT-1-existing-draft\.md/);
+  await assert.rejects(readFile(path.join(repo,'spec','04-task','TASK-ADOPT-1.md'),'utf8'));
+});
+
+test('task creation fails closed when multiple target specs match one ID',async()=>{
+  const root=await tempRoot('project-adopt-ambiguous-'),repo=path.join(root,'repo');await mkdir(repo);
+  cli(['project','init',root,'--id','PROJ-ADOPT-AMBIGUOUS','--name','Adopt ambiguous','--repository',repo]);
+  const directory=path.join(repo,'spec','04-task');
+  for(const name of ['TASK-ADOPT-2-first.md','TASK-ADOPT-2-second.md'])await writeFile(path.join(directory,name),'# TASK-ADOPT-2：Adopt draft\n\n- 状态：草稿\n\n## 验收标准\n\n- [ ] AC-1：matching acceptance\n');
+  const proposal=cli(['triage','propose',root,'--source','approved product plan','--goal','Adopt safely','--reason','Reject ambiguous authority','--ac','matching acceptance']);assert.equal(proposal.code,0,proposal.stderr);
+  assert.equal(cli(['triage','approve',root,proposal.stdout.trim(),'--by','zhangbo']).code,0);
+  const result=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-2','--title','Adopt draft','--adopt-existing']);assert.notEqual(result.code,0);assert.match(result.stderr,/multiple target task specs/);
+  await assert.rejects(readFile(path.join(root,'.spec-loop','tasks','task-adopt-2','TASK_STATE.md'),'utf8'));
 });
 
 test('fullstack proposals route backend TASK and frontend WEB-TASK into their source specification libraries',async()=>{
