@@ -241,6 +241,12 @@ async function approvedBashGateCommands(root:string,taskId:string):Promise<Set<s
   if(contract.approval.contract_hash!==contract.contract_hash)throw new Error('approved Gate contract hash mismatch');
   return new Set(contract.tools.map((tool)=>JSON.stringify(tool.command)));
 }
+async function approvedV2GateIds(root:string,taskId:string):Promise<Set<string>|null>{
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)return null;const file=path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md');if(!await exists(file))return null;
+  const digest=z.string().regex(/^[a-f0-9]{64}$/),contract=z.object({contract_hash:digest,approval:z.object({contract_hash:digest}).passthrough(),tools:z.array(z.object({gate_id:z.string().min(1)}).passthrough())}).passthrough().parse((await readMarkdown(file)).data);
+  if(contract.approval.contract_hash!==contract.contract_hash)throw new Error('approved Gate contract hash mismatch');
+  return new Set(contract.tools.map((tool)=>tool.gate_id));
+}
 async function assertGateCommand(command:string[],worktree:string,approvedBash:Set<string>){
   const bin=path.basename(command[0]).toLowerCase(),script=command[1]??'',approvedScript=bin==='bash'&&command.length===2&&approvedBash.has(JSON.stringify(command))&&safeRelativePathSchema.safeParse(script).success&&/^scripts\/[A-Za-z0-9._/-]+\.sh$/.test(script);
   if(approvedScript){const target=path.resolve(worktree,script),root=await realpath(worktree),scriptsRoot=path.join(root,'scripts'),info=await lstat(target).catch(()=>null),actual=info?await realpath(target):'';if(!info?.isFile()||info.isSymbolicLink()||!actual.startsWith(`${scriptsRoot}${path.sep}`))throw new Error(`approved Bash Gate script is missing, symbolic, or escapes the candidate: ${script}`)}
@@ -547,7 +553,8 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
 }
 
 export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
-  const m=await readWorkspace(root,taskId),current=await readHarnessState(root,taskId);if(current.stage!=='collected')throw new Error(`harness verify is illegal from ${current.stage}`);const config=await readGateConfig(root),gates=config.gates,results:GateResult[]=[];
+  const m=await readWorkspace(root,taskId),current=await readHarnessState(root,taskId);if(current.stage!=='collected')throw new Error(`harness verify is illegal from ${current.stage}`);const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),gates=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates,results:GateResult[]=[];
+  if(approvedGateIds&&gates.length!==approvedGateIds.size)throw new Error('one or more P-approved Gates are missing from the project Gate configuration');
   await validateGateScope(root,taskId,config);
   await validatePlaywrightDeclarations(root,taskId,gates);
   const startHead=await git(m.worktree,['rev-parse','HEAD']);if(startHead!==current.head)throw new Error('workspace HEAD changed after collect');
@@ -571,7 +578,7 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
 
 async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifest,head:string,gates:GateResult[]):Promise<void>{
   const requirements=await webRequirements(root,taskId);
-  const config=await readGateConfig(root),definitions=config.gates;
+  const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),definitions=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates;
   await validateGateScope(root,taskId,config);
   if(definitions.length!==gates.length||definitions.some((definition)=>!gates.some((gate)=>gate.id===definition.id)))
     throw new Error('Gate Plan changed after execution');

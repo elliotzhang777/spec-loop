@@ -58,7 +58,7 @@ function contract(taskId, overrides = {}) {
   }
 }
 
-async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true) {
+async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true, extraGates = []) {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
   const level = contractOverrides.risk ?? 'standard'
   await mkdir(repository)
@@ -89,7 +89,7 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   assert.equal(cli(['plan', taskRoot]).code, 0)
   await writeMd(path.join(root, '.spec-loop', 'GATES.md'), {
     schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
-    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: contractValue.tools[0].command, timeout_seconds: 30 }],
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: contractValue.tools[0].command, timeout_seconds: 30 }, ...extraGates],
   }, '# Gates\n\nThe v2 fixture executes the approved unit acceptance tool.')
   git(repository, ['add', '.'])
   git(repository, ['commit', '-m', 'approved project specification'])
@@ -301,8 +301,10 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
   assert.match(reconciled.last_error, /result remains unknown/)
 })
 
-test('Controlled V freezes a clean v2 candidate and runs an exactly approved repository Bash Gate', async () => {
-  const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', { tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }] }, true)
+test('Controlled V freezes a clean v2 candidate and runs only its exactly approved repository Bash Gate', async () => {
+  const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', { tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }] }, true, true, [
+    { id: 'other-task-gate', ac: ['AC-1'], command: [process.execPath, '--version'], timeout_seconds: 30 },
+  ])
   const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')
   const result = await runControlledV(f.root, f.taskId, invocation.invocation_id)
