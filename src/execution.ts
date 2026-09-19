@@ -43,6 +43,7 @@ const gateConfigSchema=z.object({
   wave_id:z.string().regex(/^W[A-Z0-9-]*$/).optional(),
   coverage:z.enum(['targeted','full']).default('targeted'),
   database:databasePolicySchema.default({lifecycle:'persistent',reset:'fixtures'}),
+  environment_passthrough:z.array(z.string().regex(/^(?:TASK[A-Z0-9]*|SPEC_LOOP_GATE)[A-Z0-9_]*$/)).max(32).default([]),
   gates:z.array(gateDefinitionSchema).min(1),
 }).strict().superRefine((value,ctx)=>{
   if(value.wave_id&&!value.scope_kind)ctx.addIssue({code:'custom',message:'wave_id requires scope_kind'});
@@ -54,6 +55,8 @@ const gateConfigSchema=z.object({
     ctx.addIssue({code:'custom',message:'persistent database lifecycle may not use container reset'});
   if(value.database.lifecycle==='disposable'&&!value.database.reason)
     ctx.addIssue({code:'custom',message:'disposable database lifecycle requires an explicit reason'});
+  if(new Set(value.environment_passthrough).size!==value.environment_passthrough.length)
+    ctx.addIssue({code:'custom',message:'Gate environment passthrough names must be unique'});
 });
 const manifestSchema = z.object({schema_version:z.literal(1),task_id:z.string(),repository:z.string(),worktree:z.string(),branch:z.string(),base_commit:z.string().regex(/^[a-f0-9]{40,64}$/),head:z.string().regex(/^[a-f0-9]{40,64}$/),created_at:z.iso.datetime()}).strict();
 const stageSchema = z.enum(['prepared','executed','collected','verified','reported']);
@@ -272,11 +275,17 @@ function assertDatabaseLifecycle(command:string[],config:z.infer<typeof gateConf
   if(mutatesContainer)throw new Error('persistent database Gate may not create or remove containers; start the long-lived validation database outside the Gate');
 }
 function gateEnvironment(config:z.infer<typeof gateConfigSchema>):Record<string,string>{
-  return {
+  const environment:Record<string,string>={
     SPEC_LOOP_VERIFICATION_COVERAGE:config.coverage,
     SPEC_LOOP_DATABASE_LIFECYCLE:config.database.lifecycle,
     SPEC_LOOP_DATABASE_RESET:config.database.reset,
   };
+  for(const name of config.environment_passthrough){
+    const value=process.env[name];
+    if(value===undefined)throw new Error(`required Gate environment variable is missing: ${name}`);
+    environment[name]=value;
+  }
+  return environment;
 }
 const MAX_CAPTURE_BYTES=1_048_576;
 async function runProcess(bin:string,args:string[],cwd:string,timeout:number,input?:string,extraEnv:Record<string,string>={},effect?:{root:string;taskId:string;kind:'provider'|'gate';idleTimeoutSeconds?:number}):Promise<{code:number;stdout:string;stderr:string;timedOut:boolean;outputTruncated:boolean;termination_verified:boolean;pipe_drain_timed_out:boolean}>{

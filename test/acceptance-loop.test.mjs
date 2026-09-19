@@ -58,7 +58,7 @@ function contract(taskId, overrides = {}) {
   }
 }
 
-async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true, extraGates = []) {
+async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true, extraGates = [], environmentPassthrough = []) {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
   const level = contractOverrides.risk ?? 'standard'
   await mkdir(repository)
@@ -89,6 +89,7 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   assert.equal(cli(['plan', taskRoot]).code, 0)
   await writeMd(path.join(root, '.spec-loop', 'GATES.md'), {
     schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    environment_passthrough: environmentPassthrough,
     gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: contractValue.tools[0].command, timeout_seconds: 30 }, ...extraGates],
   }, '# Gates\n\nThe v2 fixture executes the approved unit acceptance tool.')
   git(repository, ['add', '.'])
@@ -314,6 +315,18 @@ test('Controlled V freezes a clean v2 candidate and runs only its exactly approv
   const harness = JSON.parse(await readFile(path.join(f.root, '.spec-loop', 'output', `${f.taskId}-harness-state.json`), 'utf8'))
   assert.equal(harness.stage, 'verified')
   assert.equal(harness.head, git(f.workspace, ['rev-parse', 'HEAD']))
+})
+
+test('Controlled V passes only explicitly named task-scoped environment variables to Gates', async () => {
+  const f = await fixture('acceptance-controlled-env-', 'TASK-CONTROLLED-ENV-1', {}, true, true, [], ['TASK_GATE_FIXTURE'])
+  const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+  assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')
+  process.env.TASK_GATE_FIXTURE = 'fixture-value'
+  try {
+    assert.equal((await runControlledV(f.root, f.taskId, invocation.invocation_id)).run.stage, 'v_passed')
+  } finally {
+    delete process.env.TASK_GATE_FIXTURE
+  }
 })
 
 test('Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access', async () => {
