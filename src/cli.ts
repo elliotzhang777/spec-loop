@@ -24,8 +24,8 @@ import {
 } from './acceptance-loop.js';
 import { cancelRoleInvocation, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
 import { initReportScheduler, readReportSchedulerStatus, runReportScheduler, setReportSchedulerPaused } from './report-scheduler.js';
-import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileInterruptedWaves, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
-import { installSchedulerSupervisorLaunchd, schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor, uninstallSchedulerSupervisorLaunchd } from './scheduler-supervisor.js';
+import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileInterruptedWaves, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, renewProjectLease, renewTaskLease, retryDeadLetter, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
+import { installSchedulerSupervisorLaunchd, resetSchedulerSupervisorCircuit, schedulerSupervisorCircuitStatus, schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor, uninstallSchedulerSupervisorLaunchd } from './scheduler-supervisor.js';
 import { collectSpringEvidence, detectSpringBoot, planV2Gates, verifySpringEvidence, verifyV2GatePlan } from './toolchain.js';
 import { archiveAcceptanceEvidence, inspectArtifacts, planWorktreeRetirement, retentionPolicy, retireWorktree, runRetentionMaintenance } from './maintenance.js';
 
@@ -198,7 +198,17 @@ program.command('_scheduler-supervise',{hidden:true}).argument('<project-dir>')
   .option('--interval-seconds <seconds>','seconds between watchdog cycles','5')
   .option('--stale-seconds <seconds>','execution heartbeat stale threshold','15')
   .option('--cycle-timeout-seconds <seconds>','hard timeout for one isolated watchdog cycle','60')
-  .action((dir,o)=>action(async()=>serveSchedulerSupervisor(root(dir),{intervalSeconds:Number(o.intervalSeconds),staleSeconds:Number(o.staleSeconds),cycleTimeoutSeconds:Number(o.cycleTimeoutSeconds)})));
+  .option('--max-consecutive-failures <count>','watchdog circuit-breaker threshold','3')
+  .option('--slow-write-ms <milliseconds>','control-plane write degradation threshold','2000')
+  .option('--last-recovery-action <description>')
+  .option('--test-mode','mark this as a bounded test Supervisor')
+  .option('--max-runtime-seconds <seconds>','required bounded lifetime in test mode')
+  .option('--test-session-id <id>')
+  .action((dir,o)=>action(async()=>serveSchedulerSupervisor(root(dir),{
+    intervalSeconds:Number(o.intervalSeconds),staleSeconds:Number(o.staleSeconds),cycleTimeoutSeconds:Number(o.cycleTimeoutSeconds),
+    maxConsecutiveFailures:Number(o.maxConsecutiveFailures),slowWriteMs:Number(o.slowWriteMs),lastRecoveryAction:o.lastRecoveryAction,
+    testMode:Boolean(o.testMode),maxRuntimeSeconds:o.maxRuntimeSeconds===undefined?undefined:Number(o.maxRuntimeSeconds),testSessionId:o.testSessionId,
+  })));
 
 const activity=program.command('activity').description('Record detailed work inside the current Round');
 activity.command('start').argument('<task-dir>')
@@ -217,9 +227,10 @@ activity.command('finish').argument('<task-dir>').requiredOption('--id <step-run
   }));
 activity.command('run').argument('<task-dir>').argument('<executable>').argument('[args...]')
   .addOption(new Option('--kind <kind>').choices(['command','playwright']).default('command'))
-  .requiredOption('--label <label>').requiredOption('--summary <summary>').option('--ref <ref...>').option('--json')
+  .requiredOption('--label <label>').requiredOption('--summary <summary>').option('--ref <ref...>').option('--timeout-seconds <seconds>','hard command timeout','300').option('--json')
   .action((dir,executable,args,o)=>action(async()=>{
-    const result=await runWorkCommand(root(dir),{kind:o.kind,label:o.label,summary:o.summary,executable,args,refs:o.ref});
+    const timeoutSeconds=Number(o.timeoutSeconds);if(!Number.isFinite(timeoutSeconds)||timeoutSeconds<=0||timeoutSeconds>3600)throw new Error('--timeout-seconds must be > 0 and <= 3600');
+    const result=await runWorkCommand(root(dir),{kind:o.kind,label:o.label,summary:o.summary,executable,args,refs:o.ref,timeoutMs:Math.round(timeoutSeconds*1000)});
     print(o.json?result:`${o.label}: exit=${result.exitCode}`,o.json);
     if(result.exitCode!==0)process.exitCode=result.exitCode;
   }));
@@ -345,6 +356,8 @@ const schedulerControl=scheduler.command('control').description('Lease, fencing,
 schedulerControl.command('init').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await initSchedulerControl(root(dir)),o.json)));
 schedulerControl.command('acquire-project').argument('<project-dir>').requiredOption('--owner <identity>').requiredOption('--key <idempotency-key>').option('--ttl <seconds>','lease TTL','300').option('--json').action((dir,o)=>action(async()=>print(await acquireProjectLease(root(dir),{owner:o.owner,idempotencyKey:o.key,ttlSeconds:Number(o.ttl)}),o.json)));
 schedulerControl.command('acquire-task').argument('<project-dir>').requiredOption('--project-lease <id>').requiredOption('--project-token <token>').requiredOption('--task <id>').requiredOption('--owner <identity>').requiredOption('--key <idempotency-key>').requiredOption('--resource <claim...>').addOption(new Option('--action <action>').choices(['start_m','start_v','start_r','run_gate']).makeOptionMandatory()).option('--ttl <seconds>','lease TTL','300').option('--json').action((dir,o)=>action(async()=>print(await acquireTaskLease(root(dir),{projectLeaseId:o.projectLease,projectFencingToken:Number(o.projectToken),taskId:o.task,owner:o.owner,idempotencyKey:o.key,ttlSeconds:Number(o.ttl),resources:o.resource,action:o.action}),o.json)));
+schedulerControl.command('renew-project').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').requiredOption('--owner-nonce <nonce>').requiredOption('--not-after <iso-time>').option('--ttl <seconds>','renewal TTL','60').option('--json').action((dir,o)=>action(async()=>print(await renewProjectLease(root(dir),{leaseId:o.lease,fencingToken:Number(o.token),ownerNonce:o.ownerNonce,ttlSeconds:Number(o.ttl),notAfter:o.notAfter}),o.json)));
+schedulerControl.command('renew-task').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').requiredOption('--owner-nonce <nonce>').requiredOption('--not-after <iso-time>').option('--ttl <seconds>','renewal TTL','60').option('--json').action((dir,o)=>action(async()=>print(await renewTaskLease(root(dir),{leaseId:o.lease,fencingToken:Number(o.token),ownerNonce:o.ownerNonce,ttlSeconds:Number(o.ttl),notAfter:o.notAfter}),o.json)));
 schedulerControl.command('accept-result').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--invocation <id>').option('--json').action((dir,o)=>action(async()=>print(await assertTaskLeaseResult(root(dir),o.lease,Number(o.token),o.invocation),o.json)));
 schedulerControl.command('release-task').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--json').action((dir,o)=>action(async()=>print(await releaseTaskLease(root(dir),o.lease,Number(o.token)),o.json)));
 schedulerControl.command('release-project').argument('<project-dir>').requiredOption('--lease <id>').requiredOption('--token <token>').option('--json').action((dir,o)=>action(async()=>print(await releaseProjectLease(root(dir),o.lease,Number(o.token)),o.json)));
@@ -353,6 +366,7 @@ schedulerControl.command('pause').argument('<project-dir>').option('--json').act
 schedulerControl.command('resume').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await resumeSchedulerControl(root(dir)),o.json)));
 schedulerControl.command('kill').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await killSchedulerControl(root(dir)),o.json)));
 schedulerControl.command('stop-task').argument('<project-dir>').requiredOption('--task <id>').option('--reason <text>','auditable stop reason','stopped by user').option('--json').action((dir,o)=>action(async()=>print(await stopTaskExecution(root(dir),o.task,o.reason),o.json)));
+schedulerControl.command('retry-task').description('Explicitly move one Scheduler DeadLetter to RetryWait').argument('<project-dir>').requiredOption('--task <id>').option('--json').action((dir,o)=>action(async()=>print(await retryDeadLetter(root(dir),o.task),o.json)));
 schedulerControl.command('budget').description('Configure wave-wide concurrency, elapsed, token and cost ceilings').argument('<project-dir>').requiredOption('--max-parallel <count>').requiredOption('--max-elapsed-seconds <seconds>').requiredOption('--max-tokens <tokens>').requiredOption('--max-cost-usd <amount>').option('--json').action((dir,o)=>action(async()=>print(await configureWaveBudget(root(dir),{maxParallel:Number(o.maxParallel),maxElapsedSeconds:Number(o.maxElapsedSeconds),maxTokens:Number(o.maxTokens),maxCostUsd:Number(o.maxCostUsd)}),o.json)));
 schedulerControl.command('run-ready').description('Plan by default; --execute concurrently starts one legal M/V/R invocation per Ready Task').argument('<project-dir>').requiredOption('--owner <identity>').option('--execute','start managed role invocations').option('--json').action((dir,o)=>action(async()=>{
   const result=o.execute?await runReadyWave(root(dir),{owner:o.owner}):await planReadyWave(root(dir));print(result,o.json);if(o.execute&&result.status!=='completed')process.exitCode=5;
@@ -365,10 +379,17 @@ schedulerControl.command('supervisor-start')
   .option('--interval-seconds <seconds>', 'seconds between watchdog cycles', '5')
   .option('--stale-seconds <seconds>', 'execution heartbeat stale threshold', '15')
   .option('--cycle-timeout-seconds <seconds>', 'hard timeout for one isolated watchdog cycle', '60')
+  .option('--max-consecutive-failures <count>','watchdog circuit-breaker threshold','3')
+  .option('--slow-write-ms <milliseconds>','control-plane write degradation threshold','2000')
+  .option('--test-mode','start a bounded test Supervisor')
+  .option('--max-runtime-seconds <seconds>','required bounded lifetime in test mode')
+  .option('--test-session-id <id>')
   .option('--json')
   .action((dir, o) => action(async () => {
     const result = await startManagedSchedulerSupervisor(root(dir), {
       intervalSeconds: Number(o.intervalSeconds), staleSeconds: Number(o.staleSeconds), cycleTimeoutSeconds: Number(o.cycleTimeoutSeconds),
+      maxConsecutiveFailures:Number(o.maxConsecutiveFailures),slowWriteMs:Number(o.slowWriteMs),testMode:Boolean(o.testMode),
+      maxRuntimeSeconds:o.maxRuntimeSeconds===undefined?undefined:Number(o.maxRuntimeSeconds),testSessionId:o.testSessionId,
     });
     print(result, o.json);
   }));
@@ -380,6 +401,8 @@ schedulerControl.command('supervisor-status')
     print(result, o.json);
     if (!result.running || !result.healthy) process.exitCode = 5;
   }));
+schedulerControl.command('supervisor-circuit-status').description('Report the persistent Supervisor circuit breaker').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerSupervisorCircuitStatus(root(dir)),o.json)));
+schedulerControl.command('supervisor-circuit-reset').description('Explicitly reset an open Supervisor circuit after the cause is fixed').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await resetSchedulerSupervisorCircuit(root(dir)),o.json)));
 schedulerControl.command('supervisor-launchd-plan').description('Print an optional macOS launchd auto-restart plan without installing it').argument('<project-dir>').option('--json').action((dir,o)=>action(async()=>print(await schedulerSupervisorLaunchdPlan(root(dir)),o.json)));
 schedulerControl.command('supervisor-launchd-install').description('Preview by default; --apply installs and bootstraps the audited macOS launchd Supervisor').argument('<project-dir>').option('--apply','write and bootstrap the launchd service').option('--json').action((dir,o)=>action(async()=>print(o.apply?await installSchedulerSupervisorLaunchd(root(dir)):await schedulerSupervisorLaunchdPlan(root(dir)),o.json)));
 schedulerControl.command('supervisor-launchd-uninstall').description('Requires --apply; boot out and remove only this Project Supervisor plist').argument('<project-dir>').option('--apply','perform the scoped uninstall').option('--json').action((dir,o)=>action(async()=>{if(!o.apply)throw new Error('launchd uninstall requires --apply');print(await uninstallSchedulerSupervisorLaunchd(root(dir)),o.json)}));

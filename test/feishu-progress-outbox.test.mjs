@@ -307,8 +307,26 @@ test('running connector projects local task facts and drains the outbox', async 
     approvers: [{ project_id: 'PROJ-LIVE', open_id: 'ou_progress_user', local_actor: 'zhangbo', request_types: ['verification'] }],
   }, null, 2))
   const transport = new FakeFeishuTransport(), controller = new AbortController()
-  setTimeout(() => controller.abort(), 150)
-  await runFeishuConnector(root, { transport, signal: controller.signal, leaseTtlMs: 1000, outboxPollMs: 10, progressAggregateWindowMs: 0 })
+  const originalSendCard = transport.sendCard.bind(transport)
+  let markSent
+  const sent = new Promise((resolve) => { markSent = resolve })
+  transport.sendCard = async (...args) => {
+    const result = await originalSendCard(...args)
+    markSent()
+    return result
+  }
+  const connector = runFeishuConnector(root, { transport, signal: controller.signal, leaseTtlMs: 1000, outboxPollMs: 10, progressAggregateWindowMs: 0 })
+  let timeout
+  try {
+    await Promise.race([
+      sent,
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('connector did not send progress within 5s')), 5000) }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    controller.abort()
+  }
+  await connector
   assert.equal(transport.sent.length, 1)
   assert.match(JSON.stringify(transport.sent[0].card), /TASK-LIVE/)
 })

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
+import { withOwnedDirectoryLock } from '../owned-lock.js';
 import {
   executeConfirmationRequest,
   listConfirmationRequests, readConfirmationRequestSnapshot,
@@ -130,35 +131,9 @@ async function actionRoot(projectRoot: string): Promise<string> {
 }
 
 async function withInboxLock<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const lock = path.join(root, 'mutation.lock');
-  const ownerFile = path.join(lock, 'owner.json');
-  let acquired = false;
-  for (let attempt = 0; attempt < 700; attempt += 1) {
-    try {
-      await mkdir(lock, { mode: 0o700 });
-      await writeFile(ownerFile, `${JSON.stringify({ schema_version: 1, pid: process.pid, created_at: new Date().toISOString() })}\n`, { flag: 'wx', mode: 0o600 });
-      acquired = true; break;
-    }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const info = await lstat(lock).catch(() => null);
-      if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('feishu action inbox lock is invalid');
-      const owner = await readFile(ownerFile, 'utf8').then((value) => JSON.parse(value) as { pid?: number; created_at?: string }).catch(() => null);
-      let ownerDead = false;
-      if (owner?.pid) {
-        try { process.kill(owner.pid, 0); }
-        catch (pidError) { ownerDead = (pidError as NodeJS.ErrnoException).code === 'ESRCH'; }
-      }
-      const missingOwnerStale = !owner && Date.now() - info.mtimeMs >= 5_000;
-      if (ownerDead || missingOwnerStale) {
-        await rm(lock, { recursive: true, force: true });
-        continue;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (!acquired) throw new Error('feishu action inbox is busy; explicit recovery is required');
-  try { return await action(); } finally { await rm(lock, { recursive: true, force: true }); }
+  return withOwnedDirectoryLock(path.join(root, 'mutation.lock'), {
+    name: 'feishu action inbox', maxWaitMs: 7_000, pollMs: 10, missingOwnerProtectionMs: 5_000,
+  }, action);
 }
 
 async function readInbox(root: string): Promise<FeishuActionInboxRecord[]> {

@@ -586,7 +586,9 @@ test('aborting closes the action gate before transport disconnect completes', as
   const transport = new SlowDisconnectTransport()
   const controller = new AbortController()
   const running = runFeishuConnector(root, { holder: 'abort-gate-holder', transport, signal: controller.signal })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  const connectedDeadline=Date.now()+2_000
+  while(transport.connectionState()!=='connected'&&Date.now()<connectedDeadline)await new Promise(resolve=>setTimeout(resolve,10))
+  assert.equal(transport.connectionState(),'connected')
   controller.abort()
   await writeFile(path.join(root, '.spec-loop', 'connectors', 'feishu', 'lease.json'), 'invalid-json')
   await transport.emitCardAction({

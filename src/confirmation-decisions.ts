@@ -1,9 +1,10 @@
-import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from './files.js';
 import type { ConfirmationControllerCommand } from './connectors/feishu-callback.js';
 import { confirmationContentHash, confirmationFactsSchema } from './connectors/feishu-confirmation.js';
+import { withOwnedDirectoryLock } from './owned-lock.js';
 
 const actionSchema = z.enum([
   'approve_proposal', 'reject_proposal', 'choose_option', 'pause_task', 'approve_visual', 'reject_visual',
@@ -35,17 +36,9 @@ async function decisionRoot(projectRoot: string): Promise<string> {
 }
 
 async function withDecisionLock<T>(root: string, operation: () => Promise<T>): Promise<T> {
-  const lock = path.join(root, 'mutation.lock');
-  let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await mkdir(lock, { mode: 0o700 }); acquired = true; break; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (!acquired) throw new Error('confirmation decision store is busy');
-  try { return await operation(); } finally { await rmdir(lock); }
+  return withOwnedDirectoryLock(path.join(root, 'mutation.lock'), {
+    name: 'confirmation decision store', maxWaitMs: 1_000, pollMs: 10, missingOwnerProtectionMs: 5_000,
+  }, operation);
 }
 
 async function readDecisions(root: string): Promise<ConfirmationDecision[]> {

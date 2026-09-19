@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { z } from 'zod';
 import { assertNoSecrets } from './files.js';
 import {
@@ -6,6 +5,7 @@ import {
   type ExecutionEvent, type ExecutionOutcome, type ExecutionStepType,
 } from './execution-events.js';
 import { readState } from './task.js';
+import { runManagedProcess } from './managed-process.js';
 
 export const workActivityKindSchema = z.enum(['reproduce', 'analyze', 'change', 'command', 'playwright']);
 export type WorkActivityKind = z.infer<typeof workActivityKindSchema>;
@@ -47,20 +47,21 @@ export async function finishWorkActivity(taskRoot: string, stepRunId: string, in
 }
 
 export async function runWorkCommand(taskRoot: string, input: {
-  kind: 'command' | 'playwright'; label: string; summary: string; executable: string; args: string[]; refs?: string[];
-}): Promise<{ step: ExecutionEvent; exitCode: number; signal: NodeJS.Signals | null; error: string | null }> {
+  kind: 'command' | 'playwright'; label: string; summary: string; executable: string; args: string[]; refs?: string[];timeoutMs?:number;
+}): Promise<{ step: ExecutionEvent; exitCode: number; signal: NodeJS.Signals | null; error: string | null;timedOut:boolean;terminationVerified:boolean;pipeDrainTimedOut:boolean }> {
   const current = await context(taskRoot), stepType = activityTypes[input.kind];
+  const timeoutMs=input.timeoutMs??300_000;if(!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>3_600_000)throw new Error('work command timeout must be 1–3600000ms');
   assertNoSecrets(`${input.label}\n${input.summary}\n${(input.refs ?? []).join('\n')}`, 'work command');
   const started = await startExecutionStep(current.projectRoot, {
     taskId: current.taskId, round: current.round, stepType, label: input.label,
     summary: input.summary, refs: input.refs,
   });
-  const result = spawnSync(input.executable, input.args, { cwd: current.repository, stdio: 'inherit', env: process.env });
-  const exitCode = result.status ?? 1, signal = result.signal, error = result.error?.message ?? null;
-  const outcome: ExecutionOutcome = exitCode === 0 && !signal && !error ? 'success' : signal ? 'interrupted' : 'failure';
-  const detail = error ? `启动失败：${error}` : signal ? `被信号 ${signal} 中断` : `退出码 ${exitCode}`;
+  const result = await runManagedProcess({bin:input.executable,args:input.args,cwd:current.repository,env:process.env,timeoutMs,pipeDrainTimeoutMs:1_000,onStdout:chunk=>process.stdout.write(chunk),onStderr:chunk=>process.stderr.write(chunk)});
+  const exitCode = result.code, signal = result.signal, error = result.code===127?(result.stderr.trim()||'命令无法启动'):result.termination_verified?null:'进程终止无法确认';
+  const outcome: ExecutionOutcome = exitCode === 0 && !signal && !error ? 'success' : result.timedOut?'failure':signal ? 'interrupted' : 'failure';
+  const detail = result.timedOut?`超时（${timeoutMs}ms，终止确认=${result.termination_verified}，管道排空超时=${result.pipe_drain_timed_out}）`:error ? `启动失败：${error}` : signal ? `被信号 ${signal} 中断` : `退出码 ${exitCode}`;
   const step = await finishExecutionStep(current.projectRoot, started, {
     outcome, summary: `${input.summary}；${detail}`, refs: input.refs,
   });
-  return { step, exitCode, signal, error };
+  return { step, exitCode, signal, error,timedOut:result.timedOut,terminationVerified:result.termination_verified,pipeDrainTimedOut:result.pipe_drain_timed_out };
 }

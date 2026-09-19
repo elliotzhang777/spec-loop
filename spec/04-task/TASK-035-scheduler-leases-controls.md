@@ -68,8 +68,24 @@ P 定义资源和安全断言；M 实现；V 运行并发/故障注入；R 复�
 - 默认波次预算收紧为并发 2、20 分钟、25 万 Token 和 10 美元；并发 Worker 从同一个剩余额度预留，不能各自获得整波次预算。
 - Supervisor 支持显式 `--apply` 安装/卸载 launchd，且每天最多为 5 个终态 Task 执行非破坏性 Evidence 归档；不自动删除 worktree 或历史。
 - 增加快速退出 Provider 竞态回归：在任何异步 PID 查询前注册 stdout/stderr/error/close，避免退出事件丢失后等待到硬超时。
+- 2026-09-19 锁与监督加固：report-only 锁和 Scheduler 控制锁记录 PID 启动身份并回收死亡 owner；Pause、Resume、Kill 与 reconcile 的控制状态切换和 Lease 使用同一互斥边界，避免 Pause 与新派发交错。
+- watchdog 达到周期超时或输出上限后，先按 PID 启动身份执行 TERM→KILL 并确认旧 Worker 已退出，再清空 Supervisor Worker 标记和进入下一轮，避免重叠 watchdog 晚写状态。
+- 控制面锁统一迁移到 `OwnedDirectoryLock`，心跳迁移到有界 latest-value writer；health 输出锁 owner/年龄/等待/回收、Lease 剩余时间、预算比例、等待摄入结果和 Supervisor 写入指标。
+- Supervisor 对 stale heartbeat 自动安全替换，首次 watchdog 成功前不派发，连续失败达到阈值后熔断；测试模式具有 session ID 与最大生存期。
+- Scheduler 增加 Project/Task Lease 续租、RetryWait/DeadLetter、层级/读写/容量资源声明、公平性评分和有界 SLO 汇总。
+- 对抗性复核后补齐跨根事务全周期互斥；100 个并发跨根事务不再竞争创建 journal/temp 目录或重复恢复同一 journal。
+- Owned Lock 的损坏/半写 owner 与缺失 owner 都遵守创建保护期；回收使用独立 recovery mutex 和 inode/owner 摘要复核，50 个恢复者只能形成一个有效持有者。
+- Provider、Gate 和 Provider Doctor 探针统一迁移到 Managed Process；根进程退出与 stdout/stderr 排空分别设限，逃逸孙进程持管道不会阻塞完成 Promise。
+- Supervisor circuit 持久化到控制面，`ok:false` watchdog 计为失败，自动重启十分钟最多三次；新增 `supervisor-circuit-status` 与显式 `supervisor-circuit-reset`。
+- watchdog 为全部目标先写 stop intent，再以四路有限并发和单任务期限执行停止；未完成项保留 `stop_incomplete` 供下一轮继续 reconcile。
+- recovery mutex 继承调用方剩余 deadline，`maxWaitMs: 0` 遇到活动恢复者会立即返回 busy；Wave Driver PID 启动身份缺失时禁止启动。
+- `launchctl` 使用 10 秒 Managed Process，`activity run` 默认 300 秒且支持 `--timeout-seconds`，消除两处非主路径的无限等待。
 - 2026-09-04 快速反馈：编译通过；`test/scheduler-control.test.mjs` 1/1 通过。尚未执行正式独立 V/R。
 - 2026-09-19 快速反馈：`npm test` 215/215 通过；未启动业务波次，未执行新的正式独立 V/R，工单仍保持“待验证”。
+- 2026-09-19 本次定向反馈：编译通过；`report-scheduler`、`scheduler-control`、`process-control` 共 8/8 通过，覆盖死亡锁回收和 watchdog 超时无重叠；未执行新的正式完整 Gate。
+- 2026-09-19 防卡死扩展反馈：统一锁/合并写/失联恢复/续租/失败队列/资源模型定向回归通过；完整 `npm test` 最终 221/221 通过，并修复停止结果幂等字段及固定等待导致的飞书测试竞态。
+- 2026-09-19 对抗性收敛反馈：半写 owner、50 恢复者、100 跨根事务、setsid 孙进程持管道、持久 circuit 和 watchdog 并发停止均有回归；最终完整 `npm test` 228/228 通过。未启动业务波次，未执行正式独立 V/R。
+- 2026-09-19 deadline 收尾反馈：recovery mutex 严格继承外层剩余 deadline，Wave Driver 身份缺失时 fail closed，`launchctl` 与 `activity run` 具有确定超时；同进程锁身份缓存避免并发 Lease 在控制面 `ps` 抖动下耗尽等待预算。最终完整 `npm test` 230/230 通过。未启动业务波次，未执行正式独立 V/R。
 
 ## 2026-09-06 专项正式验证记录
 
@@ -87,3 +103,6 @@ P 定义资源和安全断言；M 实现；V 运行并发/故障注入；R 复�
 | 2026-09-06 | 故障加固 | 增加 Task 停止闭环、取消竞态 HEAD 对账、Driver 锁回收与只读产物盘点 |
 | 2026-09-06 | 专项正式 V/R | 独立 Supervisor、波次绑定、熔断和有界子进程在同一候选 HEAD 上通过 |
 | 2026-09-19 | 防卡死与质量加固 | 增加真实进展熔断、PID 身份停止、波次崩溃恢复、全局预算 reservation、定时非破坏性归档与故障注入回归 |
+| 2026-09-19 | 锁恢复与 watchdog 串行化 | 回收死亡扫描/控制锁、串行化控制状态切换，并在 watchdog 超时后核验旧 Worker 退出 |
+| 2026-09-19 | 调度防卡死闭环 | 统一锁、合并心跳、Supervisor 恢复、Lease 续租、DeadLetter、层级资源和 SLO |
+| 2026-09-19 | 对抗性复核修复 | 完成跨根事务互斥、半写锁保护、硬超时收敛、持久 circuit 与 watchdog 有界并发停止 |

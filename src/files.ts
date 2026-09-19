@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
+import { withOwnedDirectoryLock } from './owned-lock.js';
 
 export interface MarkdownDoc { data: unknown; body: string }
 
@@ -86,11 +87,9 @@ async function safeTarget(root: string, target: string): Promise<string> {
 }
 
 async function withFileTransactionLock<T>(root:string,name:string,operation:()=>Promise<T>):Promise<T>{
-  const lock=path.join(root,name);for(let attempt=0;attempt<3000;attempt++){
-    let acquired=false;try{await mkdir(lock);acquired=true}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}
-    if(acquired){await writeFile(path.join(lock,'owner.json'),`${JSON.stringify({pid:process.pid,created_at:new Date().toISOString()})}\n`,{flag:'wx'});try{return await operation()}finally{await rm(lock,{recursive:true,force:true})}}
-    const owner=await readFile(path.join(lock,'owner.json'),'utf8').then(raw=>JSON.parse(raw) as {pid?:number}).catch(()=>null),info=await lstat(lock).catch(()=>null);let reclaim=false;if(owner?.pid)try{process.kill(owner.pid,0)}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')reclaim=true;else throw error}if(!owner&&info&&Date.now()-info.mtimeMs>30_000)reclaim=true;if(reclaim){await rm(lock,{recursive:true,force:true});continue}await new Promise(resolve=>setTimeout(resolve,10));
-  }throw new Error(`transaction lock is busy: ${name}`)
+  return withOwnedDirectoryLock(path.join(root,name),{
+    name:`file transaction ${name}`,maxWaitMs:30_000,pollMs:10,missingOwnerProtectionMs:30_000,
+  },operation);
 }
 async function withTransactionLock<T>(root:string,name:string,operation:()=>Promise<T>):Promise<T>{return withLocalTransactionQueue(`${path.resolve(root)}:${name}`,()=>withFileTransactionLock(root,name,operation))}
 
@@ -145,7 +144,7 @@ function withinAnyRoot(file: string, roots: string[]): boolean {
   return roots.some((root) => resolved === path.resolve(root) || resolved.startsWith(path.resolve(root) + path.sep));
 }
 
-export async function recoverCrossRootTransactions(coordinatorRoot: string, allowedRoots: string[]): Promise<void> {
+async function recoverCrossRootTransactionsUnlocked(coordinatorRoot: string, allowedRoots: string[]): Promise<void> {
   const dir = path.join(coordinatorRoot, '.spec-loop-cross-tx');
   if (!(await exists(dir))) return;
   await safeTransactionDirectory(coordinatorRoot,'.spec-loop-cross-tx');
@@ -173,25 +172,32 @@ export async function recoverCrossRootTransactions(coordinatorRoot: string, allo
   }
 }
 
+export async function recoverCrossRootTransactions(coordinatorRoot: string, allowedRoots: string[]): Promise<void> {
+  const roots = allowedRoots.map((root) => path.resolve(root));
+  return withTransactionLock(coordinatorRoot, '.spec-loop-cross-tx-lock', () => recoverCrossRootTransactionsUnlocked(coordinatorRoot, roots));
+}
+
 export async function atomicWriteAcrossRoots(coordinatorRoot: string, allowedRoots: string[], values: Array<{ file: string; content: string | Buffer }>): Promise<void> {
   const roots = allowedRoots.map((root) => path.resolve(root));
-  await recoverCrossRootTransactions(coordinatorRoot, roots);
-  const txDir = await safeTransactionDirectory(coordinatorRoot,'.spec-loop-cross-tx');
-  const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
-  const writes: TxWrite[] = [];
-  for (let i = 0; i < values.length; i++) {
-    const target = path.resolve(values[i].file);
-    if (!withinAnyRoot(target, roots)) throw new Error(`cross-root transaction target escapes allowed roots: ${target}`);
-    const owner = roots.find((root) => target === root || target.startsWith(root + path.sep));
-    if (!owner) throw new Error(`no owner root for ${target}`);
-    const tempDir = await safeTransactionDirectory(owner,'.spec-loop-cross-tx-data');
-    const temp = await safeTarget(owner,path.join(tempDir, `${id}-${i}.tmp`));
-    await writeFile(temp, values[i].content);
-    writes.push({ target, temp, hash: sha256(values[i].content) });
-  }
-  const journal: CrossRootJournal = { id, status: 'prepared', allowed_roots: roots, writes };
-  await writeFile(await safeTarget(coordinatorRoot,path.join(txDir, `${id}.json`)), JSON.stringify(journal, null, 2));
-  await recoverCrossRootTransactions(coordinatorRoot, roots);
+  await withTransactionLock(coordinatorRoot, '.spec-loop-cross-tx-lock', async () => {
+    await recoverCrossRootTransactionsUnlocked(coordinatorRoot, roots);
+    const txDir = await safeTransactionDirectory(coordinatorRoot,'.spec-loop-cross-tx');
+    const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`;
+    const writes: TxWrite[] = [];
+    for (let i = 0; i < values.length; i++) {
+      const target = path.resolve(values[i].file);
+      if (!withinAnyRoot(target, roots)) throw new Error(`cross-root transaction target escapes allowed roots: ${target}`);
+      const owner = roots.find((root) => target === root || target.startsWith(root + path.sep));
+      if (!owner) throw new Error(`no owner root for ${target}`);
+      const tempDir = await safeTransactionDirectory(owner,'.spec-loop-cross-tx-data');
+      const temp = await safeTarget(owner,path.join(tempDir, `${id}-${i}.tmp`));
+      await writeFile(temp, values[i].content);
+      writes.push({ target, temp, hash: sha256(values[i].content) });
+    }
+    const journal: CrossRootJournal = { id, status: 'prepared', allowed_roots: roots, writes };
+    await writeFile(await safeTarget(coordinatorRoot,path.join(txDir, `${id}.json`)), JSON.stringify(journal, null, 2));
+    await recoverCrossRootTransactionsUnlocked(coordinatorRoot, roots);
+  });
 }
 
 export async function readJsonStrict(file: string): Promise<unknown> {

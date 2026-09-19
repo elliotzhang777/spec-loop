@@ -94,6 +94,18 @@ test('cross-root transaction writes both roots and recovers a prepared journal',
   await assert.rejects(()=>atomicWriteAcrossRoots(control,[control,repo],[{file:path.join(parent,'escape.md'),content:'escape'}]),/escapes allowed roots/);
 });
 
+test('one hundred concurrent cross-root transactions are serialized without journal races', async () => {
+  const parent=await tempRoot('cross-root-concurrent-'),control=path.join(parent,'control'),repo=path.join(parent,'repo');await mkdir(control);await mkdir(repo)
+  await Promise.all(Array.from({length:100},(_,index)=>atomicWriteAcrossRoots(control,[control,repo],[
+    {file:path.join(control,`control-${index}.txt`),content:`control-${index}\n`},
+    {file:path.join(repo,`repo-${index}.txt`),content:`repo-${index}\n`},
+  ])))
+  for(let index=0;index<100;index+=1){
+    assert.equal(await readFile(path.join(control,`control-${index}.txt`),'utf8'),`control-${index}\n`)
+    assert.equal(await readFile(path.join(repo,`repo-${index}.txt`),'utf8'),`repo-${index}\n`)
+  }
+})
+
 test('cross-root transaction rejects symbolic journal and temp directories before writing',async()=>{
   const parent=await tempRoot('cross-root-symlink-'),outside=path.join(parent,'outside');await mkdir(outside);
   const control=path.join(parent,'control'),repo=path.join(parent,'repo');await mkdir(control);await mkdir(repo);

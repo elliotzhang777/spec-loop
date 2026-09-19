@@ -23,6 +23,11 @@ export async function processMatches(pid: number | null | undefined, expectedSta
   return !expectedStartedAt || actual === expectedStartedAt;
 }
 
+export function requireProcessIdentity(startedAt:string|null,label:string):string{
+  if(!startedAt)throw new Error(`${label}: cannot establish process start identity`);
+  return startedAt;
+}
+
 export function signalProcessTree(pid: number | null | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
   try {

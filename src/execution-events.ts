@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { assertNoSecrets, atomicWriteMany, readMarkdown, sha256 } from './files.js';
+import { withOwnedDirectoryLock } from './owned-lock.js';
 
 export const executionStepTypeSchema = z.enum([
   'task.plan', 'task.attempt', 'round.work',
@@ -112,31 +113,9 @@ async function withEventLock<T>(projectRoot: string, operation: () => Promise<T>
   const control = path.join(projectRoot, '.spec-loop');
   const info = await lstat(control).catch(() => null);
   if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('execution event control root is missing or invalid');
-  const lock = path.join(control, 'execution-events.lock'), owner = path.join(lock, 'owner.json');
-  let acquired = false;
-  for (let attempt = 0; attempt < 500; attempt += 1) {
-    try {
-      await mkdir(lock, { mode: 0o700 });
-      await writeFile(owner, `${JSON.stringify({ schema_version: 1, pid: process.pid, created_at: new Date().toISOString() })}\n`, { flag: 'wx', mode: 0o600 });
-      acquired = true; break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const lockInfo = await lstat(lock).catch(() => null);
-      if (!lockInfo) continue;
-      if (!lockInfo.isDirectory() || lockInfo.isSymbolicLink()) throw new Error('execution event lock is invalid');
-      const current = await readFile(owner, 'utf8').then((value) => JSON.parse(value) as { pid?: number }).catch(() => null);
-      let dead = false;
-      if (current?.pid) {
-        try { process.kill(current.pid, 0); }
-        catch (pidError) { dead = (pidError as NodeJS.ErrnoException).code === 'ESRCH'; }
-      }
-      if (dead || (!current && Date.now() - lockInfo.mtimeMs > 5_000)) { await rm(lock, { recursive: true, force: true }); continue; }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (!acquired) throw new Error('execution event store is busy');
-  try { return await operation(); }
-  finally { await rm(lock, { recursive: true, force: true }); }
+  return withOwnedDirectoryLock(path.join(control, 'execution-events.lock'), {
+    name: 'execution event store', maxWaitMs: 5_000, pollMs: 10, missingOwnerProtectionMs: 5_000,
+  }, operation);
 }
 
 export async function readExecutionEvents(projectRoot: string): Promise<ExecutionEvent[]> {

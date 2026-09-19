@@ -45,6 +45,11 @@ test('report-only scheduler is canonical, measurable, read-only to Tasks, and fa
   await assert.rejects(runReportScheduler(f.root), /already running/)
   await rm(lock, { recursive: true })
 
+  await mkdir(lock)
+  await writeFile(path.join(lock, 'owner.json'), `${JSON.stringify({ pid: 99999999, process_started_at: 'stale-owner', created_at: new Date(0).toISOString() })}\n`)
+  const recovered = await runReportScheduler(f.root)
+  assert.equal(recovered.suggestions.length, 1)
+
   await writeFile(path.join(f.root, '.spec-loop', 'output', 'scheduler-cursor.json'), '{"schema_version":1,"corrupt":true}\n')
   await assert.rejects(runReportScheduler(f.root), /cursor is invalid/)
   assert.equal(await taskFingerprint(f.taskRoot), before)

@@ -185,6 +185,12 @@ test('Round work activities expose reproduce, analysis, change and command timin
     kind: 'command', label: '定向命令', summary: '运行当前 Task 的最小检查', executable: process.execPath, args: ['-e', 'process.exit(0)'],
   })
   assert.equal(command.exitCode, 0)
+  const timed=await runWorkCommand(taskRoot,{
+    kind:'command',label:'有界命令',summary:'验证工作命令硬超时',executable:process.execPath,args:['-e','setInterval(()=>{},1000)'],timeoutMs:50,
+  })
+  assert.equal(timed.exitCode,124)
+  assert.equal(timed.timedOut,true)
+  assert.equal(timed.terminationVerified,true)
 
   const snapshot = await buildExecutionSnapshot(root)
   const task = snapshot.tasks.find((item) => item.task_id === 'TASK-VIEW')

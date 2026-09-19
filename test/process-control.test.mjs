@@ -2,7 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 
-import { processMatches, processStartedAt, terminateProcessTree } from '../dist/process-control.js'
+import { processMatches, processStartedAt, requireProcessIdentity, terminateProcessTree } from '../dist/process-control.js'
+
+test('required process identity rejects a missing start time',()=>{
+  assert.throws(()=>requireProcessIdentity(null,'wave Driver'),/cannot establish process start identity/)
+  assert.equal(requireProcessIdentity('known-start','wave Driver'),'known-start')
+})
 
 const exited = (child) => new Promise((resolve) => child.once('close', resolve))
 

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, readMarkdown, sha256 } from '../files.js';
+import { withOwnedDirectoryLock } from '../owned-lock.js';
 import { findConfirmationDecision, recordConfirmationDecision } from '../confirmation-decisions.js';
 import { readWorkspace } from '../execution.js';
 import { approveProposal, readProject, scanTasks } from '../project.js';
@@ -50,17 +51,9 @@ async function controllerRoot(projectRoot: string): Promise<string> {
 }
 
 async function withControllerLock<T>(root: string, operation: () => Promise<T>): Promise<T> {
-  const lock = path.join(root, 'mutation.lock');
-  let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await mkdir(lock, { mode: 0o700 }); acquired = true; break; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (!acquired) throw new Error('feishu Controller is busy; explicit recovery is required');
-  try { return await operation(); } finally { await rmdir(lock); }
+  return withOwnedDirectoryLock(path.join(root, 'mutation.lock'), {
+    name: 'feishu Controller', maxWaitMs: 1_000, pollMs: 10, missingOwnerProtectionMs: 5_000,
+  }, operation);
 }
 
 async function readCommands(root: string): Promise<StoredCommand[]> {

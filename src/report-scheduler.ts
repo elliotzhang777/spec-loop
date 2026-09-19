@@ -1,9 +1,10 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { assertNoSecrets, atomicWriteMany, exists, sha256 } from './files.js';
 import { buildExecutionSnapshot } from './execution-view.js';
 import { readProject, scanTasks } from './project.js';
+import { acquireOwnedDirectoryLock } from './owned-lock.js';
 
 const schedulerConfigSchema=z.object({schema_version:z.literal(1),mode:z.literal('report_only'),paused:z.boolean(),cursor_max_age_hours:z.number().int().positive().max(168),updated_at:z.iso.datetime()}).strict();
 const cursorSchema=z.object({schema_version:z.literal(1),project_id:z.string(),sequence:z.number().int().positive(),source_fingerprint:z.string().length(64),canonical_report_hash:z.string().length(64),scanned_at:z.iso.datetime()}).strict();
@@ -20,7 +21,14 @@ const control=(root:string)=>path.join(root,'.spec-loop'),configFile=(root:strin
 export async function initReportScheduler(root:string){const file=configFile(root);if(!(await exists(file))){const value=schedulerConfigSchema.parse({schema_version:1,mode:'report_only',paused:false,cursor_max_age_hours:24,updated_at:new Date().toISOString()});await atomicWriteMany(root,[{file,content:`${JSON.stringify(value,null,2)}\n`}])}return schedulerConfigSchema.parse(JSON.parse(await readFile(file,'utf8')))}
 export async function setReportSchedulerPaused(root:string,paused:boolean){const current=await initReportScheduler(root),updated=schedulerConfigSchema.parse({...current,paused,updated_at:new Date().toISOString()});await atomicWriteMany(root,[{file:configFile(root),content:`${JSON.stringify(updated,null,2)}\n`}]);return updated}
 
-async function acquire(root:string):Promise<()=>Promise<void>>{const lock=path.join(control(root),'scheduler-report.lock');try{await mkdir(lock);await writeFile(path.join(lock,'owner.json'),`${JSON.stringify({pid:process.pid,created_at:new Date().toISOString()})}\n`,{flag:'wx'})}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw new Error('report-only scheduler scan is already running');throw error}return()=>rm(lock,{recursive:true,force:true})}
+async function acquire(root:string):Promise<()=>Promise<void>>{
+  const owned=await acquireOwnedDirectoryLock(path.join(control(root),'scheduler-report.lock'),{
+    name:'report-only scheduler scan',maxWaitMs:0,missingOwnerProtectionMs:30_000,
+    telemetryFile:path.join(control(root),'scheduler','control-health','report-scheduler-lock.json'),
+    busyMessage:'report-only scheduler scan is already running',
+  });
+  return async()=>{if(!(await owned.release()))throw new Error('report-only scheduler scan lock ownership was lost')};
+}
 
 function dependencies(reason:string|null):string[]{return reason?.startsWith('unfinished dependencies: ')?reason.slice('unfinished dependencies: '.length).split(', ').filter(Boolean):[]}
 function estimatedCost(level:string,reworks:number):number{return({light:1,standard:3,heavy:8}[level]??5)+reworks*2}

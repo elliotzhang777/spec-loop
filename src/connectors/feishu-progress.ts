@@ -1,10 +1,12 @@
-import { lstat, open, readFile, rename, rm } from 'node:fs/promises';
+import { lstat, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, readMarkdown, sha256 } from '../files.js';
+import { withOwnedDirectoryLock } from '../owned-lock.js';
+import { processMatches } from '../process-control.js';
 import { feishuConnectorRoot, readFeishuConfig, type FeishuTarget, type FeishuTransport } from './feishu.js';
 import { readProject, scanTasks, selectActiveTask } from '../project.js';
 import { evidenceRecords, readState } from '../task.js';
@@ -113,35 +115,15 @@ async function outboxRoot(projectRoot: string): Promise<string> {
 }
 
 async function withOutboxLock<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const lock = path.join(root, 'outbox-mutation.lock'), token = randomUUID();
-  let acquired = false;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      const handle = await open(lock, 'wx', 0o600);
-      await handle.writeFile(`${JSON.stringify({ schema_version: 1, token, pid: process.pid, created_at: new Date().toISOString() })}\n`);
-      await handle.close();
-      acquired = true;
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const owner = await readFile(lock, 'utf8').then((value) => JSON.parse(value) as { pid?: number; created_at?: string }).catch(() => null);
-      const stale = !owner || typeof owner.pid !== 'number' || typeof owner.created_at !== 'string' || Date.now() - Date.parse(owner.created_at) > 30_000;
-      let alive = false;
-      if (owner?.pid && stale) {
-        try { process.kill(owner.pid, 0); alive = true; } catch { alive = false; }
-      }
-      if (stale && !alive) {
-        const quarantine = `${lock}.stale-${randomUUID()}`;
-        try { await rename(lock, quarantine); await rm(quarantine, { force: true, recursive: true }); continue; } catch { /* another process won recovery */ }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+  const lock = path.join(root, 'outbox-mutation.lock'), legacy = await lstat(lock).catch(() => null);
+  if (legacy?.isFile() && !legacy.isSymbolicLink()) {
+    const owner = await readFile(lock, 'utf8').then((value) => JSON.parse(value) as { pid?: number; process_started_at?: string; created_at?: string }).catch(() => null);
+    const oldEnough = !owner?.created_at || Date.now() - Date.parse(owner.created_at) >= 30_000;
+    if (oldEnough && !(await processMatches(owner?.pid, owner?.process_started_at))) await rm(lock, { force: true });
   }
-  if (!acquired) throw new Error('feishu outbox mutation is busy; explicit recovery is required');
-  try { return await action(); } finally {
-    const owner = await readFile(lock, 'utf8').then((value) => JSON.parse(value) as { token?: string }).catch(() => null);
-    if (owner?.token === token) await rm(lock, { force: true });
-  }
+  return withOwnedDirectoryLock(lock, {
+    name: 'feishu outbox mutation', maxWaitMs: 1_000, pollMs: 10, missingOwnerProtectionMs: 5_000,
+  }, action);
 }
 
 async function readOutboxAt(root: string): Promise<z.infer<typeof outboxSchema>> {
