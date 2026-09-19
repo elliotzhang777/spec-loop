@@ -15,6 +15,7 @@
 | [TASK-038](04-task/TASK-038-unified-product-output.md) | `products/` 目录契约、Git 忽略、manifest 与 SHA-256、首个 APK 迁移 | 独立 V 复核目录、清单、忽略规则与哈希；必要时扩展 CLI 发布设计 | 待独立 V/R；未获得正式验证授权 | 待验证 | `products/README.md`、`products/concert-ticket-assistant/0.2.0/` | 2026-09-04 |
 | [TASK-039](04-task/TASK-039-target-task-filename-resolution.md) | 精确/带名称 Task 规格解析、歧义拒绝、target_spec 真实路径与旧行为兼容 | 独立 V 运行 Project/Target Spec 定向 Gate；独立 R 复核目标工程无重复规格 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/project.ts`、`test/project.test.mjs` | 2026-09-19 |
 | [TASK-040](04-task/TASK-040-m-worktree-git-admin-sandbox.md) | M linked-worktree Git 管理目录最小写根、路径逃逸拒绝、参数去重与 V/R 隔离兼容 | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核沙箱边界 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
+| [TASK-041](04-task/TASK-041-candidate-quality-portable-files.md) | 示例环境文件 allowlist、CRLF 兼容与真实 Secret/尾随空格 fail closed | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核质量策略未被弱化 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 

@@ -93,7 +93,7 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   if (requireOrchestration) {
     providers = path.join(root, '.spec-loop', 'PROVIDERS.md')
     maker = path.join(root, 'maker-provider.sh')
-    await writeFile(maker, '#!/bin/sh\nset -eu\nprintf "candidate one\\n" > candidate.txt\ngit add candidate.txt\ngit commit -m "candidate one" >/dev/null\nprintf "M self-test passed\\n" > "$SPEC_LOOP_EVIDENCE_ROOT/self-test.txt"\nprintf \'%s\\n\' \'{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":20,"output_tokens":30,"reasoning_tokens":10,"total_tokens":150}}\'\n')
+    await writeFile(maker, '#!/bin/sh\nset -eu\nprintf "candidate one\\n" > candidate.txt\nprintf "EXAMPLE_TOKEN=public-fixture\\n" > .env.example\nprintf "windows wrapper\\r\\n" > wrapper.cmd\ngit add candidate.txt .env.example wrapper.cmd\ngit commit -m "candidate one" >/dev/null\nprintf "M self-test passed\\n" > "$SPEC_LOOP_EVIDENCE_ROOT/self-test.txt"\nprintf \'%s\\n\' \'{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":20,"output_tokens":30,"reasoning_tokens":10,"total_tokens":150}}\'\n')
     await chmod(maker, 0o755)
     await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: codex', `executable: ${maker}`))
   }
