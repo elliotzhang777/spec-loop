@@ -158,12 +158,30 @@ export function buildProviderArgs(provider:string,args:string[],role:AcceptanceR
   return ['-C',candidate,...updated,prompt];
 }
 
+async function mGitWritableRoots(candidate:string,repository:string):Promise<string[]>{
+  const roots:string[]=[],allowed=path.resolve(repository,'.git');
+  for(const args of [['rev-parse','--git-dir'],['rev-parse','--git-common-dir']]){
+    const value=await git(candidate,args),resolved=path.resolve(candidate,value),info=await lstat(resolved).catch(()=>null);
+    if(!info?.isDirectory()||info.isSymbolicLink())throw new Error(`M candidate has an unsafe Git administrative directory: ${resolved}`);
+    if(resolved!==allowed&&!resolved.startsWith(`${allowed}${path.sep}`))throw new Error(`M candidate Git administrative directory escapes the managed repository: ${resolved}`);
+    if(!roots.includes(resolved))roots.push(resolved);
+  }
+  return roots;
+}
+
+export function addWritableRoots(args:string[],roots:string[]):string[]{
+  const updated=[...args],existing=new Set<string>();
+  for(let index=0;index<updated.length-1;index++)if(updated[index]==='--add-dir')existing.add(path.resolve(updated[index+1]));
+  for(const root of roots){const resolved=path.resolve(root);if(!existing.has(resolved)){updated.push('--add-dir',resolved);existing.add(resolved)}}
+  return updated;
+}
+
 async function runRoleInvocationInternal(root:string,taskId:string,id:string,limits:RoleRunLimits={}):Promise<RoleInvocation>{
   let invocation=await readRoleInvocation(root,taskId,id);if(invocation.status!=='prepared'&&invocation.status!=='interrupted')throw new Error(`role invocation is not runnable from ${invocation.status}`);
   const cfg=await readProviderConfig(root),selected=providerForRole(cfg,invocation.role),provider=selected.config;if(invocation.provider!==selected.id)throw new Error(`${invocation.role} provider changed after role preparation`);
   const doctor=(await providerDoctor(root)).find(item=>item.id===selected.id);if(!doctor?.resolved||!doctor.available||!doctor.compatible)throw new Error(`${invocation.role} Provider preflight failed: ${doctor?.reason??'missing diagnostic'}`);const identity={executable:provider.executable,resolved:doctor.resolved,args_sha256:sha256(JSON.stringify(provider.args)),version:doctor.version};if(invocation.provider_identity&&JSON.stringify(invocation.provider_identity)!==JSON.stringify(identity))throw new Error('Provider executable, version, or arguments changed after role preparation; prepare a new invocation');
   const prompt=await readFile(path.join(invocationRoot(root,taskId,id),'PROMPT.txt'),'utf8');if(sha256(prompt)!==invocation.prompt_hash)throw new Error('role prompt integrity failure');
-  const args=buildProviderArgs(selected.id,provider.args,invocation.role,invocation.candidate.path,prompt,invocation.evidence_root),startedAt=new Date().toISOString(),deadlineAt=new Date(Date.now()+provider.timeout_seconds*1000).toISOString();
+  const workspace=await readWorkspace(root,taskId),providerArgs=buildProviderArgs(selected.id,provider.args,invocation.role,invocation.candidate.path,prompt,invocation.evidence_root),args=invocation.role==='M'?addWritableRoots(providerArgs,await mGitWritableRoots(invocation.candidate.path,workspace.repository)):providerArgs,startedAt=new Date().toISOString(),deadlineAt=new Date(Date.now()+provider.timeout_seconds*1000).toISOString();
   for(const directory of [path.join(control(root),'shared-cache','tmp'),path.join(control(root),'shared-cache','npm'),path.join(control(root),'shared-cache','maven')])await mkdir(directory,{recursive:true});
   const tokenLimit=Math.min(invocation.token_limit??Number.MAX_SAFE_INTEGER,limits.maxTokens??Number.MAX_SAFE_INTEGER),costLimit=Math.min(invocation.cost_limit_usd??Number.MAX_VALUE,limits.maxCostUsd??Number.MAX_VALUE);
   let stdout='',stderr='',stdoutBytes=0,stderrBytes=0,outputTruncated=false,timedOut=false,settled=false,usageScan='',liveUsage=usageSchema.parse(emptyUsage),fuseReason:string|null=null,lastProgressAt=startedAt,progressSequence=0;

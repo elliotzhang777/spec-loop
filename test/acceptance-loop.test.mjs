@@ -16,7 +16,7 @@ import {
   startAcceptanceRun,
   submitMakerCandidate,
 } from '../dist/acceptance-loop.js'
-import { buildProviderArgs, cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from '../dist/role-orchestrator.js'
+import { addWritableRoots, buildProviderArgs, cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from '../dist/role-orchestrator.js'
 import { inspectSchedulerLiveness, stopTaskExecution } from '../dist/scheduler-control.js'
 import { readExecutionEvents } from '../dist/execution-events.js'
 import { buildExecutionSnapshot } from '../dist/execution-view.js'
@@ -238,6 +238,8 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
   assert.deepEqual(verifierArgs.slice(verifierArgs.indexOf('--add-dir'), verifierArgs.indexOf('--add-dir') + 2), ['--add-dir', '/evidence'])
   assert.equal(verifierArgs[verifierArgs.indexOf('--sandbox') + 1], 'workspace-write')
   assert.equal(buildProviderArgs('codex', ['exec', '--json', '--sandbox', 'read-only'], 'M', '/worktree', 'make').includes('--skip-git-repo-check'), false)
+  const makerArgs = addWritableRoots(buildProviderArgs('codex', ['exec', '--json', '--sandbox', 'read-only'], 'M', '/worktree', 'make', '/evidence'), ['/repo/.git/worktrees/task-1', '/repo/.git', '/evidence'])
+  assert.deepEqual(makerArgs.filter((value, index) => makerArgs[index - 1] === '--add-dir'), ['/evidence', '/repo/.git/worktrees/task-1', '/repo/.git'])
 
   await writeFile(providersFile, fastProviderConfig.replace('executable: /usr/bin/true', `executable: ${slowProvider}`).replace('timeout_seconds: 1800', 'timeout_seconds: 30'))
   const cancellable = await prepareRoleInvocation(f.root, f.taskId, 'V')
