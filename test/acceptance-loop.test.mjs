@@ -66,12 +66,16 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   git(repository, ['config', 'user.email', 'test@example.com'])
   git(repository, ['config', 'user.name', 'Test'])
   await writeFile(path.join(repository, 'check.mjs'), "console.log('acceptance pass')\n")
+  await mkdir(path.join(repository, 'scripts', 'gates'), { recursive: true })
+  await writeFile(path.join(repository, 'scripts', 'gates', 'check.sh'), '#!/usr/bin/env bash\nset -euo pipefail\nnode check.mjs\n')
+  await chmod(path.join(repository, 'scripts', 'gates', 'check.sh'), 0o755)
   git(repository, ['add', '.'])
   git(repository, ['commit', '-m', 'initial'])
   assert.equal(cli(['project', 'init', root, '--id', 'PROJ-PMVR', '--name', 'PMVR fixture', '--repository', repository]).code, 0)
   if (requireOrchestration) assert.equal(cli(['project', 'protocol', root, '--set', 'v2']).code, 0)
   const contractFile = path.join(root, `${taskId}-contract.json`)
-  await writeFile(contractFile, `${JSON.stringify(contract(taskId, contractOverrides), null, 2)}\n`)
+  const contractValue = contract(taskId, contractOverrides)
+  await writeFile(contractFile, `${JSON.stringify(contractValue, null, 2)}\n`)
   const proposal = cli(['triage', 'propose', root, '--source', 'approved specification', '--goal', 'Exercise P M V R acceptance', '--reason', 'Need independent acceptance', '--risk', level, '--contract', contractFile])
   assert.equal(proposal.code, 0, proposal.stderr)
   const proposalId = proposal.stdout.trim()
@@ -85,7 +89,7 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   assert.equal(cli(['plan', taskRoot]).code, 0)
   await writeMd(path.join(root, '.spec-loop', 'GATES.md'), {
     schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
-    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: [process.execPath, 'check.mjs'], timeout_seconds: 30 }],
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: contractValue.tools[0].command, timeout_seconds: 30 }],
   }, '# Gates\n\nThe v2 fixture executes the approved unit acceptance tool.')
   git(repository, ['add', '.'])
   git(repository, ['commit', '-m', 'approved project specification'])
@@ -297,8 +301,8 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
   assert.match(reconciled.last_error, /result remains unknown/)
 })
 
-test('Controlled V freezes a clean v2 candidate without a legacy Harness run', async () => {
-  const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', {}, true)
+test('Controlled V freezes a clean v2 candidate and runs an exactly approved repository Bash Gate', async () => {
+  const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', { tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }] }, true)
   const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')
   const result = await runControlledV(f.root, f.taskId, invocation.invocation_id)

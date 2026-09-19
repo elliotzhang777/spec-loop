@@ -17,6 +17,7 @@
 | [TASK-040](04-task/TASK-040-m-worktree-git-admin-sandbox.md) | M linked-worktree Git 管理目录最小写根、路径逃逸拒绝、参数去重与 V/R 隔离兼容 | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核沙箱边界 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
 | [TASK-041](04-task/TASK-041-candidate-quality-portable-files.md) | 示例环境文件 allowlist、CRLF 兼容与真实 Secret/尾随空格 fail closed | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核质量策略未被弱化 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
 | [TASK-042](04-task/TASK-042-v2-controlled-v-harness-freeze.md) | v2 Controlled V 自动冻结干净候选、collect Evidence 与旧 Harness 状态 fail closed | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核候选绑定与状态迁移 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/execution.ts`、`src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
+| [TASK-043](04-task/TASK-043-approved-repository-bash-gates.md) | 仅允许 P 契约精确批准、位于候选 `scripts/` 内的单参数 Bash Gate，并保持 dispatcher fail closed | 独立 V 运行 acceptance-loop/hardening 定向 Gate；独立 R 复核命令和路径边界 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/execution.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 
