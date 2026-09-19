@@ -261,6 +261,34 @@ export async function reconcileRoleInvocation(root:string,taskId:string,id:strin
 
 export async function assertSucceededRoleInvocation(root:string,taskId:string,id:string,role:AcceptanceRole):Promise<RoleInvocation>{const invocation=await readRoleInvocation(root,taskId,id);if(invocation.role!==role||invocation.status!=='succeeded')throw new Error(`${role} result requires a succeeded managed invocation`);return invocation}
 
+export async function recoverBudgetStoppedMakerCandidate(root:string,taskId:string,id:string,approvedBy:string):Promise<RoleInvocation>{
+  let invocation=await readRoleInvocation(root,taskId,id);
+  if(invocation.role!=='M'||invocation.status!=='failed'||invocation.exit_code!==125||invocation.timed_out||!invocation.last_error?.startsWith('live token budget reached'))throw new Error('only a token-budget-stopped M invocation may be recovered');
+  if(!invocation.output_sha256)throw new Error('budget-stopped M invocation has no bound Provider output');
+  const providerOutput=await readFile(path.join(invocationRoot(root,taskId,id),'PROVIDER.txt'),'utf8');
+  if(sha256(providerOutput)!==invocation.output_sha256||!providerOutput.includes('TERMINATION_VERIFIED true')||!providerOutput.includes(`FUSE ${invocation.last_error}`))throw new Error('budget-stopped M Provider evidence is incomplete or changed');
+  const task=(await scanTasks(root)).find(item=>item.task_id===taskId);if(!task)throw new Error(`task not found: ${taskId}`);
+  const budget=await readBudget(task.path),usage=await summarizeRoleUsage(root,taskId);
+  if(usage.totals.total_tokens>budget.max_tokens)throw new Error(`extended Task budget is still exhausted (${usage.totals.total_tokens}/${budget.max_tokens})`);
+  const workspace=await readWorkspace(root,taskId),head=await git(workspace.worktree,['rev-parse','HEAD']),status=await git(workspace.worktree,['status','--porcelain=v1','--untracked-files=all']);
+  if(status)throw new Error('budget-stopped M recovery requires a clean candidate');
+  if(head===invocation.candidate.head)throw new Error('budget-stopped M produced no new HEAD');
+  if(await git(workspace.worktree,['rev-list','--merges',`${invocation.candidate.head}..${head}`]))throw new Error('budget-stopped M produced a forbidden merge commit');
+  const spec=await readMarkdown(path.join(task.path,'SPEC.md')),targetSpec=z.object({target_spec:z.string().optional()}).passthrough().parse(spec.data).target_spec?.split(path.sep).join('/')??null;
+  const changed=(await git(workspace.worktree,['diff','--name-only',`${invocation.candidate.head}..${head}`])).split('\n').filter(Boolean);
+  if(targetSpec&&changed.includes(targetSpec))throw new Error(`budget-stopped M modified the approved formal Task specification: ${targetSpec}`);
+  const quality=await candidateQuality(workspace.worktree,invocation.candidate.head,head,task.level),evidence=await regularEvidenceFiles(invocation.evidence_root);
+  if(quality.verdict==='fail')throw new Error(`candidate quality policy failed: ${quality.violations.join('; ')}`);
+  if(!evidence.length)throw new Error('budget-stopped M produced no self-test Evidence');
+  const recoveredAt=new Date().toISOString(),recovery={schema_version:1,task_id:taskId,invocation_id:id,approved_by:approvedBy,previous_head:invocation.candidate.head,recovered_head:head,provider_exit_code:invocation.exit_code,provider_output_sha256:invocation.output_sha256,total_tokens:usage.totals.total_tokens,extended_budget:budget.max_tokens,evidence_files:evidence.map(file=>path.relative(root,file).split(path.sep).join('/')),recovered_at:recoveredAt};
+  await atomicWriteMany(root,[
+    {file:path.join(invocationRoot(root,taskId,id),'CANDIDATE_QUALITY.json'),content:`${JSON.stringify(quality,null,2)}\n`},
+    {file:path.join(invocationRoot(root,taskId,id),'BUDGET_RECOVERY.json'),content:`${JSON.stringify(recovery,null,2)}\n`},
+  ]);
+  invocation=invocationSchema.parse({...invocation,status:'succeeded',candidate:{...invocation.candidate,head,fingerprint:sha256(await git(workspace.worktree,['ls-tree','-r','--full-tree',head]))},failure_fingerprint:null,last_error:`recovered after budget extension approved by ${approvedBy}; original Provider exit ${invocation.exit_code} remains recorded`,result_status:'awaiting_ingestion',result_error:null});
+  await writeInvocation(root,invocation);return invocation;
+}
+
 async function regularEvidenceFiles(directory:string):Promise<string[]>{const result:string[]=[];for(const entry of await readdir(directory,{withFileTypes:true}).catch(()=>[])){const file=path.join(directory,entry.name);if(entry.isFile()&&!entry.isSymbolicLink()&&entry.name!=='RESULT.json')result.push(file)}return result.sort()}
 export async function ingestSucceededRoleResult(root:string,taskId:string,id:string):Promise<RoleInvocation>{
   let invocation=await assertSucceededRoleInvocation(root,taskId,id,(await readRoleInvocation(root,taskId,id)).role);

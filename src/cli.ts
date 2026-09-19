@@ -22,7 +22,7 @@ import {
   recordRResult, recordVResult, resolveAcceptanceConflict, runControlledV, startAcceptanceRun,
   submitMakerCandidate, reconcileCandidateBaseline,
 } from './acceptance-loop.js';
-import { cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
+import { cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, recoverBudgetStoppedMakerCandidate, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
 import { initReportScheduler, readReportSchedulerStatus, runReportScheduler, setReportSchedulerPaused } from './report-scheduler.js';
 import { acquireProjectLease, acquireTaskLease, assertSchedulerAction, assertTaskLeaseResult, configureWaveBudget, initSchedulerControl, inspectSchedulerLiveness, killSchedulerControl, pauseSchedulerControl, planReadyWave, reconcileInterruptedWaves, reconcileSchedulerControl, releaseProjectLease, releaseTaskLease, renewProjectLease, renewTaskLease, retryDeadLetter, resumeSchedulerControl, runReadyWave, runSchedulerWatchdog, schedulerControlStatus, stopTaskExecution } from './scheduler-control.js';
 import { installSchedulerSupervisorLaunchd, resetSchedulerSupervisorCircuit, schedulerSupervisorCircuitStatus, schedulerSupervisorLaunchdPlan, schedulerSupervisorStatus, serveSchedulerSupervisor, startManagedSchedulerSupervisor, stopManagedSchedulerSupervisor, uninstallSchedulerSupervisorLaunchd } from './scheduler-supervisor.js';
@@ -341,6 +341,8 @@ acceptanceRole.command('run').argument('<project-dir>').argument('<task-id>').re
   .action((dir,id,o)=>action(async()=>{const result=await runRoleInvocation(root(dir),id,o.invocation);print(result,o.json);if(result.status!=='succeeded')process.exitCode=1}));
 acceptanceRole.command('ingest').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
   .action((dir,id,o)=>action(async()=>{const result=await ingestSucceededRoleResult(root(dir),id,o.invocation);print(result,o.json);if(result.result_status!=='ingested')process.exitCode=1}));
+acceptanceRole.command('recover-budget-m').description('Recover a clean M candidate stopped only by the former token budget after explicit budget extension').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').requiredOption('--by <actor>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await recoverBudgetStoppedMakerCandidate(root(dir),id,o.invocation,o.by),o.json)));
 acceptanceRole.command('status').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
   .action((dir,id,o)=>action(async()=>print(await readRoleInvocation(root(dir),id,o.invocation),o.json)));
 acceptanceRole.command('cancel').argument('<project-dir>').argument('<task-id>').requiredOption('--invocation <id>').option('--json')
