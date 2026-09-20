@@ -393,6 +393,7 @@ async function projectWaves(repositoryRoot: string, specRoot: string, tasks: Exe
       : waveTasks.length && !unfinishedTasks.length ? 'delivered'
       : unfinishedTasks.length && unfinishedTasks.every((task) => task.status === 'verifying') ? 'verifying'
       : unfinishedTasks.some((task) => ['working', 'verifying', 'iterating'].includes(task.status)) ? 'working'
+      : waveTasks.length > unfinishedTasks.length ? 'working'
       : unfinishedTasks.length ? 'planned' : declaredStatus;
     const sectionTitle = section.split('\n')[0]?.trim();
     waves.push(executionWaveSnapshotSchema.parse({
@@ -424,6 +425,7 @@ async function projectWaves(repositoryRoot: string, specRoot: string, tasks: Exe
     const effectiveStatus = waveTasks.length && waveTasks.every((task) => task.status === 'cancelled') ? 'cancelled'
       : waveTasks.length && !unfinishedTasks.length ? 'delivered'
       : unfinishedTasks.some((task) => ['working', 'verifying', 'iterating'].includes(task.status)) ? 'working'
+      : waveTasks.length > unfinishedTasks.length ? 'working'
       : unfinishedTasks.length ? 'planned' : declaredStatus;
     const summary = waveStatus.match(/^## 批次目标\s*$\s*([^\n]+)/m)?.[1]?.trim() ?? '规格中未记录波次摘要';
     waves.push(executionWaveSnapshotSchema.parse({
@@ -501,6 +503,11 @@ function nextAction(state: TaskState, current?: ExecutionStepSnapshot): string {
 
 async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoot: string, state: TaskState, taskEvents: ExecutionEvent[], current: boolean, now: number): Promise<ExecutionTaskSnapshot> {
   const fromEvents = eventSteps(taskEvents, now, state.current_round), diagnostics: string[] = [], dependsOn = await taskDependencies(repositoryRoot, taskRoot),acceptanceFacts=await acceptanceProjection(projectRoot,taskRoot),runtime=await roleRuntime(projectRoot,state.task_id,now);
+  const projectedStatus = acceptanceFacts.protocol === 'v2'
+    && acceptanceFacts.acceptance?.stage === 'candidate'
+    && acceptanceFacts.acceptance.fresh
+    ? 'delivered'
+    : state.status;
   if(acceptanceFacts.acceptance)diagnostics.push(...acceptanceFacts.acceptance.diagnostics);
   if(runtime?.state==='running'&&runtime.progress_age_ms!==null&&runtime.idle_timeout_ms!==null){
     const remaining=runtime.idle_timeout_ms-runtime.progress_age_ms;
@@ -538,9 +545,9 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
   if (taskEventTimes.length) {
     const start = Math.min(...taskEventTimes), delivered = taskEvents.find((item) => item.label === '交付关闭' && item.kind === 'step_succeeded');
     const cancelled = taskEvents.find((item) => item.label === 'Task 已取消' && item.kind === 'annotation');
-    const end = delivered ? Date.parse(delivered.occurred_at) : cancelled ? Date.parse(cancelled.occurred_at) : ['delivered','cancelled'].includes(state.status) ? Date.parse(state.updated_at) : now;
+    const end = delivered ? Date.parse(delivered.occurred_at) : cancelled ? Date.parse(cancelled.occurred_at) : ['delivered','cancelled'].includes(projectedStatus) ? Date.parse(state.updated_at) : now;
     wallStart = start; wallEnd = Math.max(start, end); wallClock = wallEnd - wallStart;
-    untracked = Math.max(0, wallClock - activeMs - waitingMs); timing = delivered || state.status !== 'delivered' ? 'exact' : 'derived';
+    untracked = Math.max(0, wallClock - activeMs - waitingMs); timing = delivered || projectedStatus !== 'delivered' ? 'exact' : 'derived';
   }
   const breakdown = durationBreakdown(steps, wallStart, wallEnd, now);
   const fineIntervals = steps.filter((step) => breakdownCategory(step) && breakdownCategory(step) !== 'wait_ms'
@@ -554,8 +561,8 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
     && step.type !== 'round.work' && step.type !== 'wait.user' && step.status !== 'noted')
     .sort((left, right) => (right.duration_ms as number) - (left.duration_ms as number))[0] ?? null;
   return executionTaskSnapshotSchema.parse({
-    task_id: state.task_id, title: state.title, level: state.level, status: state.status, round: state.current_round, depends_on: dependsOn, blocked_by: [], managed: true,
-    record_kind:taskEvents.length?(['delivered','cancelled'].includes(state.status)?'historical_runtime':'current_run'):['delivered','cancelled'].includes(state.status)?'historical_no_runtime':state.current_round===0?'never_started':'current_run',runtime,
+    task_id: state.task_id, title: state.title, level: state.level, status: projectedStatus, round: state.current_round, depends_on: dependsOn, blocked_by: [], managed: true,
+    record_kind:taskEvents.length?(['delivered','cancelled'].includes(projectedStatus)?'historical_runtime':'current_run'):['delivered','cancelled'].includes(projectedStatus)?'historical_no_runtime':state.current_round===0?'never_started':'current_run',runtime,
     ...acceptanceFacts,
     updated_at: state.updated_at, current, wall_clock_ms: wallClock, active_ms: activeMs, waiting_ms: waitingMs,
     untracked_ms: untracked, round_work_ms: roundWorkMs, round_detail_ms: roundDetailMs,
@@ -580,7 +587,9 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
     blocked_by: task.depends_on.filter((dependency) => taskStatus.has(dependency) && !['delivered', 'cancelled'].includes(taskStatus.get(dependency) as string)),
   }));
   const blockedIds = new Set(tasks.filter((task) => task.blocked_by.length).map((task) => task.task_id));
-  const active = selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)));
+  const effectiveStatus = new Map(managedTasks.map((task) => [task.task_id, task.status]));
+  const active = selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)
+    && !['delivered', 'cancelled'].includes(effectiveStatus.get(state.task_id) ?? state.status)));
   tasks = tasks.map((task) => executionTaskSnapshotSchema.parse({ ...task, current: active?.state.task_id === task.task_id }));
   const waves = await projectWaves(project.repository, project.spec_root, tasks);
   for (const wave of waves) {

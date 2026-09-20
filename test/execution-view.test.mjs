@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { Script } from 'node:vm'
 
 import { cli, fillContracts, tempRoot } from './helpers.mjs'
@@ -290,6 +291,41 @@ target_spec: TASK-VIEW.md
 Treat an accepted v2 Candidate as a finished dependency.
 `)
   assert.deepEqual(await unfinishedTaskDependencies(root, 'TASK-VIEW'), [])
+})
+
+test('a fresh v2 Candidate is projected as delivered instead of the stale v1 planned lifecycle', async () => {
+  const { root, taskRoot } = await projectFixture('execution-view-v2-candidate-status-')
+  const contractInput = { schema_version: 2, task_id: 'TASK-VIEW' }
+  const contractHash = createHash('sha256').update(JSON.stringify(contractInput)).digest('hex')
+  await writeFile(path.join(taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), `---
+schema_version: 2
+task_id: TASK-VIEW
+contract_hash: ${contractHash}
+approval:
+  approved_by: user
+  approved_at: 2026-09-20T00:00:00.000Z
+  contract_hash: ${contractHash}
+---
+`)
+  const candidateId = 'CANDIDATE-TASK-VIEW-1', head = 'a'.repeat(40)
+  await writeFile(path.join(taskRoot, 'ACCEPTANCE_RUN.json'), `${JSON.stringify({
+    task_id: 'TASK-VIEW', stage: 'candidate', run_id: 'RUN-TASK-VIEW-1', contract_hash: contractHash,
+    current_head: head, plan_hash: null, last_v_evidence_set_hash: null, last_r_evidence_set_hash: null,
+    candidate_id: candidateId,
+  }, null, 2)}\n`)
+  const output = path.join(root, '.spec-loop', 'output', 'TASK-VIEW-acceptance-v2')
+  await mkdir(output, { recursive: true })
+  await writeFile(path.join(output, 'CANDIDATE.json'), `${JSON.stringify({
+    candidate_id: candidateId, contract_hash: contractHash, plan_hash: null, head,
+    v_evidence_set_hash: null, r_evidence_set_hash: null,
+  }, null, 2)}\n`)
+
+  const snapshot = await buildExecutionSnapshot(root)
+  const task = snapshot.tasks.find((item) => item.task_id === 'TASK-VIEW')
+  assert.equal(task.acceptance.fresh, true)
+  assert.equal(task.status, 'delivered')
+  assert.equal(task.record_kind, 'historical_no_runtime')
+  assert.equal(snapshot.active_task, null)
 })
 
 test('target-only Heavy Tasks remain visible without fabricated execution timing', async () => {
