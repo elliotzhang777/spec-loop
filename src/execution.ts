@@ -263,7 +263,11 @@ async function assertGateCommand(command:string[],worktree:string,approvedBash:S
   if(['npm','pnpm','yarn','bun'].includes(bin)&&command.slice(1).some((arg)=>['exec','dlx','x'].includes(arg.toLowerCase())))throw new Error(`shell or command dispatcher is forbidden in gate: ${command.join(' ')}`);
   if(bin==='sudo'||bin==='su')throw new Error(`privilege escalation is forbidden in gate: ${command[0]}`);
   if(bin==='git'&&['push','merge','rebase','reset','clean','checkout','switch','branch','tag','commit'].includes((command[1]??'').toLowerCase()))throw new Error(`mutating git command is forbidden in gate: ${command.join(' ')}`);
-  const joined=command.join(' ').toLowerCase();if(/\b(deploy|publish|release)\b/.test(joined))throw new Error(`release command is forbidden in gate: ${command.join(' ')}`);
+  // A human-approved v2 Bash Gate may use words such as "release" in its
+  // evidence-oriented filename. The filename is not an executable action, and
+  // rejecting it here makes the approved contract impossible to run. Continue
+  // to reject those action words for every non-approved command.
+  const joined=command.join(' ').toLowerCase();if(!approvedScript&&/\b(deploy|publish|release)\b/.test(joined))throw new Error(`release command is forbidden in gate: ${command.join(' ')}`);
 }
 function assertDatabaseLifecycle(command:string[],config:z.infer<typeof gateConfigSchema>){
   if(config.database.lifecycle!=='persistent')return;
