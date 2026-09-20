@@ -13,6 +13,7 @@ const MAX_DASHBOARD_STEPS_PER_TASK = 20;
 const MAX_DASHBOARD_REFS_PER_STEP = 10;
 const MAX_DASHBOARD_DIAGNOSTICS = 50;
 export const MAX_EXECUTION_SNAPSHOT_BYTES = 262_144;
+const MIN_DASHBOARD_STEPS_PER_TASK = 5;
 export const executionStepSnapshotSchema = z.object({
   id: z.string(), type: z.string(), round: z.number().int().nonnegative().nullable(), label: z.string().max(120), summary: z.string().max(500), status: stepStatusSchema,
   started_at: z.iso.datetime().nullable(), ended_at: z.iso.datetime().nullable(), duration_ms: z.number().int().nonnegative().nullable(),
@@ -635,5 +636,26 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
     } : null,
     waves, tasks, diagnostics: diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS).map((item) => dashboardText(item, 1_000)),
   });
-  const bytes=Buffer.byteLength(JSON.stringify(snapshot));if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)throw new Error(`Dashboard Snapshot exceeds ${MAX_EXECUTION_SNAPSHOT_BYTES} bytes (${bytes}); reduce bounded summaries before publishing`);return snapshot;
+  let bytes=Buffer.byteLength(JSON.stringify(snapshot));
+  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
+    // A project's task count grows over time, so a fixed per-task history bound
+    // is not sufficient to keep the whole projection bounded. Compact oldest
+    // historical detail first while preserving every task and the active task's
+    // most recent steps.
+    const compactable=()=>snapshot.tasks
+      .filter(task=>task.steps.length>MIN_DASHBOARD_STEPS_PER_TASK)
+      .sort((left,right)=>Number(left.current)-Number(right.current)||right.steps.length-left.steps.length);
+    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
+      const task=compactable()[0];if(!task)break;
+      task.steps.shift();
+      bytes=Buffer.byteLength(JSON.stringify(snapshot));
+    }
+    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
+      const task=snapshot.tasks.filter(item=>item.diagnostics.length>1)
+        .sort((left,right)=>Number(left.current)-Number(right.current)||right.diagnostics.length-left.diagnostics.length)[0];
+      if(!task)break;task.diagnostics.shift();bytes=Buffer.byteLength(JSON.stringify(snapshot));
+    }
+    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES&&snapshot.diagnostics.length){snapshot.diagnostics.shift();bytes=Buffer.byteLength(JSON.stringify(snapshot));}
+  }
+  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)throw new Error(`Dashboard Snapshot exceeds ${MAX_EXECUTION_SNAPSHOT_BYTES} bytes (${bytes}); reduce bounded summaries before publishing`);return snapshot;
 }
