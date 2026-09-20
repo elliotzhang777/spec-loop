@@ -450,6 +450,11 @@ test('provider identity changes fail closed and repeated deterministic launch fa
     assert.match(result.failure_fingerprint, /^[a-f0-9]{64}$/)
   }
   await assert.rejects(prepareRoleInvocation(failed.root, failed.taskId, 'V'), /Provider circuit is open after 2 identical failures/)
+
+  await writeFile(path.join(failed.workspace, 'new-head.txt'), 'different candidate\n')
+  git(failed.workspace, ['add', 'new-head.txt'])
+  git(failed.workspace, ['commit', '-m', 'different candidate head'])
+  await assert.rejects(prepareRoleInvocation(failed.root, failed.taskId, 'V'), /current clean stable candidate HEAD/)
 })
 
 test('scope, executable and Java requirements fail before an acceptance Run or role invocation starts', async () => {

@@ -142,11 +142,11 @@ export async function prepareRoleInvocation(root:string,taskId:string,roleValue:
   const runPath=path.join(task.path,'ACCEPTANCE_RUN.json'),run=JSON.parse(await readFile(runPath,'utf8')) as {run_id?:string;stage?:string;current_head?:string|null;plan_hash?:string|null};
   const allowed:Record<AcceptanceRole,string[]>={M:['m_working'],V:['plan_compiled'],R:['v_passed']};if(!run.run_id||!run.stage||!allowed[role].includes(run.stage))throw new Error(`${role} invocation is illegal from ${run.stage??'unknown'}`);
   await (await import('./project.js')).verifyExecutionPreflight(root,taskId);
-  const previous=await invocationRecords(root,taskId),roleTail=[...previous].reverse().filter(item=>item.role===role),tail=[] as RoleInvocation[];for(const item of roleTail){if(!item.failure_fingerprint)break;tail.push(item)}
+  const workspace=await readWorkspace(root,taskId),actualHead=await git(workspace.worktree,['rev-parse','HEAD']);
+  const previous=await invocationRecords(root,taskId),roleTail=[...previous].reverse().filter(item=>item.role===role&&item.candidate.head===actualHead),tail=[] as RoleInvocation[];for(const item of roleTail){if(!item.failure_fingerprint)break;tail.push(item)}
   if(tail.length){const repeated=tail.findIndex(item=>item.failure_fingerprint!==tail[0].failure_fingerprint);const count=repeated<0?tail.length:repeated;const contract=(await readFile(path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md'),'utf8'));const limit=Number(contract.match(/repeated_failure_limit:\s*(\d+)/)?.[1]??2);if(count>=limit)throw new Error(`${role} Provider circuit is open after ${count} identical failures (${tail[0].failure_fingerprint})`)}
   if(!(await exists(path.join(task.path,'BUDGET.md'))))await runtimeInit(task.path);
   const budget=await readBudget(task.path),knownTokens=previous.reduce((sum,item)=>sum+(item.usage.total_tokens??0),0);if(knownTokens>=budget.max_tokens)throw new Error(`Task token budget reached before ${role} invocation: ${knownTokens}/${budget.max_tokens}`);
-  const workspace=await readWorkspace(root,taskId),actualHead=await git(workspace.worktree,['rev-parse','HEAD']);
   if(role!=='M'&&(!run.current_head||actualHead!==run.current_head||await git(workspace.worktree,['status','--porcelain=v1','--untracked-files=all'])))throw new Error(`${role} requires the current clean stable candidate HEAD`);
   const id=`INV-${taskId}-${role}-${randomUUID()}`,base=invocationRoot(root,taskId,id),evidenceRoot=path.join(base,'evidence');await mkdir(evidenceRoot,{recursive:true});
   let candidatePath=workspace.worktree,access:'read_write'|'read_only_snapshot'='read_write',fingerprint:string;
