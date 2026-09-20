@@ -306,7 +306,7 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
 
 test('Controlled V freezes a clean v2 candidate and runs only its exactly approved repository Bash Gate', async () => {
   const f = await fixture('acceptance-controlled-v-', 'TASK-CONTROLLED-V-1', { tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }] }, true, true, [
-    { id: 'other-task-gate', ac: ['AC-1'], command: [process.execPath, '--version'], timeout_seconds: 30 },
+    { id: 'other-task-gate', ac: ['AC-99'], command: [process.execPath, '--version'], timeout_seconds: 30 },
   ])
   const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'succeeded')

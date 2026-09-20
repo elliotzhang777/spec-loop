@@ -140,7 +140,7 @@ export async function initGateConfig(root:string){const file=path.join(control(r
 export async function readGateConfig(root:string){await initGateConfig(root);return gateConfigSchema.parse((await readMarkdown(path.join(control(root),'GATES.md'))).data)}
 export async function readGates(root:string){return (await readGateConfig(root)).gates}
 
-async function validateGateScope(root:string,taskId:string,config:z.infer<typeof gateConfigSchema>):Promise<void>{
+async function validateGateScope(root:string,taskId:string,config:z.infer<typeof gateConfigSchema>,scopedGates:z.infer<typeof gateDefinitionSchema>[]=config.gates):Promise<void>{
   const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);
   if(!task)throw new Error('task not found');
   const state=await readState(task.path);
@@ -155,7 +155,7 @@ async function validateGateScope(root:string,taskId:string,config:z.infer<typeof
   if(!config.scope_kind)return;
   const acceptance=acceptanceSchema.parse((await readMarkdown(path.join(task.path,'ACCEPTANCE.md'))).data);
   const criterionIds=new Set(acceptance.criteria.map((criterion)=>criterion.id));
-  for(const gate of config.gates){
+  for(const gate of scopedGates){
     const coverage=gate.ac??[];
     if(new Set(coverage).size!==coverage.length||coverage.some((id)=>!criterionIds.has(id)))
       throw new Error(`${gate.id}: scoped Gate AC coverage is invalid`);
@@ -569,7 +569,7 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
 export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
   const m=await readWorkspace(root,taskId),current=await readHarnessState(root,taskId);if(current.stage!=='collected')throw new Error(`harness verify is illegal from ${current.stage}`);const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),gates=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates,results:GateResult[]=[];
   if(approvedGateIds&&gates.length!==approvedGateIds.size)throw new Error('one or more P-approved Gates are missing from the project Gate configuration');
-  await validateGateScope(root,taskId,config);
+  await validateGateScope(root,taskId,config,gates);
   await validatePlaywrightDeclarations(root,taskId,gates);
   const startHead=await git(m.worktree,['rev-parse','HEAD']);if(startHead!==current.head)throw new Error('workspace HEAD changed after collect');
   const collectRaw=await readFile(path.join(control(root),'output',`${taskId}-collect.json`),'utf8');
@@ -593,7 +593,7 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
 async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifest,head:string,gates:GateResult[]):Promise<void>{
   const requirements=await webRequirements(root,taskId);
   const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),definitions=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates;
-  await validateGateScope(root,taskId,config);
+  await validateGateScope(root,taskId,config,definitions);
   if(definitions.length!==gates.length||definitions.some((definition)=>!gates.some((gate)=>gate.id===definition.id)))
     throw new Error('Gate Plan changed after execution');
   for(const requirement of requirements){
