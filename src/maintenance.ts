@@ -65,7 +65,7 @@ export async function retentionPolicy(projectRoot:string){
   return{schema_version:1,project_root:path.resolve(projectRoot),shared_cache_root:path.join(control,'shared-cache'),snapshot_max_bytes:262_144,
     recommended_limits:{project_bytes:10*1024**3,workflow_bytes:2*1024**3,provider_output_bytes:1024**2,retained_terminal_worktrees:5},
     lifecycle:{authoritative:['EXECUTION_EVENTS.jsonl','Acceptance Contract/Run/Plan','Gate summaries and hashed Evidence','Candidate and retirement manifests'],ephemeral:['role candidate snapshots','worktrees after terminal archive','per-invocation temporary directories'],shared:['npm download cache','Maven repository cache']},
-    commands:{inspect:`spec-loop maintenance inspect ${JSON.stringify(path.resolve(projectRoot))} --json`,archive:`spec-loop maintenance archive-evidence ${JSON.stringify(path.resolve(projectRoot))} <TASK-ID> --json`,retire:'spec-loop maintenance retire-worktree <PROJECT> <TASK-ID> --expected-head <HEAD> --apply --json'},
+    commands:{archive_events:`spec-loop maintenance archive-events ${JSON.stringify(path.resolve(projectRoot))} --json`,inspect:`spec-loop maintenance inspect ${JSON.stringify(path.resolve(projectRoot))} --json`,archive:`spec-loop maintenance archive-evidence ${JSON.stringify(path.resolve(projectRoot))} <TASK-ID> --json`,retire:'spec-loop maintenance retire-worktree <PROJECT> <TASK-ID> --expected-head <HEAD> --apply --json'},
     destructive_action_performed:false};
 }
 

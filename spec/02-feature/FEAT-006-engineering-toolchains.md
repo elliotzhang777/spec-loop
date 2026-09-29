@@ -49,15 +49,16 @@ Toolchain 从 T0 外部 Evidence 演进到 T1 通用命令、T2 平台预设和 
 |---|---|---|
 | Design | [DES-006 工程 Toolchain 适配](../03-design/DES-006-engineering-toolchain-adapters.md) | 进行中 |
 | Task | T1 [TASK-009](../04-task/TASK-009-git-worktree-gate.md)、范围 [TASK-016](../04-task/TASK-016-define-verification-scope.md)、Playwright [TASK-019](../04-task/TASK-019.md) | 已完成 |
-| Task | [TASK-036 v2 Gate Planner 与 Spring Boot T2](../04-task/TASK-036-gate-planner-spring-toolchain.md) | 已批准 |
+| Task | [TASK-036 v2 Gate Planner 与 Spring Boot T2](../04-task/TASK-036-gate-planner-spring-toolchain.md) | 已完成 |
+| Task | [TASK-038 统一最终成品出口](../04-task/TASK-038-unified-product-output.md) | 已完成 |
 
 ## 实际交付
 
 - 已实现行为：T0 外部 Evidence 与 T1 通用命令 Gate；命令受 cwd、超时、环境限制约束，并生成绑定 Git HEAD 的 artifact。
 - 已实现行为：显式 Playwright Web Gate 使用目标本地 CLI，强制解析测试统计，归档 HTML、JSON、截图和逐文件哈希，并接入 Harness Report 完整性复核。
 - 已实现行为：`GATES.md` 可声明 `scope_kind`、`wave_id`、`coverage` 和数据库生命周期；非 Heavy 全量覆盖/一次性数据库、persistent Gate 直接创建删除容器以及执行后策略漂移均会被拒绝。
-- 未实现行为：v2 自动 Gate Plan 与 Spring Boot T2 由 TASK-036 实施；Xcode/iOS、微信小程序按真实项目需求另建独立工单，不混入当前批次。
-- 验证结论：T1 已通过自动化测试和两个真实 Git Project Dogfood；T2/T3 待后续阶段验证。
+- 已完成的 T2 增量：TASK-036 的 v2 Gate Planner 与 Spring Boot Maven/Gradle 原生证据在 `af57702` 独立 V/R PASS；P Contract 追踪、已验证 Gate、环境/候选指纹和报告清单完整绑定。Xcode/iOS、微信小程序按真实项目需求另建独立工单。
+- 验证结论：T1 已通过自动化测试和两个真实 Git Project Dogfood；Spring T2 已定向验收；TASK-038 的本机成品目录、manifest 和源/目标 APK 哈希在 `eca847d` 独立 V/R PASS，其他 T2/T3 仍待后续阶段验证。
 
 ## 变更记录
 
@@ -68,3 +69,4 @@ Toolchain 从 T0 外部 Evidence 演进到 T1 通用命令、T2 平台预设和 
 | 2026-07-23 | 增加 Playwright Web Gate | Web 功能必须用真实浏览器路径验证并产生原生 Evidence | TASK-019 |
 | 2026-07-26 | 明确波次增量 Gate 与最终组合 Heavy | 降低多 Task 波次的重复验证次数 | TASK-016 |
 | 2026-07-26 | 强制定向 Gate 与长期数据库复用 | 减少全量回归和数据库容器生命周期开销 | TASK-016 |
+| 2026-09-29 | 完成本机成品出口定向验收 | TASK-038 AC-1～4 独立 V/R PASS；本机 APK 未入 Git，真机与可重构性交由独立验证 | TASK-038 |

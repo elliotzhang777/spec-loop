@@ -5,10 +5,16 @@ import { inflateSync } from 'node:zlib';
 import path from 'node:path';
 import { atomicWriteMany, assertNoSecrets, assertSubstantive, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
 import type { HumanReviewRecord, HumanReviewRequirement, ReviewArtifact, TaskState } from './model.js';
-import { finishLatestManagedTaskStep, startManagedTaskStep } from './execution-events.js';
+import { finishExecutionStep, finishLatestManagedTaskStep, managedProjectRootForTask, startManagedTaskStep } from './execution-events.js';
 import { acceptanceSchema, humanReviewSchema, planSchema, stateSchema } from './schemas.js';
 
 const exec = promisify(execFile);
+async function observedVisualWrite(root:string,state:TaskState,reviewId:string,summary:string,operation:()=>Promise<void>):Promise<void>{
+  const start=await startManagedTaskStep(root,{taskId:state.task_id,round:state.current_round,stepType:'review.visual',label:`视觉 Review ${reviewId}`,summary,refs:[`reviews/${reviewId}.md`]});
+  const project=managedProjectRootForTask(root);
+  try{await operation()}catch(error){if(start&&project)await finishExecutionStep(project,start,{outcome:'failure'});throw error}
+  if(start&&project)await finishExecutionStep(project,start,{outcome:'success'});
+}
 const mediaTypes = new Map<string, ReviewArtifact['media_type']>([
   ['.png', 'image/png'],
 ]);
@@ -225,7 +231,7 @@ export async function requestVisualReview(root:string,reviewId:string,revision:s
     schema_version:1,...base,status:'pending',request_hash:hash,requested_at:requestedAt,
     history_tail_hash:event.event_hash,decision_hash:null,reviewer:null,reviewed_at:null,note:'',
   }) as HumanReviewRecord;
-  await atomicWriteMany(root,[...writes,{file:reviewFile(root,reviewId),content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}]);
+  await observedVisualWrite(root,state,reviewId,'记录当前截图的视觉 Review 请求',()=>atomicWriteMany(root,[...writes,{file:reviewFile(root,reviewId),content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}]));
   await startManagedTaskStep(root, {
     taskId: state.task_id, round: state.current_round, stepType: 'wait.user', wait: true,
     label: `等待视觉确认 ${reviewId}`, summary: '等待用户检查当前 revision 的截图效果并批准或拒绝',
@@ -267,7 +273,7 @@ export async function decideVisualReview(root:string,reviewId:string,result:'app
   }) as HumanReviewRecord;
   const writes:Array<{file:string;content:string}>=[{file,content:projection(record)},{file:historyFile(root,reviewId),content:historyContent([...events,event])}];
   if(effectFile)writes.push({file:effectFile,content:`${JSON.stringify({schema_version:1,command_id:controllerCommandId,review_id:reviewId,result,decision_hash:record.decision_hash},null,2)}\n`});
-  await atomicWriteMany(root,writes);
+  await observedVisualWrite(root,state,reviewId,'记录用户对当前截图的视觉结论',()=>atomicWriteMany(root,writes));
   await finishLatestManagedTaskStep(root, {
     taskId: state.task_id, round: state.current_round, stepType: 'wait.user', outcome: result === 'approved' ? 'success' : 'failure',
     summary: `视觉确认 ${reviewId}：${result}`, refs: [`reviews/${reviewId}.md`],
@@ -288,7 +294,7 @@ export async function readVisualReviews(root:string):Promise<HumanReviewRecord[]
   return result;
 }
 
-export async function validateRequiredHumanReviews(root:string,state:TaskState,revision:string):Promise<string[]> {
+export async function validateRequiredHumanReviews(root:string,state:TaskState,revision:string,pendingApprovals:ReadonlyMap<string,string>=new Map()):Promise<string[]> {
   const { requirements, acceptanceHash: contractHash } = await stateAndRequirements(root);
   if (!requirements.length) return [];
   const canonicalRevision = await canonicalGitRevision(state.repository,revision);
@@ -298,7 +304,7 @@ export async function validateRequiredHumanReviews(root:string,state:TaskState,r
     const record = humanReviewSchema.parse((await readMarkdown(file)).data) as HumanReviewRecord;
     await validateRecordHistory(root,record);
     if (record.task_id !== state.task_id || record.review_id !== item.id || record.kind !== item.kind) throw new Error(`${item.id}: visual review identity mismatch`);
-    if (record.status !== 'approved') throw new Error(`${item.id}: required visual review is ${record.status}`);
+    if (record.status !== 'approved' && !(record.status === 'pending' && pendingApprovals.get(record.review_id) === record.request_hash)) throw new Error(`${item.id}: required visual review is ${record.status}`);
     if (record.round !== state.current_round || record.code_revision !== canonicalRevision || record.acceptance_hash !== contractHash) throw new Error(`${item.id}: visual review is stale for current Round, revision or Acceptance`);
     if (record.request_hash !== requestHash(record)) throw new Error(`${item.id}: visual review request hash mismatch`);
     for (const artifact of record.artifacts) {

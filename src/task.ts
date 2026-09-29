@@ -453,11 +453,14 @@ export async function appendAttempt(root: string, input: Omit<Attempt, 'schema_v
   const ledger = all.map((a) => JSON.stringify(a)).join('\n') + '\n';
   const budget = await readBudget(root);
   const result = guard(budget, all);
-  await atomicWriteMany(root, [
+  await observedTaskStep(root,{
+    taskId:state.task_id,round:attempt.round,stepType:'task.attempt',label:`记录 Attempt ${attempt.attempt}`,
+    summary:'记录本次尝试、结果和预算投影',refs:['LOOP_LEDGER.jsonl','RUN_LOG.md'],
+  },()=>atomicWriteMany(root, [
     { file: path.join(root, 'LOOP_LEDGER.jsonl'), content: ledger },
     { file: path.join(root, 'RUN_LOG.md'), content: renderRunLog(all) },
     { file: path.join(root, 'RUN_SUMMARY.md'), content: renderSummary(state, budget, all, result) },
-  ]);
+  ]));
   await annotateManagedTask(root, {
     taskId: state.task_id, round: attempt.round, label: `Attempt ${attempt.attempt} · ${attempt.outcome}`,
     summary: attempt.action, refs: ['LOOP_LEDGER.jsonl', 'RUN_LOG.md'], occurredAt: new Date(attempt.timestamp),

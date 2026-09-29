@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "npm run build:execution-view && tsc",
-    "build:execution-view": "esbuild assets/execution-view/controls.jsx --bundle --minify --format=iife --target=es2022 --outfile=assets/execution-view/controls.js",
+    "build:execution-view": "node tools/build-execution-view.mjs",
     "check:feishu-contracts": "node tools/check-feishu-connector-contracts.mjs",
     "quality:standard": "npm run build && npm run check:feishu-contracts && node --test --test-concurrency=4 test/*.test.mjs",
     "test": "npm run quality:standard",
@@ -35,8 +35,10 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.10.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
-  }
+  },
+  "packageManager": "pnpm@11.17.0+sha512.cca3cea332ad254bb84145f966d19f4879615210346fc92c79a047f23a0d7b3cca3c3792f0076ba1f1831d277efbcf0a9119b31a9a60eca7fb3d6231f331ef72"
 }

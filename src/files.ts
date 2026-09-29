@@ -139,6 +139,33 @@ export async function atomicWriteMany(root: string, values: Array<{ file: string
   });
 }
 
+// Heartbeats are disposable single-file telemetry, not recoverable facts. Keep
+// them in the same ordering/lock domain as facts, but never journal a stale
+// heartbeat for replay after its caller timed out or the process stopped.
+export async function atomicWriteTelemetry(root: string, value: { file: string; content: string | Buffer }, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await withTransactionLock(root, '.spec-loop-tx-lock', async () => {
+    signal.throwIfAborted();
+    const target = await safeTarget(root, value.file);
+    await mkdir(path.dirname(target), { recursive: true });
+    const txDir = await safeTransactionDirectory(root, '.spec-loop-tx');
+    const temp = path.join(txDir, `telemetry-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`);
+    try {
+      signal.throwIfAborted();
+      await writeFile(temp, value.content, { signal });
+      signal.throwIfAborted();
+      await rename(temp, target);
+    } finally { await rm(temp, { force: true }); }
+  });
+}
+
+export async function removeTelemetryFile(root: string, file: string, shouldRemove: () => Promise<boolean> = async () => true): Promise<void> {
+  await withTransactionLock(root, '.spec-loop-tx-lock', async () => {
+    const target = await safeTarget(root, file);
+    if (await shouldRemove()) await rm(target, { force: true });
+  });
+}
+
 function withinAnyRoot(file: string, roots: string[]): boolean {
   const resolved = path.resolve(file);
   return roots.some((root) => resolved === path.resolve(root) || resolved.startsWith(path.resolve(root) + path.sep));

@@ -279,6 +279,10 @@ main { max-width: 1540px; margin: 0 auto; padding: 24px; }
 .antd-wave-item .ant-progress-inner { background: #273044; }
 .wave-sidebar-list .ant-menu-item-selected .antd-wave-item > div:first-child strong { color: #fff; }
 .execution-content { min-width: 0; padding: 18px; background: var(--page); }
+.wave-review-panel { margin-top: 14px; min-width: 0; }
+.wave-review-panel p { margin-block: 8px; overflow-wrap: anywhere; }
+.wave-review-panel code { white-space: normal; overflow-wrap: anywhere; }
+.wave-review-panel .ant-space, .wave-review-panel .ant-space-item { min-width: 0; max-width: 100%; }
 .execution-content .runtime-card, .execution-content .panel, .execution-content .workflow-wrap { box-shadow: none; }
 .runtime-card { border-radius: 10px; }
 .runtime-heading { min-height: 54px; padding: 10px 16px 8px; }
@@ -312,6 +316,9 @@ main { max-width: 1540px; margin: 0 auto; padding: 24px; }
 .antd-inspector .ant-descriptions { margin-bottom: 20px; }
 .antd-inspector .ant-descriptions-item-label { color: var(--text-secondary); font-size: 11px; }
 .antd-inspector .ant-descriptions-item-content { font-size: 12px; font-variant-numeric: tabular-nums; }
+.antd-inspector .ant-descriptions-item { min-width: 0; }
+.antd-inspector .ant-descriptions-item-content { overflow-wrap: anywhere; word-break: normal; }
+.project-diagnostics .ant-collapse-content-box { max-height: 320px; overflow: auto; }
 .antd-step-timeline { margin-top: 6px; }
 .antd-step-item { min-width: 0; padding: 0 0 10px; }
 .antd-step-item.bottleneck { margin: -6px -8px 6px; padding: 8px; border-radius: 8px; background: var(--warning-soft); }
@@ -367,7 +374,8 @@ main { max-width: 1540px; margin: 0 auto; padding: 24px; }
   .content-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .execution-shell { display: block; }
+  .execution-shell.ant-layout.ant-layout-has-sider { display: block; }
+  .execution-shell.ant-layout.ant-layout-has-sider > .execution-content { width: 100%; }
   .wave-sidebar { width: 100% !important; min-width: 0 !important; max-width: none !important; min-height: 0; max-height: none; position: static; overflow: visible; flex: 0 0 auto !important; border-right: 0; border-bottom: 1px solid light-dark(#273044, #242b38); }
   .wave-sidebar-heading { min-height: 48px; }
   .wave-sidebar > p { display: none; }

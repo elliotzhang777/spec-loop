@@ -1,10 +1,10 @@
 # TASK-042：v2 Controlled V 自动冻结 Harness 候选
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-09-19
-- 最后更新：2026-09-19
+- 最后更新：2026-09-29
 - 所属设计：[DES-004](../03-design/DES-004-controlled-automation-controller.md)
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -42,15 +42,16 @@
 ## 验证范围
 
 - `scope_kind: task`，`coverage: targeted`。
-- 本轮只做实现与快速反馈；正式独立 V/R 仍按目标 Task 的单独授权执行。
+- 当前执行约定允许已批准 Task 内连续完成定向 V/R；候选变化重新绑定证据。
 
 ## 交付记录
 
-- 完成日期：2026-09-19，实现候选待正式验证。
+- 完成日期：2026-09-29；候选 `eca847d` 独立 Light V/R 双 PASS。
 - 变更文件/交付物：`src/execution.ts`、`src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs`。
 - 快速反馈：`npm run build` 通过；`node --test test/acceptance-loop.test.mjs` 19/19 通过。
 - 关键实现：Controlled V 在干净 worktree 上原子写入 collect Evidence 与 Harness state；已有同一 collected 候选幂等复用，未完成旧 Harness 阶段 fail closed。
-- 遗留风险：正式独立 V/R 尚未授权。
+- 正式证据：`.spec-loop/output/TASK-042-{V,R}-eca847d.json`。当前 HEAD Controlled V 定向 1/1 与独立临时批准工程证明自动 collect、完整指纹绑定和同候选字节幂等；脏树、Workspace mismatch、旧 prepared/executed 均 fail closed。同 HEAD 构建及 acceptance-loop 34/34 复用 TASK-040 Gate。
+- 遗留风险：本工单未运行真实 M 或最终 Heavy；这些仍由对应任务的权限与预算控制。
 
 ## 变更记录
 
@@ -58,3 +59,4 @@
 |---|---|---|
 | 2026-09-19 | 创建并开始实施 | 海工 TASK-001 首次正式 V 在 Gate 执行前因缺失 Harness state 失败 |
 | 2026-09-19 | 实现候选进入待验证 | 构建与 19 项 acceptance-loop 定向回归通过，等待独立正式 V/R |
+| 2026-09-29 | 完成独立 Light V/R 并关闭工单 | AC-1～4 全通过，自动冻结与候选绑定均可复核 |

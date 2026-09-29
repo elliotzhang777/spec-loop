@@ -1,10 +1,10 @@
 # TASK-043：允许 P 契约精确绑定的仓库 Bash Gate
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-09-19
-- 最后更新：2026-09-19
+- 最后更新：2026-09-29
 - 所属设计：[DES-004](../03-design/DES-004-controlled-automation-controller.md)
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -42,14 +42,14 @@
 ## 验证范围
 
 - `scope_kind: task`，`coverage: targeted`。
-- 本轮只做实现与快速反馈；目标 Task 的正式 V 授权保持绑定原候选。
+- 独立 Light V/R 使用 `coverage: targeted`，绑定最终干净候选 `4366ed8`。
 
 ## 交付记录
 
-- 完成日期：2026-09-19（实现与快速反馈完成，待独立 V/R）。
+- 完成日期：2026-09-29。
 - 变更文件/交付物：`src/execution.ts`、`test/acceptance-loop.test.mjs`。
-- 快速反馈：`npm run build` 通过；`node --test test/acceptance-loop.test.mjs` 19/19 通过；`node --test test/hardening.test.mjs` 11/11 通过。
-- 遗留风险：正式独立 V/R 尚未授权；本修复仅作为已获批海工 TASK-001 正式 V 的控制器前置修复。
+- 验证：最终 `4366ed8` 构建、五项 Bash Gate 定向测试和受影响 hardening 通过；独立 [V](../../.spec-loop/output/TASK-043-V-4366ed8.json) 与 [R](../../.spec-loop/output/TASK-043-R-4366ed8.json) 均逐 AC PASS。前两轮分别发现契约/Run 绑定及 PATH 假解释器绕过，旧候选 FAIL 已保留，修复后重验。
+- 安全边界：只认当前 Run 匹配的完整 P 契约、字面 `bash` 两参数命令和候选内非链接脚本；实际解释器固定 `/bin/bash`，子进程 PATH 固定系统目录及当前 Node 目录。未执行最终 Phase 4 Heavy，也未执行真实业务仓库的 Gate。
 
 ## 变更记录
 
@@ -57,3 +57,4 @@
 |---|---|---|
 | 2026-09-19 | 创建并开始实施 | 海工 TASK-001 获批的四个 Bash Gate 被通用 dispatcher 防护拒绝 |
 | 2026-09-19 | 实现精确契约绑定、仓库 `scripts/` 路径约束与定向回归，转待验证 | 在不开放任意 Shell 的前提下恢复批准 Gate 的可执行性 |
+| 2026-09-29 | 修复契约完整性、当前 Run 绑定和 PATH 解释器劫持；最终 `4366ed8` 独立 V/R PASS，转已完成 | 旧候选独立验证发现的可执行绕过均已复现并封闭 |

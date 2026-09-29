@@ -9,6 +9,15 @@ import { createLatestValueWriter, withOperationTimeout } from '../dist/latest-wr
 import { processStartedAt } from '../dist/process-control.js'
 import { tempRoot } from './helpers.mjs'
 
+test('aborting a lock waiter keeps the live holder and prevents late acquisition',async()=>{
+  const directory=path.join(await tempRoot('owned-lock-abort-'),'control.lock'),holder=await acquireOwnedDirectoryLock(directory,{name:'holder',maxWaitMs:0}),controller=new AbortController()
+  try{
+    const began=Date.now(),waiting=acquireOwnedDirectoryLock(directory,{name:'waiter',signal:controller.signal,maxWaitMs:5000})
+    const rejected=assert.rejects(waiting,/cancel waiter/);setTimeout(()=>controller.abort(new Error('cancel waiter')),30);await rejected
+    assert.ok(Date.now()-began<1000);assert.equal((await inspectOwnedDirectoryLock(directory)).owner.nonce,holder.owner.nonce)
+  }finally{await holder.release()}
+})
+
 test('owned directory lock detects PID reuse and only releases its own nonce', async () => {
   const root=await tempRoot('owned-lock-'),directory=path.join(root,'control.lock'),started=await processStartedAt(process.pid)
   assert.ok(started)
@@ -21,6 +30,31 @@ test('owned directory lock detects PID reuse and only releases its own nonce', a
   assert.equal(await lock.release(),false)
   assert.equal((await inspectOwnedDirectoryLock(directory)).exists,true)
   await rm(directory,{recursive:true,force:true})
+})
+
+test('unknown owner identity preserves both current and legacy live locks', async () => {
+  for (const legacy of [false, true]) {
+    const root=await tempRoot('owned-lock-unknown-'),directory=path.join(root,'control.lock'),started=await processStartedAt(process.pid)
+    await mkdir(directory)
+    const owner=legacy?{pid:process.pid,process_started_at:started,created_at:new Date(0).toISOString()}:{schema_version:1,name:'fixture',pid:process.pid,process_started_at:started,nonce:randomUUID(),created_at:new Date(0).toISOString()}
+    const raw=`${JSON.stringify(owner)}\n`;await writeFile(path.join(directory,'owner.json'),raw)
+    assert.equal((await inspectOwnedDirectoryLock(directory,async()=>null)).reason,'identity_unknown')
+    await assert.rejects(acquireOwnedDirectoryLock(directory,{name:'fixture',maxWaitMs:30,missingOwnerProtectionMs:0,identifyProcess:async()=>null}),/identity_unknown/)
+    assert.equal(await readFile(path.join(directory,'owner.json'),'utf8'),raw)
+    await rm(root,{recursive:true,force:true})
+  }
+})
+
+test('a recovery mutex with unknown identity is never stolen after its protection period', async () => {
+  const root=await tempRoot('recovery-unknown-'),directory=path.join(root,'control.lock'),started=await processStartedAt(process.pid)
+  await mkdir(directory);await writeFile(path.join(directory,'owner.json'),'{')
+  const old=new Date(Date.now()-10_000);await utimes(directory,old,old)
+  const raw=JSON.stringify({schema_version:1,name:'recovery',pid:process.pid,process_started_at:started,nonce:randomUUID(),created_at:new Date(0).toISOString()})
+  await writeFile(`${directory}.recovery`,raw)
+  await assert.rejects(acquireOwnedDirectoryLock(directory,{name:'fixture',maxWaitMs:30,missingOwnerProtectionMs:0,identifyProcess:async()=>null}),/lock wait exceeded/)
+  assert.equal(await readFile(`${directory}.recovery`,'utf8'),raw)
+  assert.equal(await readFile(path.join(directory,'owner.json'),'utf8'),'{')
+  await rm(root,{recursive:true,force:true})
 })
 
 test('owned directory lock protects a missing owner briefly and then reclaims it', async () => {

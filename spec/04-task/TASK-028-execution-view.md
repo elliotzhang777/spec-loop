@@ -1,10 +1,10 @@
 # TASK-028：可重建投影与本地执行 Web UI
 
-- 状态：进行中
+- 状态：待验证
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-09-04
+- 最后更新：2026-09-29
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -14,7 +14,7 @@
 
 ## 目标
 
-交付 `snapshot` 与 `view` 命令，让用户通过只读本地页面看到当前 Task/步骤、步骤目的、实时 elapsed、历史 Task 时间泳道和可展开的步骤/Evidence 明细。
+交付 `snapshot` 与 `view` 命令，让用户通过本地页面的只读执行观察区域看到当前 Task/步骤、步骤目的、实时 elapsed、历史 Task 时间泳道和可展开的步骤/Evidence 明细。
 
 ## 与 P/M/V/R v2 的关系
 
@@ -29,7 +29,7 @@
 - `buildExecutionSnapshot`、严格 snapshot schema 和确定性 JSON CLI；
 - Task/step 区间并集、wall/active/waiting/untracked 和精度计算；
 - `spec-loop snapshot <project-dir> --json`；
-- loopback-only、GET/HEAD-only 的 `spec-loop view <project-dir>`；
+- loopback-only 的 `spec-loop view <project-dir>`；本工单拥有的执行观察、静态资源和工程枚举路由仅接受 GET/HEAD。共享服务中由 TASK-035 后续加入的波次 Review 路由按其独立授权规则接受受控 POST；
 - 打包进 npm 产物的自包含 HTML/CSS/JS；
 - 首屏当前工作、Task 时间泳道、步骤详情、diagnostics 和窄屏布局；
 - ETag 条件刷新、前端 current elapsed 和新增事件增量可见；
@@ -40,7 +40,7 @@
 ### 不包含
 
 - 旧项目深度兼容和大规模性能/安全最终验收；
-- 任意 Task 修改、命令执行、批准、Review 决策或 Connector 写入；
+- 本工单的执行观察路由发起 Task 修改、命令执行、批准、Review 决策或 Connector 写入；共享服务的 TASK-035 波次 Review 路由不属于本工单的只读观察能力；
 - 远程监听、账号系统和公网部署；
 - Portfolio 跨 Project 聚合。
 
@@ -61,7 +61,7 @@
 - [ ] AC-3：Task 泳道与明细准确展示 wall/active/waiting/untracked，以及每个步骤的状态、耗时、结果和 refs。
 - [x] AC-3a：Round 详情展示复现、分析、修改、编译/测试等子步骤，并单独标明子步骤覆盖率与未拆分耗时。
 - [ ] AC-4：新增事件后页面无需整页刷新即可在 500 毫秒目标之外的下一轮条件刷新内更新；无变化时服务返回 304；时钟推进只修改数字、进度条和节点耗时，不重建页面结构或造成控件闪烁。
-- [ ] AC-5：只绑定 loopback，只接受 GET/HEAD；非法方法、路径遍历、symlink、XSS payload 和 Secret 字段不会造成写入或泄漏。
+- [ ] AC-5：服务只绑定 loopback；本工单的执行观察、静态资源及工程枚举路由只接受 GET/HEAD，非法方法、路径遍历、symlink、XSS payload 和 Secret 字段不会造成写入或泄漏。TASK-035 后加的波次 Review 专属路由是明确隔离的例外，必须保持其独立的 capability、Origin、请求大小和权威校验。
 - [ ] AC-6：桌面与窄屏 Playwright 路径全部通过，并完成绑定当前 revision 截图的人工视觉 Review。
 - [x] AC-7：H1～H15 可从规格重建；点击 H 查看全部子 Task，点击 Task 查看步骤，并可通过面包屑、图内按钮或工具栏逐级返回。
 - [x] AC-8：默认定位最新未完成 H；H 完成状态受全部子 Task 约束，状态冲突显式告警；子 Task 使用从左到右的真实依赖分层 DAG。
@@ -79,7 +79,7 @@
 |---|---|---|
 | AC-1、AC-3 | projection fixture 单元测试与 cache 删除 E2E | 计算正确、重建等价 |
 | AC-2、AC-4 | Playwright 当前步骤和动态追加路径 | 首屏明确，elapsed/刷新正确 |
-| AC-5 | HTTP 与文件边界对抗测试 | 回环只读、无 XSS/Secret/任意文件 |
+| AC-5 | HTTP 与文件边界对抗测试 | 执行观察路由回环只读、无 XSS/Secret/任意文件；TASK-035 Review POST 无授权被拒绝 |
 | AC-6 | 桌面与 390px Playwright + REVIEW-1 | 功能通过且视觉获用户批准 |
 | AC-12 | 静态资源契约测试 + Playwright 键盘/弹层路径 | AntD 资源本地可用，无原生 select/手写 Segmented/手写波次按钮，全局 Card 与波次 Menu 组件契约完整 |
 | AC-15 | HTTP 工程目录 fixture + 前端静态契约 | 清单完整、子工程 Snapshot 可切换、非法 key/路径参数拒绝、选择器使用 AntD |
@@ -105,11 +105,11 @@
 
 ## 交付记录
 
-- 完成日期：核心实现完成，待视觉与正式验收关闭
+- 完成日期：核心实现与独立技术 V/R 在 `4366ed8` 重新绑定通过；待当前 revision 人工视觉 Review 后关闭
 - 变更文件/交付物：`src/execution-view.ts`、`src/execution-view-server.ts`、`assets/execution-view/*`、`snapshot`/`view` CLI 与定向测试
 - 关键实现与决策：每次读取 `.spec-loop` 事实重建，无 snapshot 数据库；并集计算主动/等待时间；历史缺口显式为 unknown；页面使用稳定 revision 和结构签名区分事实变化，当前 elapsed 本地递增并原位更新数字/进度；页面骨架采用 AntD Layout，全局/波次总览采用 Card/Statistic/Progress，波次导航采用 Menu/Progress，步骤检查器采用 Timeline/Descriptions，工程切换采用保留上一帧的 Spin 遮罩，DAG 继续由 ELK + SVG 表达领域语义。
-- 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；真实 Playwright 和截图 Review 未在本轮执行。
-- 遗留风险：当前环境没有可用浏览器会话，尚未完成桌面/390px 视觉确认、键盘路径与大规模性能 Gate，工单不关闭。
+- 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；本轮已运行真实 Chrome，人工截图 Review 仍待用户决定。
+- 遗留风险：桌面/390px Chrome 功能和键盘路径已通过；人工视觉决定尚未签署。大规模性能 Gate 由 TASK-029 Heavy 执行，工单暂不关闭。
 
 ## 验证证据
 
@@ -119,6 +119,11 @@
 | 2026-08-20 | Codex | Node 22，本地定向反馈检查 | 通过（非正式关闭） | `npm run build`、`node --check assets/execution-view/app.js`、`node --test test/execution-view.test.mjs`；10/10 通过，覆盖稳定 revision、增量 patch、AntD 静态资源与 CSP |
 | 2026-08-31 | Codex | Node 22，本地 AntD 页面组件回归 | 通过（待视觉 Review） | `npm run build:execution-view`、`node --check assets/execution-view/app.js`、`node --test test/execution-view.test.mjs`；14/14 通过，覆盖 AntD Card/Menu/Progress/Statistic、局部更新、工程切换与 CSP |
 | 2026-09-04 | Codex/M（快速反馈） | Node 22，P4-B1 | 构建与 14/14 通过（非正式 Evidence） | 页面服务可在 `127.0.0.1` 启动；当前会话无可连接浏览器，未执行或冒充视觉 Review |
+| 2026-09-29 | M | 本机 Chrome 154，海工只读数据 | 浏览器功能 PASS | `.spec-loop/output/TASK-028-browser-6718589.json`；工程切换、H6、ETag/方法、桌面与 390px 四张截图及 SHA-256；人工视觉待决定 |
+| 2026-09-29 | 独立 V | 干净候选 `6718589` | FAIL（AC-5 原文） | `.spec-loop/output/TASK-028-V-6718589.json`；后续 TASK-035 的受控 Review POST 与旧文档“整个服务只接受 GET/HEAD”冲突；其余功能 AC 通过，AC-6 人工视觉待用户 |
+| 2026-09-29 | 独立 V | 干净候选 `eca847d`，定向功能与真实 Chrome | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-V-eca847d.json`；AC-1～15 含 3a 功能通过，Review 路由边界复核通过；AC-6 人工视觉未代签 |
+| 2026-09-29 | 独立 R | 同一干净候选 `eca847d` | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-R-eca847d.json`；复核动态刷新、键盘、390px 与当前候选四张截图 SHA-256 |
+| 2026-09-29 | 独立 V/R | 干净候选 `4366ed8`，Chrome 154 | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-V-4366ed8.json`、`TASK-028-R-4366ed8.json`、`TASK-028-browser-4366ed8.json` 与同 revision 四张 PNG；23/23 定向测试、HTTP/桌面/390px、截图哈希通过，AC-6 人工决定未代签 |
 
 ## 关闭检查
 
@@ -156,3 +161,6 @@
 | 2026-08-31 | 完成第二轮 Ant Design 页面统一和可读性调整 | 页面骨架、波次指标、步骤检查器改用 Layout/Statistic/Timeline/Descriptions；辅助字号提升，当前波次自动定位，工程切换增加 Spin 保底状态 |
 | 2026-09-04 | 按最新版架构定义兼容收口 | 保持 v1 在途任务不迁移；v2 角色观察面下沉到 TASK-033，最终组合验收由 TASK-029 承担 |
 | 2026-09-04 | 启动 P4-B1 快速反馈检查 | 当前未提交实现构建和定向测试通过；真实浏览器反馈项保持待办 |
+| 2026-09-29 | 明确共享服务路由边界 | TASK-028 观察能力只读；已批准 TASK-035 的波次 Review 另设受控 POST，修正旧文档对整个服务 GET/HEAD 的过宽表述 |
+| 2026-09-29 | 完成独立技术 V/R，等待视觉决定 | `eca847d` AC 功能与浏览器证据 PASS；当前候选人工视觉 Review 尚未签署，工单保持待验证 |
+| 2026-09-29 | 在新集成候选重绑技术证据 | `4366ed8` 的独立 V/R 与 Chrome 截图重新通过，人工视觉仍待该 revision 决定 |

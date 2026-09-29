@@ -3,13 +3,13 @@ import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promise
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { atomicWriteMany } from './files.js';
+import { atomicWriteMany, atomicWriteTelemetry, removeTelemetryFile } from './files.js';
 import { readProject } from './project.js';
-import { processMatches, processStartedAt, signalProcessTree, terminateProcessTree } from './process-control.js';
+import { processMatches, inspectProcess, processStartedAt, signalProcessTree, terminateProcessTree } from './process-control.js';
 import { runRetentionMaintenance } from './maintenance.js';
 import { acquireOwnedDirectoryLock, inspectOwnedDirectoryLock, type OwnedDirectoryLock } from './owned-lock.js';
-import { createLatestValueWriter, withOperationTimeout } from './latest-writer.js';
-import { runManagedProcess } from './managed-process.js';
+import { createLatestValueWriter, withOperationTimeout, withAbortableOperationTimeout } from './latest-writer.js';
+import { runManagedProcess, startManagedProcess } from './managed-process.js';
 
 const supervisorMarkerSchema = z.object({
   schema_version: z.literal(1),
@@ -66,68 +66,56 @@ async function writeCircuit(root:string,value:SupervisorCircuit):Promise<void>{a
 export async function schedulerSupervisorCircuitStatus(projectRoot:string){const root=await realpath(projectRoot);return readCircuit(root)}
 export async function resetSchedulerSupervisorCircuit(projectRoot:string){const root=await realpath(projectRoot),status=await schedulerSupervisorStatus(root);if(status.running)throw new Error('stop the scheduler Supervisor before resetting its circuit');const value=supervisorCircuitSchema.parse({schema_version:1,circuit_open:false,opened_at:null,reason:null,consecutive_failures:0,automatic_restarts:[],updated_at:new Date().toISOString()});await writeCircuit(root,value);return value}
 
-async function matchingProcess(pid: number, startedAt: string): Promise<boolean> {
-  return processMatches(pid, startedAt);
-}
-
 async function releaseSupervisorFiles(root: string, processStart: string, lock: OwnedDirectoryLock): Promise<void> {
-  const marker = await readMarker(root).catch(() => null);
-  if (marker?.pid === process.pid && marker.process_started_at === processStart) await rm(markerFile(root), { force: true });
-  await lock.release();
+  try {
+    await withOperationTimeout(removeTelemetryFile(root, markerFile(root), async () => {
+      const marker = await readMarker(root).catch(() => null);
+      return marker?.pid === process.pid && marker.process_started_at === processStart;
+    }), 5_000, 'Supervisor heartbeat removal');
+  } finally { await lock.release(); }
 }
 
 async function watchdogCycle(
   root: string,
   staleSeconds: number,
   timeoutSeconds: number,
-  onWorker: (worker: ChildProcess | null) => Promise<void>,
+  onWorker: (worker: ChildProcess | null, identity: string | null) => Promise<void>,
 ): Promise<{ ok: boolean; unhealthy: unknown[]; stopped_tasks: Array<{ task_id?: string }> }> {
   const cli = fileURLToPath(new URL('./cli.js', import.meta.url));
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, 'scheduler', 'control', 'watchdog', root, '--stale-seconds', String(staleSeconds), '--apply', '--json'], {
-      cwd: root,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '', stderr = '', settled = false, finishing = false;
-    let timer: NodeJS.Timeout;
-    const identity = child.pid ? processStartedAt(child.pid) : Promise.resolve(null);
-    const finish = async (error?: Error, value?: { ok: boolean; unhealthy: unknown[]; stopped_tasks: Array<{ task_id?: string }> }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { await onWorker(null); }
-      catch (markerError) { if (!error) error = markerError as Error; }
-      if (error) reject(error); else resolve(value!);
-    };
-    const stopAndFinish = async (error: Error) => {
-      if (settled || finishing) return;
-      finishing = true;
-      clearTimeout(timer);
-      const termination = await terminateProcessTree(child.pid, await identity, 500);
-      if (!termination.stopped) error = new Error(`${error.message}; watchdog worker stop was not verified (${termination.reason})`);
-      await finish(error);
-    };
-    timer = setTimeout(() => { void stopAndFinish(new Error(`watchdog cycle exceeded ${timeoutSeconds}s and was killed`)); }, timeoutSeconds * 1000);
-    void onWorker(child).catch((error) => { void stopAndFinish(error as Error); });
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-      if (Buffer.byteLength(stdout) > 1_000_000) void stopAndFinish(new Error('watchdog cycle output exceeded 1 MB'));
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-      if (Buffer.byteLength(stderr) > 100_000) void stopAndFinish(new Error('watchdog cycle error output exceeded 100 KB'));
-    });
-    child.on('error', (error) => { void stopAndFinish(error); });
-    child.on('close', (code, signal) => {
-      if (settled || finishing) return;
-      if (code !== 0) { void finish(new Error((stderr.trim() || `watchdog cycle exited ${code ?? signal}`).slice(0, 1000))); return; }
-      try {
-        const parsed = JSON.parse(stdout) as { ok?: boolean; unhealthy?: unknown[]; stopped_tasks?: Array<{ task_id?: string }> };
-        void finish(undefined, { ok: parsed.ok === true, unhealthy: Array.isArray(parsed.unhealthy) ? parsed.unhealthy : [], stopped_tasks: Array.isArray(parsed.stopped_tasks) ? parsed.stopped_tasks : [] });
-      } catch (error) { void finish(new Error(`watchdog cycle returned invalid JSON: ${(error as Error).message}`)); }
-    });
+  let outputBytes = 0, errorBytes = 0, outputError: Error | null = null;
+  const managed = startManagedProcess({
+    bin: process.execPath,
+    args: [cli, 'scheduler', 'control', 'watchdog', root, '--stale-seconds', String(staleSeconds), '--apply', '--json'],
+    cwd: root, timeoutMs: timeoutSeconds * 1000, maxCaptureBytes: 1_000_000,
+    onStdout(chunk) {
+      outputBytes += chunk.length;
+      if (outputBytes > 1_000_000) { outputError = new Error('watchdog cycle output exceeded 1 MB'); void managed.terminate(); }
+    },
+    onStderr(chunk) {
+      errorBytes += chunk.length;
+      if (errorBytes > 100_000) { outputError = new Error('watchdog cycle error output exceeded 100 KB'); void managed.terminate(); }
+    },
   });
+  try {
+    const identity = await managed.processStartedAt;
+    if (managed.child.exitCode === null && managed.child.signalCode === null && !identity) throw new Error('cannot establish watchdog Worker process start identity');
+    await onWorker(managed.child, identity);
+    const result = await managed.completion;
+    if (!result.termination_verified) throw new Error('watchdog worker stop was not verified');
+    if (outputError) throw outputError;
+    if (result.timedOut) throw new Error(`watchdog cycle exceeded ${timeoutSeconds}s and was killed`);
+    if (result.identity_error) throw new Error(result.identity_error);
+    if (result.code !== 0) throw new Error((result.stderr.trim() || `watchdog cycle exited ${result.code}`).slice(0, 1000));
+    try {
+      const parsed = JSON.parse(result.stdout) as { ok?: boolean; unhealthy?: unknown[]; stopped_tasks?: Array<{ task_id?: string }> };
+      return { ok: parsed.ok === true, unhealthy: Array.isArray(parsed.unhealthy) ? parsed.unhealthy : [], stopped_tasks: Array.isArray(parsed.stopped_tasks) ? parsed.stopped_tasks : [] };
+    } catch (error) { throw new Error(`watchdog cycle returned invalid JSON: ${(error as Error).message}`); }
+  } catch (error) {
+    const stopped = await managed.terminate({ graceMs: 500 });
+    const completion = await managed.completion;
+    if (!stopped && !completion.termination_verified) throw new Error(`${(error as Error).message}; watchdog worker stop was not verified`);
+    throw error;
+  } finally { await onWorker(null, null); }
 }
 
 export async function schedulerSupervisorStatus(projectRoot: string) {
@@ -137,7 +125,9 @@ export async function schedulerSupervisorStatus(projectRoot: string) {
   let marker: SupervisorMarker;
   try { marker = await readMarker(root); } catch (error) { return { running: false, healthy: false, reason: `invalid_marker: ${(error as Error).message}`, marker: null }; }
   if (marker.project_root !== root) return { running: false, healthy: false, reason: 'project_root_mismatch' as const, marker };
-  if (!(await matchingProcess(marker.pid, marker.process_started_at))) return { running: false, healthy: false, reason: circuit.circuit_open?'circuit_open' as const:'stale_pid' as const, marker,circuit };
+  const identity=await inspectProcess(marker.pid,marker.process_started_at);
+  if(identity.status==='unknown')return{running:true,healthy:false,reason:'identity_unknown' as const,marker,circuit};
+  if (identity.status!=='alive') return { running: false, healthy: false, reason: circuit.circuit_open?'circuit_open' as const:'stale_pid' as const, marker,circuit };
   const heartbeatAgeMs = Math.max(0, Date.now() - Date.parse(marker.heartbeat_at));
   const heartbeatLimitMs = Math.max(5000, marker.interval_seconds * 3000);
   if(circuit.circuit_open)return{running:true,healthy:false,reason:'circuit_open' as const,heartbeat_age_ms:heartbeatAgeMs,marker,circuit};
@@ -178,7 +168,7 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: {
     successful_watchdogs:0,consecutive_failures:0,max_consecutive_failures:maxConsecutiveFailures,last_recovery_action:options.lastRecoveryAction??null,control_io:null,
     test_mode:Boolean(options.testMode),test_session_id:options.testSessionId??null,max_runtime_seconds:options.testMode?options.maxRuntimeSeconds??null:null,
   });
-  const writer=createLatestValueWriter<SupervisorMarker>(snapshot=>withOperationTimeout(atomicWriteMany(root,[{file:markerFile(root),content:`${JSON.stringify(snapshot,null,2)}\n`}]),slowWriteMs,'Supervisor heartbeat write'))
+  const writer=createLatestValueWriter<SupervisorMarker>(snapshot=>withAbortableOperationTimeout(signal=>atomicWriteTelemetry(root,{file:markerFile(root),content:`${JSON.stringify(snapshot,null,2)}\n`},signal),slowWriteMs,'Supervisor heartbeat write'))
   const persist = async (change: Partial<SupervisorMarker> = {}) => {
     marker = supervisorMarkerSchema.parse({ ...marker, ...change, heartbeat_at: new Date().toISOString(),control_io:writer.stats() });
     const snapshot = marker;
@@ -187,10 +177,10 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: {
   };
   const stop = () => { stopping = true; signalProcessTree(worker?.pid,'SIGTERM'); };
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
-  await persist();
   const runtimeDeadline=options.testMode?Date.now()+Number(options.maxRuntimeSeconds)*1000:null;
   const runtimeTimer=runtimeDeadline?setTimeout(stop,Math.max(1,runtimeDeadline-Date.now())):null;runtimeTimer?.unref();
   try {
+    await persist();
     while (!stopping) {
       if(runtimeDeadline&&Date.now()>=runtimeDeadline){stopping=true;break}
       if(circuitOpen){await persist({state:'degraded',worker_pid:null,worker_process_started_at:null,last_error:marker.last_error??'watchdog circuit is open'}).catch(()=>{stopping=true});const until=Date.now()+intervalSeconds*1000;while(!stopping&&Date.now()<until)await delay(Math.min(200,until-Date.now()));continue}
@@ -199,9 +189,9 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: {
       const heartbeat = setInterval(() => { void persist().catch(() => { stopping = true; signalProcessTree(worker?.pid,'SIGKILL'); }); }, Math.min(2000, intervalSeconds * 1000));
       let failedResult:{ok:boolean;unhealthy:unknown[];stopped_tasks:Array<{task_id?:string}>}|null=null;
       try {
-        const result = await watchdogCycle(root, staleSeconds, cycleTimeoutSeconds, async (current) => {
+        const result = await watchdogCycle(root, staleSeconds, cycleTimeoutSeconds, async (current, identity) => {
           worker = current;
-          await persist({ worker_pid: current?.pid ?? null, worker_process_started_at: current?.pid ? await processStartedAt(current.pid) : null });
+          await persist({ worker_pid: current?.pid ?? null, worker_process_started_at: identity });
         });
         if(!result.ok){failedResult=result;throw new Error(`watchdog reported unhealthy state (${result.unhealthy.length} unhealthy records)`)}
         await persist({
@@ -217,7 +207,7 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: {
           await persist({last_maintenance_at:maintenance.ran_at,last_maintenance_archived:maintenance.archived.length,last_maintenance_errors:maintenance.errors.length});
         }
       } catch (error) {
-        if (!stopping){const failures=marker.consecutive_failures+1;circuitOpen=failures>=maxConsecutiveFailures;const message=`${(error as Error).message}${circuitOpen?`; watchdog circuit opened after ${failures} consecutive failures`:''}`.slice(0,1000);if(circuitOpen){const previous=await readCircuit(root);await writeCircuit(root,supervisorCircuitSchema.parse({...previous,circuit_open:true,opened_at:new Date().toISOString(),reason:message,consecutive_failures:failures,updated_at:new Date().toISOString()})).catch(()=>{stopping=true})}await persist({ state: 'degraded', worker_pid: null, worker_process_started_at: null, last_check_at: new Date().toISOString(), last_check_ok: false,last_unhealthy_count:failedResult?.unhealthy.length??marker.last_unhealthy_count,last_stopped_tasks:failedResult?.stopped_tasks.length?failedResult.stopped_tasks.flatMap(item=>typeof item.task_id==='string'?[item.task_id]:[]):marker.last_stopped_tasks,consecutive_failures:failures,last_error:message }).catch(()=>{stopping=true})}
+        if (!stopping){const failures=marker.consecutive_failures+1;circuitOpen=failures>=maxConsecutiveFailures||/worker stop was not verified/.test((error as Error).message);const message=`${(error as Error).message}${circuitOpen?`; watchdog circuit opened after ${failures} consecutive failures`:''}`.slice(0,1000);if(circuitOpen){const previous=await readCircuit(root);await writeCircuit(root,supervisorCircuitSchema.parse({...previous,circuit_open:true,opened_at:new Date().toISOString(),reason:message,consecutive_failures:failures,updated_at:new Date().toISOString()})).catch(()=>{stopping=true})}await persist({ state: 'degraded', worker_pid: null, worker_process_started_at: null, last_check_at: new Date().toISOString(), last_check_ok: false,last_unhealthy_count:failedResult?.unhealthy.length??marker.last_unhealthy_count,last_stopped_tasks:failedResult?.stopped_tasks.length?failedResult.stopped_tasks.flatMap(item=>typeof item.task_id==='string'?[item.task_id]:[]):marker.last_stopped_tasks,consecutive_failures:failures,last_error:message }).catch(()=>{stopping=true})}
       } finally { clearInterval(heartbeat); worker = null; }
       if (stopping) break;
       const until = Date.now() + intervalSeconds * 1000;
@@ -227,6 +217,7 @@ export async function serveSchedulerSupervisor(projectRoot: string, options: {
     await writer.close(marker);
   } finally {
     if(runtimeTimer)clearTimeout(runtimeTimer);
+    process.off('SIGINT', stop); process.off('SIGTERM', stop);
     await writer.close().catch(() => {});
     await releaseSupervisorFiles(root, processStart,ownedLock);
   }

@@ -130,7 +130,7 @@ spec-loop view $PROJECT_DIR [--port $PORT] [--no-open]
 spec-loop snapshot $PROJECT_DIR [--json]
 ```
 
-`view` 默认绑定 `127.0.0.1` 和可用端口，只接受 GET/HEAD；`snapshot` 提供确定性 JSON，方便测试和后续 Connector 复用。HTTP 仅提供：
+`view` 默认绑定 `127.0.0.1` 和可用端口。TASK-028 的执行观察、静态资源和工程枚举路由仅接受 GET/HEAD；`snapshot` 提供确定性 JSON，方便测试和后续 Connector 复用。共享服务后来由 TASK-035 增加的波次 Review 专属 POST 路由不属于只读观察能力，必须执行独立 capability、Origin、大小和权威校验。TASK-028 的 HTTP 观察接口包括：
 
 - `GET /`：打包在 npm 产物内的静态观察面；
 - `GET /api/snapshot`：当前投影，支持 `ETag`/`If-None-Match`；
@@ -228,7 +228,7 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | AC-4 | 兼容测试 | 使用当前仓库和 Phase 1–3 Dogfood 目录重建 | 旧事实展示，精度标签准确，缺失值不伪造 |
 | AC-5 | 故障注入 + Playwright | 未闭合事件、进程崩溃、reconcile、新事件追加 | elapsed 更新，异常明确，增量刷新成功 |
 | AC-6 | 对抗测试 | 截断、重排、改 hash、重复 sequence、symlink/path traversal | fail closed 并给出诊断 |
-| AC-7 | 安全测试 | 绑定地址、HTTP 方法、Secret canary、XSS payload、任意路径 | 仅回环只读且无敏感输出 |
+| AC-7 | 安全测试 | 绑定地址、观察路由 HTTP 方法、Secret canary、XSS payload、任意路径；复核 TASK-035 Review POST 授权边界 | 观察能力仅回环只读且无敏感输出；未授权 Review 写入拒绝 |
 | AC-8 | 性能 Gate | 200×200 fixture 冷建与单事件增量 | 分别满足 2 秒和 500 毫秒门限 |
 | AC-9 | Playwright + 人工 | 桌面/窄屏四条路径、截图与 revision-bound Review | 功能通过且信息层级获用户批准 |
 | AC-15 | CLI 集成 + 进程对抗 | Task/Harness 启动、重复启动、僵尸 marker、CI、`--no-view`、浏览器打开失败 | 入口可点击且幂等，故障不阻断任务 |
@@ -238,8 +238,8 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 
 | 工单 | 交付物 | 依赖 | 状态 |
 |---|---|---|---|
-| [TASK-027](../04-task/TASK-027-execution-events.md) | 项目级事件协议、writer、全入口埋点、恢复与协议测试 | Phase 3 现有 Task/Harness | 进行中 |
-| [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 进行中 |
+| [TASK-027](../04-task/TASK-027-execution-events.md) | 项目级事件协议、writer、全入口埋点、恢复与协议测试 | Phase 3 现有 Task/Harness | 已完成 |
+| [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 待验证 |
 | [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | v2 Heavy：旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood、独立 V/R | TASK-027、TASK-028 | 已批准 |
 | [TASK-033](../04-task/TASK-033-pmvr-execution-observability.md) | v2 P/M/V/R、Conflict、Inbox、Candidate 事件与观察面 | TASK-027、TASK-028、TASK-032 | 已批准 |
 
@@ -248,7 +248,7 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 - 最终实现：`EXECUTION_EVENTS.jsonl`、Projection Builder、`snapshot`/`view` CLI、只读 HTTP 服务与自包含 Web UI 已完成首版实现。
 - 与设计差异：首版仅展示安全的 Artifact/Evidence 逻辑引用，不提供 `/api/artifacts/:ref` 内容读取；旧 Harness 非 Gate 阶段暂不根据弱时间点生成 derived 区间；事件存储当前在锁内原子重写完整 JSONL，增量索引与大规模性能优化留给 TASK-029。
 - 运维/迁移说明：旧项目无需迁移；启用新版本后从基线事件开始记录完整时间。
-- 关联完成工单：无。
+- 关联完成工单：TASK-027（`e399565` 独立 V/R PASS）。
 
 ## 变更记录
 
@@ -268,3 +268,6 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | 2026-08-31 | 将全局总览与波次目录升级为 Ant Design 页面组件 | 页面虽已使用 AntD 表单控件，但统计卡和波次列表仍是手写 DOM，视觉语言不统一且与 React 根存在更新冲突 | TASK-028 |
 | 2026-08-31 | 页面骨架、波次指标和步骤检查器统一为 Ant Design | 第二轮视觉走查发现外层布局、耗时卡和步骤时间线仍为手写组件，且辅助字号过小；改用 Layout、Statistic、Timeline、Descriptions、Spin 并提升信息可读性 | TASK-028 |
 | 2026-09-04 | 增加 v1 兼容收口与 v2 观察面桥梁 | TASK-027/028 保持在途 v1，TASK-029 使用 v2 Heavy，TASK-033 原生展示 P/M/V/R 运行事实 | TASK-027～029、033 |
+| 2026-09-29 | 事件底座完成定向验收 | reader 拒绝已闭合 step ID 重用和身份 Secret；确认权威事件缺口可按请求补记；保留原子重写与 v1 在途兼容 | TASK-027 |
+| 2026-09-29 | 明确共享本地服务的路由所有权 | TASK-028 观察路由仅 GET/HEAD；TASK-035 受控 Review POST 是后续独立能力，不改变观察接口的只读约束 | TASK-028、TASK-035 |
+| 2026-09-29 | 可视化技术验收通过并重绑候选 | `4366ed8` 的独立技术 V/R、Chrome 桌面/390px 与截图哈希通过，动态刷新和键盘路径沿用未变源码的定向证据；人工视觉 Review 待用户 | TASK-028 |

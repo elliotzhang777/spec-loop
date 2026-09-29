@@ -89,7 +89,12 @@ export const acceptanceContractInputSchema = z.object({
   for (const item of [...value.assertions, ...value.evidence_requirements]) if (!tools.has(item.tool_id)) ctx.addIssue({ code: 'custom', message: `${item.id} references unknown tool ${item.tool_id}` });
   for (const item of value.criteria) if (item.waivable && item.risk_tags.some((tag) => protectedRiskTags.has(tag))) ctx.addIssue({ code: 'custom', message: `${item.id} has a protected risk tag and may not be waivable` });
   const ids = value.criteria.map((item) => item.id);
-  if (new Set(ids).size !== ids.length || ids.some((id, index) => id !== `AC-${index + 1}`)) ctx.addIssue({ code: 'custom', message: 'criterion IDs must be unique and continuous from AC-1' });
+  const numbers = ids.map((id) => Number(id.slice(3)));
+  if (new Set(ids).size !== ids.length || numbers.some((number, index) =>
+    value.version === 1 ? number !== index + 1 : index > 0 && number <= numbers[index - 1]
+  )) ctx.addIssue({ code: 'custom', message: value.version === 1
+    ? 'initial criterion IDs must be unique and continuous from AC-1'
+    : 'revised criterion IDs must be unique and remain in ascending order' });
   for (const [label, idsToCheck] of [
     ['use case', value.use_cases.map((item) => item.id)],
     ['assertion', value.assertions.map((item) => item.id)],
@@ -159,7 +164,8 @@ export function approvedAcceptanceContractValue(inputValue: unknown, approvedBy:
 
 const evidenceInputSchema = z.object({
   file: z.string().min(1),
-  ac: z.array(acIdSchema).min(1),
+  sha256: hashSchema.optional(),
+  ac: z.union([acIdSchema, z.array(acIdSchema).min(1)]).transform((value) => Array.isArray(value) ? value : [value]),
   requirement_ids: z.array(z.string().regex(/^ER-[1-9]\d*$/)).min(1),
 }).strict();
 
@@ -281,6 +287,10 @@ async function readContract(taskRoot: string): Promise<AcceptanceContractV2> {
   return data;
 }
 
+export async function readApprovedAcceptanceContract(taskRoot: string): Promise<AcceptanceContractV2> {
+  return readContract(taskRoot);
+}
+
 async function readRun(taskRoot: string): Promise<AcceptanceRun> {
   return runSchema.parse(JSON.parse(await readFile(runFile(taskRoot), 'utf8')));
 }
@@ -341,7 +351,14 @@ export async function cancelAcceptanceRun(root:string,taskId:string,reason='canc
   if(run.stage==='cancelled')return run;
   if(run.stage==='candidate')throw new Error('cannot cancel a completed Candidate');
   const updated=history({...run,active_conflict_id:null,stopped_head:observedHead??run.stopped_head},'cancelled',reason,'controller',null);
-  await atomicWriteMany(root,[{file:runFile(task.path),content:`${JSON.stringify(updated,null,2)}\n`}]);
+  const writes=[{file:runFile(task.path),content:`${JSON.stringify(updated,null,2)}\n`}];
+  if(run.active_conflict_id){
+    const file=path.join(control(root),'conflicts',`${run.active_conflict_id}.json`),conflict=conflictSchema.parse(JSON.parse(await readFile(file,'utf8')));
+    if(conflict.conflict_id!==run.active_conflict_id||conflict.task_id!==taskId||conflict.status!=='active')throw new Error('active Acceptance Conflict does not match the cancelled Run');
+    const resolved=conflictSchema.parse({...conflict,status:'resolved',resolved_at:new Date().toISOString(),resolution:`cancelled: ${reason}`});
+    writes.push({file,content:`${JSON.stringify(resolved,null,2)}\n`});
+  }
+  await atomicWriteMany(root,writes);
   await rebuildReviewInbox(root);return updated;
 }
 
@@ -356,7 +373,7 @@ async function stableCandidate(root: string, taskId: string) {
   return { workspace, head, diff_hash: sha256(diff), worktree_fingerprint: sha256(tree) };
 }
 
-async function hashEvidenceFiles(root: string, values: z.infer<typeof evidenceInputSchema>[], contract: AcceptanceContractV2) {
+async function hashEvidenceFiles(root: string, values: z.infer<typeof evidenceInputSchema>[], contract: AcceptanceContractV2, fallbackDir?: string) {
   const allowedAc = new Set(contract.criteria.map((item) => item.id));
   const requirements = new Map(contract.evidence_requirements.map((item) => [item.id, item]));
   const records = [] as Array<{ file: string; sha256: string; ac: string[]; requirement_ids: string[] }>;
@@ -366,13 +383,20 @@ async function hashEvidenceFiles(root: string, values: z.infer<typeof evidenceIn
       const requirement = requirements.get(id);
       if (!requirement || value.ac.some((ac) => !requirement.ac.includes(ac))) throw new Error(`evidence requirement ${id} does not cover the declared AC`);
     }
-    const target = path.isAbsolute(value.file) ? path.resolve(value.file) : path.resolve(root, value.file),info=await lstat(target).catch(()=>null);
+    let target = path.isAbsolute(value.file) ? path.resolve(value.file) : path.resolve(root, value.file);
+    let info=await lstat(target).catch(()=>null);
+    if (!info && fallbackDir && !path.isAbsolute(value.file)) {
+      target=path.resolve(fallbackDir,value.file);
+      info=await lstat(target).catch(()=>null);
+    }
     if(!info?.isFile()||info.isSymbolicLink())throw new Error('Evidence must be a regular non-symbolic file');
     const actual=await realpath(target),actualRoot=await realpath(root);
     if (!(actual === actualRoot || actual.startsWith(actualRoot + path.sep))) throw new Error('Evidence file escapes Project root');
     const content = await readFile(actual);
     if (!content.length) throw new Error('Evidence file is empty');
-    records.push({ file: path.relative(actualRoot, actual), sha256: sha256(content), ac: [...new Set(value.ac)].sort(), requirement_ids: [...new Set(value.requirement_ids)].sort() });
+    const contentHash = sha256(content);
+    if (value.sha256 && value.sha256 !== contentHash) throw new Error('Evidence declared SHA-256 does not match the file');
+    records.push({ file: path.relative(actualRoot, actual), sha256: contentHash, ac: [...new Set(value.ac)].sort(), requirement_ids: [...new Set(value.requirement_ids)].sort() });
   }
   return records.sort((left, right) => left.file.localeCompare(right.file));
 }
@@ -514,7 +538,7 @@ export async function recordVResult(root: string, taskId: string, sourceFile: st
   if (input.task_id !== taskId || input.contract_hash !== contract.contract_hash || input.plan_hash !== plan.plan_hash || input.head !== plan.head) throw new Error('V result is not bound to the current Task, Contract, Plan and HEAD');
   if(run.orchestration_required){const invocation=await (await import('./role-orchestrator.js')).assertSucceededRoleInvocation(root,taskId,input.invocation_id,'V');if(invocation.candidate.head!==plan.head)throw new Error('V invocation targets a different candidate HEAD')}
   if (input.invocation_id === run.last_r_invocation) throw new Error('V invocation must be independent from R');
-  const evidence = await hashEvidenceFiles(root, input.evidence, contract), currentEvidenceSetHash = evidenceSetHash(evidence);
+  const evidence = await hashEvidenceFiles(root, input.evidence, contract, path.dirname(sourceFile)), currentEvidenceSetHash = evidenceSetHash(evidence);
   if (run.last_v_evidence_set_hash === currentEvidenceSetHash) throw new Error('V retry must produce new Evidence content');
   if (input.verdict === 'pass') {
     const covered = new Set(evidence.flatMap((item) => item.ac));
@@ -541,12 +565,14 @@ export async function recordVResult(root: string, taskId: string, sourceFile: st
   return createConflict(root, task.path, applyFailure(base, fingerprint), contract, 'V', input.message, fingerprint);
 }
 
-export async function runControlledV(root: string, taskId: string, invocationId: string): Promise<{ gates: GateResult[]; run: AcceptanceRun }> {
+export async function runControlledV(root: string, taskId: string, invocationId: string, providerResultFile?: string): Promise<{ gates: GateResult[]; run: AcceptanceRun }> {
   const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path);
   if (run.stage !== 'plan_compiled') throw new Error(`V is illegal from ${run.stage}`);
   const plan = await readPlan(root, taskId, run); await assertCandidateStillCurrent(root, taskId, plan);await freezeControlledVerificationCandidate(root,taskId);
+  const providerResult = providerResultFile ? vInputSchema.parse(JSON.parse(await readFile(providerResultFile, 'utf8'))) : null;
+  if (providerResult && (providerResult.task_id !== taskId || providerResult.invocation_id !== invocationId || providerResult.head !== plan.head || providerResult.plan_hash !== plan.plan_hash || providerResult.contract_hash !== contract.contract_hash)) throw new Error('Provider V result is not bound to the controlled candidate');
   const gates = await runGates(root, taskId);
-  const gateFile = path.join(control(root), 'output', `${taskId}-gates.json`);
+  const gateFile = path.resolve(control(root), 'output', `${taskId}-gates.json`);
   const input = vInputSchema.parse({
     task_id: taskId, contract_hash: contract.contract_hash, plan_hash: plan.plan_hash, head: plan.head,
     invocation_id: invocationId,
@@ -556,6 +582,23 @@ export async function runControlledV(root: string, taskId: string, invocationId:
     message: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'all controlled Gates passed' : 'one or more controlled Gates failed',
     evidence: contract.evidence_requirements.map((item) => ({ file: gateFile, ac: item.ac, requirement_ids: [item.id] })),
   });
+  if (providerResult) {
+    for (const item of providerResult.evidence) {
+      if (!path.isAbsolute(item.file)) {
+        const projectPath=path.resolve(root,item.file);
+        if (!(await lstat(projectPath).catch(()=>null))) {
+          input.evidence.push({ ...item, file:path.resolve(path.dirname(providerResultFile!),item.file) });
+          continue;
+        }
+      }
+      input.evidence.push(item);
+    }
+    if (providerResult.verdict === 'fail') {
+      input.verdict = 'fail'; input.classification = providerResult.classification;
+      input.failed_ac = [...new Set([...input.failed_ac, ...providerResult.failed_ac])];
+      input.message = `${input.message}; Provider V: ${providerResult.message}`;
+    }
+  }
   const temp = path.join(outputDir(root, taskId), 'V', `controlled-input-${Date.now()}.json`);
   await atomicWriteMany(root, [{ file: temp, content: `${JSON.stringify(input, null, 2)}\n` }]);
   return { gates, run: await recordVResult(root, taskId, temp) };
@@ -569,7 +612,7 @@ export async function recordRResult(root: string, taskId: string, sourceFile: st
   if (input.task_id !== taskId || input.contract_hash !== contract.contract_hash || input.plan_hash !== plan.plan_hash || input.head !== plan.head || input.v_evidence_set_hash !== run.last_v_evidence_set_hash) throw new Error('R result is not bound to the current Task, Contract, Plan, HEAD and V Evidence');
   if(run.orchestration_required){const invocation=await (await import('./role-orchestrator.js')).assertSucceededRoleInvocation(root,taskId,input.invocation_id,'R');if(invocation.candidate.head!==plan.head)throw new Error('R invocation targets a different candidate HEAD')}
   if (input.invocation_id === run.last_v_invocation) throw new Error('R invocation must differ from V invocation');
-  const evidence = await hashEvidenceFiles(root, input.evidence, contract), currentEvidenceSetHash = evidenceSetHash(evidence);
+  const evidence = await hashEvidenceFiles(root, input.evidence, contract, path.dirname(sourceFile)), currentEvidenceSetHash = evidenceSetHash(evidence);
   if (run.last_r_evidence_set_hash === currentEvidenceSetHash) throw new Error('R retry must produce new Evidence content');
   const record = { schema_version: 2, role: 'R', run_id: run.run_id, ...input, evidence, evidence_set_hash: currentEvidenceSetHash, recorded_at: new Date().toISOString() };
   const file = path.join(outputDir(root, taskId), 'R', `${Date.now()}-${input.invocation_id.replace(/[^a-zA-Z0-9-]/g, '_')}.json`);
@@ -599,7 +642,10 @@ async function newestRoleRecord(root: string, taskId: string, role: 'V' | 'R'): 
   const dir = path.join(outputDir(root, taskId), role);
   if (!(await exists(dir))) return null;
   const files = (await readdir(dir)).filter((name) => name.endsWith('.json') && !name.startsWith('controlled-input-')).sort();
-  return files.length ? JSON.parse(await readFile(path.join(dir, files.at(-1)!), 'utf8')) : null;
+  if (!files.length) return null;
+  const file = path.join(dir, files.at(-1)!), info = await lstat(file);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 1_048_576 || !(await realpath(file)).startsWith(await realpath(root) + path.sep)) throw new Error('invalid acceptance role record');
+  return JSON.parse(await readFile(file, 'utf8'));
 }
 
 export async function rebuildReviewInbox(root: string) {
@@ -632,7 +678,21 @@ export async function resolveAcceptanceConflict(root: string, taskId: string, in
   if (input.contract_file) {
     const nextInput = acceptanceContractInputSchema.parse(JSON.parse(await readFile(path.resolve(input.contract_file), 'utf8')));
     if (nextInput.task_id !== taskId || nextInput.risk !== contract.risk || nextInput.version <= contract.version) throw new Error('replacement contract must preserve Task/risk and increase version');
-    if (input.action === 'waive_noncritical') for (const id of input.ac) if (nextInput.criteria.some((item) => item.id === id)) throw new Error(`${id} is still present in the replacement contract`);
+    if (input.action === 'waive_noncritical') {
+      const waived = new Set(input.ac);
+      if (waived.size !== input.ac.length) throw new Error('waive_noncritical contains duplicate AC IDs');
+      const withoutWaived = <T extends { ac: string[] }>(items: T[]) => items.map((item) => ({ ...item, ac: item.ac.filter((id) => !waived.has(id)) })).filter((item) => item.ac.length);
+      const { contract_hash: _hash, approval: _approval, ...currentInput } = contract;
+      const expected = {
+        ...currentInput,
+        version: nextInput.version,
+        criteria: contract.criteria.filter((item) => !waived.has(item.id)),
+        use_cases: withoutWaived(contract.use_cases),
+        assertions: withoutWaived(contract.assertions),
+        evidence_requirements: withoutWaived(contract.evidence_requirements),
+      };
+      if (JSON.stringify(nextInput) !== JSON.stringify(expected)) throw new Error('waiver replacement may only remove the specified AC and its coverage');
+    }
     const contractHash = sha256(JSON.stringify(nextInput));
     replacement = approvedContractSchema.parse({ ...nextInput, contract_hash: contractHash, approval: { approved_by: input.actor, approved_at: now, contract_hash: contractHash } });
   }
@@ -672,6 +732,63 @@ export async function buildAcceptanceSchedule(root: string) {
 
 export async function readAcceptanceRun(root: string, taskId: string): Promise<AcceptanceRun> {
   return readRun((await findTask(root, taskId)).path);
+}
+
+// Shared by the wave review reader and its final freshness check. A bundle
+// never substitutes its cached facts for the authoritative acceptance state.
+export async function acceptanceReviewFacts(root: string, taskId: string) {
+  const task = await findTask(root, taskId), run = await readRun(task.path), contract = await readContract(task.path), state = await readState(task.path);
+  let actualHead: string | null = null, clean = false;
+  const diagnostics: string[] = [];
+  try { const candidate = await stableCandidate(root, taskId); actualHead = candidate.head; clean = true; }
+  catch (error) { diagnostics.push((error as Error).message); }
+  const records = [] as Array<{role:string;record_hash:string;verdict:string;invocation_id:string;evidence_set_hash:string;evidence:Array<{file:string;sha256:string;ac:string[];requirement_ids:string[]}>}>;
+  for (const role of ['V','R'] as const) {
+    const record = await newestRoleRecord(root, taskId, role);
+    if (!record) continue;
+    if(['candidate','v_passed'].includes(run.stage)&&(record.run_id!==run.run_id||record.contract_hash!==run.contract_hash||record.plan_hash!==run.plan_hash||record.head!==run.current_head))diagnostics.push(`${role}: record is not bound to the current run`);
+    const evidence = record.evidence as Array<{file:string;sha256:string;ac:string[];requirement_ids:string[]}>;
+    for (const item of evidence) {
+      try {
+        const file = path.resolve(root, item.file), info = await lstat(file), actual = await realpath(file), project = await realpath(root);
+        if (!info.isFile() || info.isSymbolicLink() || info.size > 20 * 1024 * 1024 || !actual.startsWith(project + path.sep) || sha256(await readFile(actual)) !== item.sha256) throw new Error('Evidence changed or escaped the project');
+      } catch (error) { diagnostics.push(`${role}: ${(error as Error).message}`); }
+    }
+    if(evidenceSetHash(evidence)!==record.evidence_set_hash)diagnostics.push(`${role}: Evidence set hash mismatch`);
+    const expected=role==='V'?run.last_v_evidence_set_hash:run.last_r_evidence_set_hash;if(['candidate','v_passed'].includes(run.stage)&&expected!==record.evidence_set_hash)diagnostics.push(`${role}: authoritative Evidence binding mismatch`);
+    records.push({role,record_hash:sha256(JSON.stringify(record)),verdict:String(record.verdict),invocation_id:String(record.invocation_id),evidence_set_hash:String(record.evidence_set_hash),evidence});
+  }
+  if (run.plan_hash && ['plan_compiled','v_passed','candidate'].includes(run.stage)) {
+    try { await assertCandidateStillCurrent(root, taskId, await readPlan(root, taskId, run)); }
+    catch (error) { diagnostics.push((error as Error).message); }
+  }
+  if (run.stage === 'candidate') {
+    const candidate = JSON.parse(await readFile(path.join(outputDir(root,taskId),'CANDIDATE.json'),'utf8'));
+    if (candidate.head !== actualHead || candidate.candidate_id !== run.candidate_id || candidate.plan_hash !== run.plan_hash || candidate.contract_hash !== contract.contract_hash || candidate.v_evidence_set_hash !== run.last_v_evidence_set_hash || candidate.r_evidence_set_hash !== run.last_r_evidence_set_hash || records.find(item=>item.role==='V')?.verdict !== 'pass' || records.find(item=>item.role==='R')?.verdict !== 'pass') diagnostics.push('Candidate or independent V/R binding is stale');
+  }
+  const visual = await (await import('./review.js')).readVisualReviews(task.path);
+  const invocations = [] as Array<{role:string;invocation_id:string;status:string;result_status:string;manifest_hash:string}>;
+  for (const role of ['M','V','R'] as const) {
+    const latest = await (await import('./role-orchestrator.js')).latestRoleInvocation(root, taskId, role);
+    if (!latest) continue;
+    invocations.push({role,invocation_id:latest.invocation_id,status:latest.status,result_status:latest.result_status,manifest_hash:sha256(JSON.stringify(latest))});
+    if (['prepared','running','interrupted'].includes(latest.status)) diagnostics.push(`${role}: invocation has not reached a reconciled terminal state`);
+  }
+  return {task_id:taskId,title:String(((await readMarkdown(path.join(task.path,'SPEC.md'))).data as {title?:unknown}).title??taskId),round:state.current_round,stage:run.stage,run_id:run.run_id,run_hash:sha256(JSON.stringify(run)),contract_hash:contract.contract_hash,plan_hash:run.plan_hash,head:actualHead,candidate_id:run.candidate_id,clean,risk:contract.risk,critical_path:contract.critical_path,criteria:contract.criteria.map(item=>({id:item.id,text:item.text})),budgets:contract.budgets,semantic_reworks_used:run.semantic_reworks_used,conflict_id:run.active_conflict_id,records,invocations,visual,diagnostics,task_root:path.relative(root,task.path)};
+}
+
+export async function returnAcceptanceToMaker(root: string, taskId: string, actor: string, note: string, commandId: string, reauthorizeBudget = false) {
+  const task = await findTask(root,taskId), run = await readRun(task.path), contract = await readContract(task.path), ref = `wave-review:${commandId}`;
+  if (run.history.some(item=>item.artifact===ref)) return run;
+  if (!['candidate','waiting_human_review','plan_compiled','v_passed','m_working'].includes(run.stage)) throw new Error(`cannot return ${run.stage} to M`);
+  if (!reauthorizeBudget && run.semantic_reworks_used >= contract.budgets.max_semantic_reworks) throw new Error('rework budget exhausted; explicit budget reauthorization is required');
+  const updated = history({...run,active_conflict_id:null,candidate_id:null,current_head:null,plan_hash:null,last_v_invocation:null,last_r_invocation:null,last_v_evidence_set_hash:null,last_r_evidence_set_hash:null,
+    semantic_reworks_used:reauthorizeBudget?0:run.semantic_reworks_used+1,...(reauthorizeBudget?{infrastructure_retries:{V:0,R:0},last_failure_fingerprint:null,repeated_failure_count:0}:{})},'m_working',`${actor}: ${note}`,'human',ref);
+  const extra: Array<{file:string;content:string}> = [];
+  if (run.active_conflict_id) { const file = path.join(control(root),'conflicts',`${run.active_conflict_id}.json`), conflict = conflictSchema.parse(JSON.parse(await readFile(file,'utf8'))); extra.push({file,content:`${JSON.stringify({...conflict,status:'resolved',resolved_at:new Date().toISOString(),resolution:`wave review: ${actor}: ${note}`},null,2)}\n`}); }
+  await writeRun(root,task.path,updated,extra);
+  if(run.active_conflict_id)await rebuildReviewInbox(root);
+  return updated;
 }
 
 export async function reconcileCandidateBaseline(root: string, taskId: string, apply = false) {

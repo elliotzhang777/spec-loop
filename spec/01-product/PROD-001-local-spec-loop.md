@@ -51,7 +51,8 @@
 - 安全约束：最小权限、无 Secret 持久化、高风险动作人工门禁。
 - 技术约束：本地优先；Phase 1–2 不依赖后台服务或数据库。
 - 兼容约束：未来能力不得削弱已实现的状态、Evidence、Guard 和 Heavy 要求。
-- 交付授权约束：启动或继续 Task 只授权实现与快速反馈；正式验证、正式交付和阶段推进必须由用户针对当前候选分别明确授权。
+- 执行与验收授权：已批准 Task/波次按规格、权限、Gate 计划和预算连续完成实现、自测与 V/R；候选变化只作废旧验证证据及最终验收决定，不撤销范围内执行授权。普通人工确认集中到最终清单，交付、视觉/Heavy/阶段验收和外部动作仍须明确决定。
+- 波次默认节奏：新完整波次先完成整波实现，再统一验证；初验问题集中修复一次并复验一次，第二轮仍失败则提交剩余问题与证据，不在同波次继续自动返工。已有在途 V/R 不切换执行规则。
 
 ## 特性拆分
 
@@ -62,7 +63,7 @@
 | [FEAT-003 Project Loop 与 Agent 执行](../02-feature/FEAT-003-project-loop-agent-execution.md) | 管理项目多任务并让 Codex 受控单步执行 | P1 | 已完成 |
 | [FEAT-004 受控自动闭环](../02-feature/FEAT-004-controlled-automation.md) | 批准后替代循环内重复 Prompt | P1 | 草稿 |
 | [FEAT-005 Scheduling 与隔离](../02-feature/FEAT-005-scheduling-isolation.md) | 报告型调度、并发隔离和安全控制 | P1 | 草稿 |
-| [FEAT-006 工程 Toolchain](../02-feature/FEAT-006-engineering-toolchains.md) | 自动构建、测试并生成平台证据 | P1 | 待验证 |
+| [FEAT-006 工程 Toolchain](../02-feature/FEAT-006-engineering-toolchains.md) | 自动构建、测试并生成平台证据 | P1 | 进行中 |
 | [FEAT-007 Portfolio 与持续优化](../02-feature/FEAT-007-portfolio-capability-optimization.md) | 多项目组合、能力资产和优化治理 | P2 | 草稿 |
 | [FEAT-008 飞书进度通知与确认连接器](../02-feature/FEAT-008-feishu-progress-approval-connector.md) | 远程查看任务进度并安全完成必要人工卡点 | P1 | 已批准 |
 | [FEAT-009 可重建执行可视化](../02-feature/FEAT-009-execution-visualization.md) | 查看当前任务/步骤、历史耗时和 Evidence 路径 | P1 | 进行中 |
@@ -71,7 +72,22 @@
 
 - 当前结果：Phase 1–3 已交付；Phase 3 的 Project Loop、安全加固、故障恢复、Web Gate、人工效果门禁和分工程规格模板已经完成正式 Heavy 验收。
 - 指标结果：最终候选的 67 项自动化、对抗和恢复测试全部通过，WPHASE3 全量 Harness Gate、独立 Verifier 和用户 Heavy 人工确认均为 PASS。
-- 遗留事项：Scheduling、自动多 Round、受控并发、Spring/Xcode/小程序平台预设和 Portfolio 尚未实现；Web 已增加显式 Playwright Gate，但自动发现与 Gate Planner 仍留在 Phase 4。
+- 遗留事项：自动多 Round、受控并发、Xcode/小程序平台预设和 Portfolio 仍待后续工单；Spring T2、Gate Planner 与 report-only Scheduling 已完成定向验收，Phase 4 全量 Heavy 尚未执行。
+- 2026-09-29 Phase 4 增量：TASK-034 report-only Scheduler 在候选 `cbc1a5d` 上通过独立 V/R；其余 Scheduling 自动执行、阶段 Heavy 与产品交付仍按对应工单验收。
+- 同一候选的 TASK-035 波次调度与防卡死能力已通过独立 V/R 和用户人工视觉 Review；Phase 4 最终 Heavy、真实业务角色与产品交付仍待各自门槛。
+- 2026-09-29 TASK-030 P/M/V/R v2 旁路内核在候选 `eb05e92` 通过独立 V/R，覆盖 Contract、HEAD/计划/Evidence、路由预算、Conflict/Inbox、人工动作及 v1 兼容；新任务默认 v2 接入由 TASK-031 继续验收。
+- 2026-09-29 TASK-030/031 在更新后的候选 `7177a72` 重新通过独立 V/R；新任务 v2 契约、签名批准、默认协议切换、doctor/status 与旧模板兼容已完成定向验收。本机批准密钥丢失须重新批准，最终 Phase 4 Heavy 和真实业务角色仍待后续工单。
+
+- 2026-09-29 TASK-032 隔离角色编排在候选 `7233571` 通过独立 V/R；准备阶段诊断与运行阶段均限制未受信任 Provider 的外部写入，真实 Codex 探针通过。TASK-030/031 在同 HEAD 重绑通过；Phase 4 Heavy 与真实业务角色仍待后续工单。
+- 2026-09-29 TASK-036 Spring T2 与 v2 Gate Planner 在 `af57702` 独立 V/R PASS；真实 Maven/Gradle Gate、契约完整性、环境和候选漂移、完整报告清单均定向复核。TASK-030/031/032 在同 HEAD 重绑 PASS；最终波次 Heavy 尚待验收。
+- 2026-09-29 TASK-027 执行事件协议在 `e399565` 独立 V/R PASS；并发写入、身份与 Secret 校验、确认等待故障恢复及 Task/Review 主路径已定向验收。FEAT-009 的页面与最终 Heavy 仍在后续工单。
+- 2026-09-29 TASK-028 本地执行观察面在 `4366ed8` 独立技术 V/R 和真实 Chrome 功能重新绑定通过；当前 revision 的人工视觉 Review 待用户，FEAT-009 与 Phase 4 Heavy 尚未关闭。
+- 2026-09-29 TASK-038 统一本机成品出口在 `eca847d` 独立 Light V/R PASS；点点助手 0.2.0 APK 与源构建物哈希一致。版本目录未入 Git，未声称真机验收或由候选 HEAD 重构。
+- 2026-09-29 TASK-039 目标规格 Task 文件名兼容在 `eca847d` 独立 Light V/R PASS；海工 live TASK-001 只有一份带名称规格，运行任务绑定该真实路径。
+- 2026-09-29 TASK-040 M linked-worktree Git 管理目录最小写根在 `eca847d` 独立 Light V/R PASS；路径逃逸拒绝、参数去重和 V/R 隔离均定向复核。
+- 2026-09-29 TASK-041 候选质量兼容在 `eca847d` 独立 Light V/R PASS；公开示例配置和 CRLF 可用，真实敏感文件与尾随空格继续拒绝。
+- 2026-09-29 TASK-042 v2 Controlled V 自动冻结在 `eca847d` 独立 Light V/R PASS；缺失旧 Harness state 可安全生成 collect 证据，漂移和脏树继续拒绝。
+- 2026-09-29 TASK-043 仓库 Bash Gate 在 `4366ed8` 独立 Light V/R PASS；完整 P 契约与当前 Run 绑定，实际解释器和 PATH 固定，伪契约及假程序绕过已关闭。真实海工 Gate 和最终 Heavy 仍待各自验证。
 
 ## 变更记录
 

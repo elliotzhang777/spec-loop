@@ -86,16 +86,16 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
-> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。2026-09-04，用户批准将剩余工单统一对齐最新版 P/M/V/R v2 架构并开始批次实施，范围为 TASK-027～037 的规格、实现和快速反馈检查。正式 V/R、完整 Gate、Heavy/阶段验收、merge、push、deploy 仍分别需要当前稳定候选上的明确授权。
+> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。2026-09-04，用户批准将剩余工单统一对齐最新版 P/M/V/R v2 架构并开始批次实施，范围为 TASK-027～037 的规格、实现和快速反馈检查。原授权为实现与快速反馈。2026-09-26 用户将确认收敛到末尾：已批准 Task/波次范围、权限、Gate 计划与预算内的实现和正式 V/R 可连续修复复验；HEAD 变化重新绑定验证证据，不重复申请执行授权。Heavy/视觉/阶段验收及 merge、push、deploy 等动作汇总最终清单，仍需明确决定后执行。
 
 ### Phase 4 实施批次
 
 | 批次 | 目标 | 工单 | 进入条件 | 当前状态 |
 |---|---|---|---|---|
-| P4-B1 | v1 在途兼容收口与 v2 内核验证就绪 | TASK-027、TASK-028、TASK-030 | 已具备 | 进行中 |
-| P4-B2 | 新任务 v2 接入、角色物理隔离与 v2 观察面 | TASK-031～TASK-033 | TASK-030 正式 V/R PASS；TASK-027/028 收口 | 已批准，依赖阻塞 |
-| P4-B3 | report-only Scheduler、Lease/Pause/Kill 与 Spring Gate Planner | TASK-034～TASK-036 | TASK-032 完成；Scheduler 先证明 report-only 稳定 | 已批准，依赖阻塞 |
-| P4-B4 | 执行视图、飞书与 Phase 4 最终 Heavy | TASK-026、TASK-029、TASK-037 | 前置 Task 完成、真实配置就绪、另获正式验证授权 | 已批准，依赖阻塞 |
+| P4-B1 | v1 在途兼容收口与 v2 内核验证就绪 | TASK-027、TASK-028、TASK-030 | TASK-027 在 `e399565` 独立 V/R PASS；TASK-030 在 `af57702` 重绑 PASS；TASK-028 在 `4366ed8` 技术 V/R PASS、人工视觉待决定 | 进行中 |
+| P4-B2 | 新任务 v2 接入、角色物理隔离与 v2 观察面 | TASK-031～TASK-033 | TASK-031/032 在 `af57702` 独立 V/R 重绑 PASS；TASK-033 与观察面依赖待收口 | 进行中 |
+| P4-B3 | report-only Scheduler、Lease/Pause/Kill 与 Spring Gate Planner | TASK-034～TASK-036 | TASK-034/035/036 已完成；最终波次全量验证仍由 Heavy Task 执行 | 进行中 |
+| P4-B4 | 执行视图、飞书与 Phase 4 最终 Heavy | TASK-026、TASK-029、TASK-037 | 前置 Task 完成、真实配置就绪、最终 Heavy/阶段验收获得明确决定 | 已批准，依赖阻塞 |
 
 批次只表达依赖和去重边界，不允许跳过单个 Task 的 P Contract、稳定 HEAD、独立 V/R 或人工门禁。P4-B1 中 TASK-027/028 按 v1 兼容收口，不中途迁移；所有未开始的新工单使用 v2。
 
@@ -116,7 +116,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 - Controller 从契约、HEAD、diff 和工程 Toolchain 编译不可降级的验收计划；
 - V 独立执行 Playwright、API、单测等验收并分类实现、环境、规格和高风险失败；
 - V PASS 后 R 才能独立复核结论与 Evidence，R 不替代 V 执行测试；
-- M/V/R 共用初次执行后最多 2 次语义返工，基础设施重试单独有界；
+- 在途单任务 M/V/R 保留原有语义返工预算；新完整波次先做完 M，再统一 V/R，最多一轮集中修复和一次复验。基础设施重试不得形成第三轮波次验证；
 - 预算耗尽或冲突生成 Conflict Record/Review Inbox 并进入 `waiting_human_review`；
 - 普通独立 Task 可暂挂并继续其他 Ready Task，下游、关键路径和高风险任务按规则阻塞或立即升级。
 

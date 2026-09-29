@@ -10,13 +10,14 @@ export interface ManagedProcessResult {
   outputTruncated: boolean;
   termination_verified: boolean;
   pipe_drain_timed_out: boolean;
+  identity_error: string | null;
 }
 
 export interface ManagedProcessHandle {
   child: ChildProcess;
   processStartedAt: Promise<string | null>;
   completion: Promise<ManagedProcessResult>;
-  terminate(options?: { timedOut?: boolean; graceMs?: number }): Promise<boolean>;
+  terminate(options?: { timedOut?: boolean; graceMs?: number; timeoutMs?: number }): Promise<boolean>;
 }
 
 export interface ManagedProcessOptions {
@@ -30,6 +31,10 @@ export interface ManagedProcessOptions {
   maxCaptureBytes?: number;
   onStdout?: (chunk: Buffer) => void;
   onStderr?: (chunk: Buffer) => void;
+  identifyProcess?: typeof processStartedAt;
+  terminationTimeoutMs?: number;
+  terminationGraceMs?: number;
+  detached?: boolean;
   spawnOptions?: Omit<SpawnOptions, 'cwd' | 'env' | 'stdio' | 'detached'>;
 }
 
@@ -41,15 +46,17 @@ export function startManagedProcess(options: ManagedProcessOptions): ManagedProc
     ...options.spawnOptions,
     cwd: options.cwd,
     env: options.env,
-    detached: process.platform !== 'win32',
+    detached: options.detached ?? process.platform !== 'win32',
     stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
-  const identity = child.pid ? processStartedAt(child.pid) : Promise.resolve(null);
+  const identity = child.pid ? (options.identifyProcess ?? processStartedAt)(child.pid, Math.min(5_000, options.timeoutMs)) : Promise.resolve(null);
   let stdout = '', stderr = '', stdoutBytes = 0, stderrBytes = 0, outputTruncated = false;
   let timedOut = false, settled = false, rootExited = false, terminationVerified = false, pipeDrainTimedOut = false;
   let exitCode: number | null = null, exitSignal: NodeJS.Signals | null = null;
+  let identityError: string | null = null;
   let executionTimer: NodeJS.Timeout, drainTimer: NodeJS.Timeout | undefined;
   let resolveCompletion!: (result: ManagedProcessResult) => void;
+  let terminationWork: Promise<boolean> | null = null;
 
   const collect = (target: 'stdout' | 'stderr', chunk: Buffer) => {
     const used = target === 'stdout' ? stdoutBytes : stderrBytes, remaining = Math.max(0, captureLimit - used);
@@ -63,9 +70,10 @@ export function startManagedProcess(options: ManagedProcessOptions): ManagedProc
     settled = true;
     clearTimeout(executionTimer); if (drainTimer) clearTimeout(drainTimer);
     resolveCompletion({
-      code: timedOut ? 124 : (exitCode ?? 1), signal: exitSignal, stdout, stderr, timedOut, outputTruncated,
+      code: timedOut ? 124 : identityError ? 125 : (exitCode ?? 1), signal: exitSignal, stdout, stderr, timedOut, outputTruncated,
       termination_verified: terminationVerified || rootExited,
       pipe_drain_timed_out: pipeDrainTimedOut,
+      identity_error: identityError,
     });
   };
   const beginDrainDeadline = () => {
@@ -77,13 +85,18 @@ export function startManagedProcess(options: ManagedProcessOptions): ManagedProc
       finish();
     }, drainMs);
   };
-  const terminate = async (request: { timedOut?: boolean; graceMs?: number } = {}) => {
+  const terminate = async (request: { timedOut?: boolean; graceMs?: number; timeoutMs?: number } = {}) => {
     if (request.timedOut) timedOut = true;
-    if (settled || rootExited) { terminationVerified = true; beginDrainDeadline(); return true; }
-    const result = await terminateProcessTree(child.pid, await identity, request.graceMs ?? 1_000);
-    terminationVerified = result.stopped;
-    beginDrainDeadline();
-    return result.stopped;
+    if (rootExited || terminationVerified) { beginDrainDeadline(); return true; }
+    if (terminationWork) return terminationWork;
+    terminationWork = (async () => {
+      const result = await terminateProcessTree(child.pid, await identity, request.graceMs ?? options.terminationGraceMs ?? 1_000,
+        { timeoutMs: request.timeoutMs ?? options.terminationTimeoutMs });
+      terminationVerified ||= result.stopped || rootExited;
+      beginDrainDeadline();
+      return terminationVerified;
+    })().finally(() => { terminationWork = null; });
+    return terminationWork;
   };
 
   const completion = new Promise<ManagedProcessResult>((resolve) => {
@@ -95,6 +108,22 @@ export function startManagedProcess(options: ManagedProcessOptions): ManagedProc
     child.on('close', (code, signal) => { rootExited = true; terminationVerified = true; exitCode ??= code; exitSignal ??= signal; finish(); });
     executionTimer = setTimeout(() => { void terminate({ timedOut: true }); }, options.timeoutMs);
     if (options.input !== undefined) child.stdin?.end(options.input);
+  });
+  // Fast commands may finish before ps sees them. Only an unidentifiable live
+  // child is rejected. Never publish its result as a successful managed run.
+  void identity.then(startedAt => {
+    if (startedAt || rootExited || settled) return;
+    identityError = 'cannot establish managed child process start identity';
+    stderr = `${stderr}\n${identityError}`.trim();
+    // This ChildProcess is owned by this spawn and has not reported exit. Use
+    // its direct handle; do not signal an unverified PID/process group.
+    child.kill('SIGKILL');
+    beginDrainDeadline();
+  }).catch(error => {
+    if (rootExited || settled) return;
+    identityError = `cannot establish managed child process start identity: ${(error as Error).message}`;
+    stderr = `${stderr}\n${identityError}`.trim();
+    child.kill('SIGKILL'); beginDrainDeadline();
   });
   return { child, processStartedAt: identity, completion, terminate };
 }

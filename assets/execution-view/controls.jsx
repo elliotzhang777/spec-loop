@@ -22,6 +22,10 @@ import {
   Tag,
   Timeline,
   Tooltip,
+  Table,
+  Input,
+  Checkbox,
+  Image,
   theme,
 } from 'antd';
 import { AimOutlined, ApartmentOutlined, LeftOutlined } from '@ant-design/icons';
@@ -236,7 +240,7 @@ function TaskInspector() {
       title={<div><span className="antd-kicker">TASK INSPECTOR</span><strong>{task.title}</strong></div>}
       extra={<Tag color={statusColors[task.status]}>{task.statusLabel}</Tag>}
     >
-      <Descriptions size="small" column={2} items={task.metrics} />
+      <Descriptions size="small" layout="vertical" column={1} items={task.metrics} />
       {timelineItems.length ? <Timeline className="antd-step-timeline" items={timelineItems} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无步骤事件" />}
       {task.diagnostics.length > 0 && <Alert showIcon type="warning" message="Task 数据提示" description={<ul>{task.diagnostics.map((item) => <li key={item}>{item}</li>)}</ul>} />}
     </Card>
@@ -299,6 +303,108 @@ function TaskControls() {
   );
 }
 
+function WaveReview() {
+  const project = useControlState('project-controls', { value: 'root' }).value ?? 'root';
+  const [items, setItems] = useState([]), [selected, setSelected] = useState(null), [record, setRecord] = useState(null);
+  const [reload, setReload] = useState(0), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null), [message, setMessage] = useState(null);
+  const [actor, setActor] = useState(''), [note, setNote] = useState(''), [choices, setChoices] = useState({}), [next, setNext] = useState(false);
+  const query = (extra = {}) => new URLSearchParams({ project, ...extra }).toString();
+  const readResponse = async (response) => { const value = await response.json(); if (!response.ok) throw new Error(value.error ?? '请求失败'); return value; };
+  useEffect(() => {
+    const abort = new AbortController(); setItems([]); setRecord(null); setSelected(null); setError(null); setMessage(null); setLoading(true);
+    fetch(`/api/wave-reviews?${query()}`, { signal: abort.signal }).then(readResponse).then((values) => {
+      setItems(values); setSelected(values.find(item => ['awaiting_wave_review', 'applying'].includes(item.status))?.wave_id ?? values.find(item => item.status === 'reviewed')?.wave_id ?? null);
+    }).catch(err => { if (!abort.signal.aborted) setError(err.message); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    return () => abort.abort();
+  }, [project, reload]);
+  useEffect(() => {
+    if (!selected) return;
+    const abort = new AbortController(); setRecord(null); setChoices({}); setNext(false); setLoading(true);
+    fetch(`/api/wave-review?${query({ wave: selected })}`, { signal: abort.signal }).then(readResponse).then(value => { setRecord(value); if(value.decision){ setActor(value.decision.actor);setNote(value.decision.note);setNext(value.decision.authorize_next);setChoices(Object.fromEntries(value.decision.choices.map(choice => [choice.task_id, {...choice, visual_accepted: choice.visual.some(item => item.result === 'approved')}]))); } })
+      .catch(err => { if (!abort.signal.aborted) setError(err.message); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    return () => abort.abort();
+  }, [project, selected, reload]);
+  const change = (id, value) => setChoices(current => ({ ...current, [id]: { ...current[id], ...value } }));
+  const mutation = async (route, body) => readResponse(await fetch(`/api/wave-review/${route}?${query()}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Loop-Review-Token': document.querySelector('meta[name="review-token"]')?.content ?? '' }, body: JSON.stringify(body),
+  }));
+  const refresh = async () => {
+    setBusy(true); setError(null);
+    try { const value = await mutation('refresh', { wave_id: selected }); const values = await readResponse(await fetch(`/api/wave-reviews?${query()}`)); setItems(values); setSelected(value.bundle.wave_id); }
+    catch(err) { setError(err.message); } finally { setBusy(false); }
+  };
+  const submit = async () => {
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const selectedChoices = record.bundle.tasks.map(item => {
+        const choice = choices[item.task_id] ?? { action: 'defer' };
+        return { task_id: item.task_id, action: choice.action ?? 'defer', reauthorize_budget: Boolean(choice.reauthorize_budget), heavy_accepted: Boolean(choice.heavy_accepted),
+          visual: choice.visual_accepted ? item.facts.visual.filter(review => review.status === 'pending').map(review => ({ review_id: review.review_id, request_hash: review.request_hash, result: 'approved' })) : [] };
+      });
+      const boundDecision = record.decision ? Object.fromEntries(['bundle_hash', 'request_id', 'actor', 'note', 'choices', 'authorize_next', 'next_plan_hash'].filter(key => record.decision[key] !== undefined).map(key => [key, record.decision[key]])) : {
+        bundle_hash: record.bundle.bundle_hash, request_id: record.decision?.request_id ?? crypto.randomUUID(), actor, note, choices: selectedChoices,
+        authorize_next: next && hasReturned, ...(next && hasReturned ? { next_plan_hash: record.bundle.next_plan.plan_hash } : {}),
+      };
+      const value = await mutation('decision', { wave_id: selected, start_next: boundDecision.authorize_next, decision: boundDecision });
+      setRecord(value.review); setItems(current => current.map(item => item.wave_id === selected ? { ...item, status: value.review.status } : item)); setMessage(value.next ? '统一决定已记录，下一波已启动。' : '统一决定已记录；候选尚未合并或发布。');
+    } catch(err) { setError(err.message); } finally { setBusy(false); }
+  };
+  const expired = record && record.status !== 'applying' && Date.parse(record.bundle.expires_at) <= Date.now();
+  const tasks = record?.bundle.tasks ?? [], locked = record?.status === 'applying', editable = record?.status !== 'reviewed';
+  const hasReturned = tasks.some(item => ['return_to_m', 'continue'].includes(choices[item.task_id]?.action));
+  const recordedDecision = id => record?.status === 'reviewed' ? ({ accept: '已接受候选', return_to_m: '已退回修复', continue: '已批准继续', defer: '已暂缓' })[record.decision?.choices.find(choice => choice.task_id === id)?.action] : null;
+  const columns = [
+    { title: '任务与候选', key: 'task', width: 210, render: (_, item) => <Space direction="vertical" size={2}><strong>{item.task_id}</strong><span>{item.facts?.title ?? '事实尚未就绪'}</span><code>{item.facts?.head?.slice(0, 12) ?? '尚无稳定提交'}</code></Space> },
+    { title: '验证与待决事项', key: 'status', width: 210, render: (_, item) => <Space direction="vertical" size={2}>
+      <Tag color={recordedDecision(item.task_id) ? 'blue' : item.outcome === 'candidate' ? 'green' : item.outcome === 'invalid' ? 'red' : 'orange'}>{recordedDecision(item.task_id) ?? ({ candidate: 'V/R 已通过，待统一验收', needs_user: '需要最终决定', invalid: '事实失配，需重新绑定', unfinished: '尚未完成' })[item.outcome]}</Tag>
+      <span>{item.facts?.records.map(result => `${result.role}: ${result.verdict === 'pass' ? '通过' : '未通过'}`).join(' · ') || '暂无完整 V/R 结论'}</span>
+      {item.failures.length > 0 && <span>本波失败 / 修复记录：{item.failures.length}</span>}
+    </Space> },
+    { title: '耗时与费用', key: 'usage', width: 140, render: (_, item) => <Space direction="vertical" size={2}><span>{item.elapsed_ms == null ? '耗时未记录' : `${(item.elapsed_ms / 1000).toFixed(1)} 秒`}</span><span>{item.usage.tokens.toLocaleString()} Token</span><span>{item.usage.recorded ? `$${item.usage.cost_usd.toFixed(4)}` : '费用未核实'}</span></Space> },
+    { title: '最终决定', key: 'decision', width: 240, render: (_, item) => {
+      const choice = choices[item.task_id] ?? { action: 'defer' };
+      return <Space direction="vertical" size={6}><Select aria-label={`${item.task_id} 最终决定`} style={{ width: 220 }} value={choice.action ?? 'defer'} disabled={!editable || locked || busy} onChange={action => change(item.task_id, { action, reauthorize_budget: false, heavy_accepted: false, visual_accepted: false })} options={[
+        { value: 'defer', label: '暂缓确认' }, { value: 'accept', label: '接受候选（暂不合并）', disabled: item.outcome !== 'candidate' }, { value: 'continue', label: '按原范围继续 / 复验', disabled: !item.facts || !['m_working', 'm_submitted', 'plan_compiled', 'v_passed'].includes(item.facts.stage) }, { value: 'return_to_m', label: '退回修复', disabled: !item.facts || !['candidate', 'waiting_human_review', 'plan_compiled', 'v_passed', 'm_working'].includes(item.facts.stage) },
+      ]} />
+        {choice.action === 'return_to_m' && <Checkbox checked={choice.reauthorize_budget} disabled={!editable || locked || busy} onChange={e => change(item.task_id, { reauthorize_budget: e.target.checked })}>重新批准原返工预算</Checkbox>}
+        {choice.action === 'accept' && item.facts.risk === 'heavy' && <Checkbox checked={choice.heavy_accepted} disabled={!editable || locked || busy} onChange={e => change(item.task_id, { heavy_accepted: e.target.checked })}>我已完成本任务 Heavy 人工验收</Checkbox>}
+        {choice.action === 'accept' && item.facts.visual.some(review => review.status === 'pending') && <Checkbox checked={choice.visual_accepted} disabled={!editable || locked || busy} onChange={e => change(item.task_id, { visual_accepted: e.target.checked })}>我已查看截图并接受视觉效果</Checkbox>}
+      </Space>;
+    } },
+  ];
+  return <Card title="波次末统一验收" className="wave-review-panel" extra={<Button disabled={busy} onClick={() => setReload(value => value + 1)}>刷新列表</Button>}>
+    <p>范围内的实现、修复和 V/R 连续推进；最终在这里一起审阅候选与待决事项。</p>
+    {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+    {message && <Alert type="success" showIcon message={message} style={{ marginBottom: 12 }} />}
+    {loading && <Spin />}
+    {items.some(item => item.status === 'invalid') && <Alert type="warning" showIcon message="部分验收记录损坏，已单独标记；其余波次可继续验收。" />}
+    {items.length > 0 && <Space wrap style={{ marginBottom: 12 }}><Select aria-label="选择待验收执行波次" style={{ width: 330 }} value={selected} onChange={setSelected} options={items.map(item => ({ value: item.wave_id, disabled: item.status === 'invalid', label: `${item.status === 'invalid' ? '记录损坏' : new Date(item.created_at).toLocaleString()} · ${item.task_total} 项 · ${item.status === 'invalid' ? item.wave_id : item.status === 'reviewed' ? '已记录决定' : '待验收'}` }))} /><Button disabled={busy || !record || record.status === 'applying'} onClick={refresh}>重新绑定当前候选</Button></Space>}
+    {!loading && !items.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有执行结束的待验收波次" />}
+    {record && <>
+      {expired && <Alert type="warning" message="清单已过期，请重新绑定当前候选后再提交。" />}
+      {record.bundle.execution_mode === 'batch_two_rounds' && <Alert type={record.bundle.execution_status === 'completed' ? 'info' : 'warning'} showIcon style={{ marginBottom: 12 }} message={`整波验证 ${record.bundle.verification_round ?? 0}/${record.bundle.max_verification_rounds ?? 2} 轮 · ${record.bundle.execution_status === 'completed' ? '已通过' : '仍有待处理'}`} description={record.bundle.block_reason ?? '请查看任务行中的候选、待确认事项和证据。'} />}
+      <p>本波 {tasks.length} 项 · 原执行结果：{({ completed: '已结束', completed_with_failures: '已结束，包含失败记录', usage_unknown: '费用或用量未核实', budget_stopped: '已达预算上限', stop_incomplete: '停止尚未核实' })[record.bundle.execution_status] ?? record.bundle.execution_status} · 清单有效至 {new Date(record.bundle.expires_at).toLocaleString()}</p>
+      <Table rowKey="task_id" dataSource={tasks} columns={columns} pagination={false} scroll={{ x: 800 }} expandable={{ expandedRowRender: item => <Space direction="vertical" style={{ width: '100%' }}>
+        {item.diagnostics.map((text, index) => <Alert key={index} type="warning" message={text} />)}
+        <strong>验收标准与证据</strong>
+        {item.facts?.criteria.map(criterion => <div key={criterion.id}>{criterion.id}：{criterion.text}</div>)}
+        {item.facts?.records.map(result => <div key={result.role}>{result.role} 证据：{result.evidence.map(evidence => evidence.file).join('、')}</div>)}
+        {item.failures.map((text, index) => <div key={index}>失败 / 修复：{text}</div>)}
+        {item.facts?.visual.flatMap(review => review.artifacts.map(artifact => <figure key={artifact.sha256}><Image width={260} src={`/api/review-artifact?${query({ wave: selected, task: item.task_id, hash: artifact.sha256 })}`} alt={`${item.task_id} ${review.review_id} 验收截图`} /><figcaption>{review.review_id} · {review.status === 'approved' ? '已接受视觉效果' : '待视觉审阅'}</figcaption></figure>))}
+      </Space> }} />
+      {editable && <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+        <Space wrap><Input aria-label="验收人" placeholder="验收人" value={actor} onChange={e => setActor(e.target.value)} disabled={locked || busy} style={{ width: 180 }} /><Input aria-label="统一验收说明" placeholder="统一验收说明（至少 3 个字）" value={note} onChange={e => setNote(e.target.value)} disabled={locked || busy} style={{ width: 400, maxWidth: '100%' }} /></Space>
+        {hasReturned && <p>下一波仅执行：{tasks.filter(item => ['return_to_m', 'continue'].includes(choices[item.task_id]?.action)).map(item => item.task_id).join('、')}。上限：{record.bundle.next_plan.budget.max_parallel} 路并发、{record.bundle.next_plan.budget.max_elapsed_seconds} 秒、{record.bundle.next_plan.budget.max_tokens.toLocaleString()} Token、${record.bundle.next_plan.budget.max_cost_usd}。</p>}
+        {hasReturned && record.bundle.next_plan.gate_plan && <Collapse style={{ width: '100%' }} items={[{ key: 'next-gates', label: '下一波自动验证计划', children: <Space direction="vertical"><span>覆盖范围：{record.bundle.next_plan.gate_plan.coverage === 'targeted' ? '任务定向验证' : '全量验证'}</span>{record.bundle.next_plan.gate_plan.gates.map(gate => <div key={gate.id}><strong>{gate.id}</strong> · {gate.timeout_seconds} 秒 · <code>{gate.command?.join(' ') ?? `Playwright ${(gate.tests ?? []).join(' ')}`}</code></div>)}</Space> }]} />}
+        <Checkbox checked={next && hasReturned} disabled={locked || !hasReturned || busy} onChange={e => setNext(e.target.checked)}>批准待执行任务的下一波计划并恢复调度（沿用当前范围和预算）</Checkbox>
+        <Button type="primary" disabled={busy || expired || actor.trim().length < 2 || note.trim().length < 3} loading={busy} onClick={submit}>{next && hasReturned ? '提交统一验收并继续下一波' : '提交统一验收'}</Button>
+      </Space>}
+      {!editable && <Space direction="vertical" style={{ marginTop: 12 }}><Alert type="info" message={`决定已由 ${record.decision.actor} 记录。未接受项仍保留现场；合并和发布需另行明确决定。`} />{record.decision.authorize_next && <Button disabled={busy} loading={busy} onClick={submit}>启动已批准的下一波</Button>}</Space>}
+    </>}
+  </Card>;
+}
+
 function ExecutionLayout() {
   const state = useControlState('execution-layout', { switching: false, error: null });
   return (
@@ -334,6 +440,7 @@ function ExecutionLayout() {
 
           <Content className="execution-content">
             <section id="global-overview-control" aria-label="AIRFLOW OVERVIEW 全局执行总览"><GlobalOverview /></section>
+            <section aria-label="波次统一验收"><WaveReview /></section>
 
             <section className="workflow-wrap" aria-labelledby="workflow-heading">
               <div className="subsection-heading">
@@ -421,9 +528,12 @@ window.ExecutionAntd = {
       </Empty>
     ));
   },
-  mountAlert(host, { message, descriptions, type = 'warning' }) {
+  mountAlert(host, { message, descriptions, type = 'warning', collapsible = false }) {
     const description = Array.isArray(descriptions)
-      ? <ul>{descriptions.map((item) => <li key={item}>{item}</li>)}</ul>
+      ? collapsible && descriptions.length > 3
+        ? <><ul>{descriptions.slice(0, 3).map((item, index) => <li key={index}>{item}</li>)}</ul>
+          <Collapse ghost size="small" items={[{ key: 'remaining', label: `查看其余 ${descriptions.length - 3} 条`, children: <ul>{descriptions.slice(3).map((item, index) => <li key={index}>{item}</li>)}</ul> }]} /></>
+        : <ul>{descriptions.map((item, index) => <li key={index}>{item}</li>)}</ul>
       : descriptions;
     renderInto(host, <Alert showIcon type={type} message={message} description={description} />);
   },

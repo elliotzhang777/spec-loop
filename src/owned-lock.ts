@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { processStartedAt } from './process-control.js';
+import { processStartedAt, inspectProcess } from './process-control.js';
 
 const ownerSchema = z.object({
   schema_version: z.literal(1),
@@ -18,12 +18,14 @@ export type OwnedLockReclaimReason = 'dead_process' | 'pid_reused' | 'missing_ow
 
 export interface OwnedDirectoryLockOptions {
   name: string;
+  signal?: AbortSignal;
   maxWaitMs?: number;
   pollMs?: number;
   missingOwnerProtectionMs?: number;
   mode?: number;
   telemetryFile?: string;
   busyMessage?: string;
+  identifyProcess?: typeof processStartedAt;
 }
 
 export interface OwnedDirectoryLock {
@@ -40,7 +42,7 @@ export interface OwnedLockInspection {
   owner: OwnedLockOwner | null;
   owner_age_ms: number | null;
   process_alive: boolean | null;
-  reason: 'absent' | 'owned' | 'legacy_owner' | 'dead_process' | 'pid_reused' | 'missing_owner' | 'invalid_owner' | 'invalid_path';
+  reason: 'absent' | 'owned' | 'legacy_owner' | 'dead_process' | 'pid_reused' | 'missing_owner' | 'invalid_owner' | 'invalid_path' | 'identity_unknown';
 }
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -89,7 +91,7 @@ async function persistTelemetry(file: string | undefined, value: Record<string, 
   } catch { /* telemetry must never compromise lock safety */ }
 }
 
-export async function inspectOwnedDirectoryLock(directory: string): Promise<OwnedLockInspection> {
+export async function inspectOwnedDirectoryLock(directory: string, identifyProcess = observedProcessStartedAt): Promise<OwnedLockInspection> {
   const info = await lstat(directory).catch(() => null);
   if (!info) return { exists: false, valid: true, owner: null, owner_age_ms: null, process_alive: null, reason: 'absent' };
   if (!info.isDirectory() || info.isSymbolicLink()) return { exists: true, valid: false, owner: null, owner_age_ms: Math.max(0, Date.now() - info.mtimeMs), process_alive: null, reason: 'invalid_path' };
@@ -101,17 +103,18 @@ export async function inspectOwnedDirectoryLock(directory: string): Promise<Owne
   catch {
     const legacy=parsed as {pid?:unknown;process_started_at?:unknown;created_at?:unknown;acquired_at?:unknown};
     if(Number.isInteger(legacy?.pid)&&(legacy.pid as number)>0){
-      const actual=await observedProcessStartedAt(legacy.pid as number),expected=typeof legacy.process_started_at==='string'?legacy.process_started_at:null;
+      const expected=typeof legacy.process_started_at==='string'?legacy.process_started_at:null,probe=await inspectProcess(legacy.pid as number,expected,{identifyProcess}),actual=probe.started_at;
       const created=typeof legacy.created_at==='string'?legacy.created_at:typeof legacy.acquired_at==='string'?legacy.acquired_at:null;
       const age=created&&Number.isFinite(Date.parse(created))?Math.max(0,Date.now()-Date.parse(created)):Math.max(0,Date.now()-info.mtimeMs);
-      if(!actual)return{exists:true,valid:false,owner:null,owner_age_ms:age,process_alive:false,reason:'dead_process'};
+      if(probe.status==='unknown')return{exists:true,valid:false,owner:null,owner_age_ms:age,process_alive:null,reason:'identity_unknown'};
+      if(probe.status==='dead')return{exists:true,valid:false,owner:null,owner_age_ms:age,process_alive:false,reason:'dead_process'};
       if(expected&&actual!==expected)return{exists:true,valid:false,owner:null,owner_age_ms:age,process_alive:true,reason:'pid_reused'};
       return{exists:true,valid:false,owner:null,owner_age_ms:age,process_alive:true,reason:'legacy_owner'};
     }
     return { exists: true, valid: false, owner: null, owner_age_ms: Math.max(0, Date.now() - info.mtimeMs), process_alive: null, reason: 'invalid_owner' };
   }
-  const actualStart = await observedProcessStartedAt(owner.pid), alive = actualStart !== null;
-  const reason = !alive ? 'dead_process' : actualStart !== owner.process_started_at ? 'pid_reused' : 'owned';
+  const probe = await inspectProcess(owner.pid,owner.process_started_at,{identifyProcess}), alive = probe.status==='unknown'?null:probe.status!=='dead';
+  const reason = probe.status==='unknown'?'identity_unknown':probe.status==='dead'?'dead_process':probe.status==='identity_mismatch'?'pid_reused':'owned';
   return { exists: true, valid: reason === 'owned', owner, owner_age_ms: Math.max(0, Date.now() - Date.parse(owner.created_at)), process_alive: alive, reason };
 }
 
@@ -126,7 +129,7 @@ async function quarantine(directory: string): Promise<boolean> {
   return true;
 }
 
-async function acquireRecoveryMutex(directory: string, protectionMs: number, outerDeadline: number, abort?:()=>Promise<boolean>): Promise<(() => Promise<void>) | null> {
+async function acquireRecoveryMutex(directory: string, protectionMs: number, outerDeadline: number, abort?:()=>Promise<boolean>, identifyProcess = observedProcessStartedAt): Promise<(() => Promise<void>) | null> {
   const recovery = `${directory}.recovery`, claimed = `${recovery}.claimed`;
   const processStart = await observedProcessStartedAt(process.pid);
   if (!processStart) throw new Error(`cannot establish recovery owner identity for ${directory}`);
@@ -150,8 +153,8 @@ async function acquireRecoveryMutex(directory: string, protectionMs: number, out
     const raw = await readFile(recovery, 'utf8').catch(() => null);
     const existing = raw ? (() => { try { return ownerSchema.parse(JSON.parse(raw)); } catch { return null; } })() : null;
     const age = Math.max(0, Date.now() - (existing ? Date.parse(existing.created_at) : info.mtimeMs));
-    const alive = existing ? await observedProcessStartedAt(existing.pid) : null;
-    const stale = age >= protectionMs && (!existing || !alive || alive !== existing.process_started_at);
+    const probe = existing ? await inspectProcess(existing.pid,existing.process_started_at,{identifyProcess}) : null;
+    const stale = age >= protectionMs && (!existing || probe?.status==='dead' || probe?.status==='identity_mismatch');
     if (stale) {
       let claimedByUs=false;
       try {
@@ -170,13 +173,13 @@ async function acquireRecoveryMutex(directory: string, protectionMs: number, out
   }
 }
 
-async function reclaimIfUnchanged(directory: string, expected: LockFingerprint | null, reason: OwnedLockReclaimReason, protectionMs: number, outerDeadline: number): Promise<boolean> {
-  const releaseRecovery = await acquireRecoveryMutex(directory, protectionMs,outerDeadline,async()=>!sameFingerprint(expected,await lockFingerprint(directory)));
+async function reclaimIfUnchanged(directory: string, expected: LockFingerprint | null, reason: OwnedLockReclaimReason, protectionMs: number, outerDeadline: number, identifyProcess = observedProcessStartedAt): Promise<boolean> {
+  const releaseRecovery = await acquireRecoveryMutex(directory, protectionMs,outerDeadline,async()=>!sameFingerprint(expected,await lockFingerprint(directory)),identifyProcess);
   if(!releaseRecovery)return false;
   try {
     const currentFingerprint = await lockFingerprint(directory);
     if (!sameFingerprint(expected, currentFingerprint)) return false;
-    const inspection = await inspectOwnedDirectoryLock(directory);
+    const inspection = await inspectOwnedDirectoryLock(directory,identifyProcess);
     if (inspection.reason !== reason) return false;
     if ((reason === 'missing_owner' || reason === 'invalid_owner') && (inspection.owner_age_ms ?? 0) < protectionMs) return false;
     return quarantine(directory);
@@ -195,6 +198,7 @@ async function releaseIfOwned(directory: string, owner: OwnedLockOwner, protecti
 }
 
 export async function acquireOwnedDirectoryLock(directory: string, options: OwnedDirectoryLockOptions): Promise<OwnedDirectoryLock> {
+  options.signal?.throwIfAborted();
   const maxWaitMs = options.maxWaitMs ?? 10_000, pollMs = options.pollMs ?? 10;
   const missingOwnerProtectionMs = options.missingOwnerProtectionMs ?? 5_000;
   if (!options.name.trim()) throw new Error('owned directory lock name is required');
@@ -205,6 +209,7 @@ export async function acquireOwnedDirectoryLock(directory: string, options: Owne
   let reclaimedReason: OwnedLockReclaimReason | null = null;
   await mkdir(path.dirname(directory), { recursive: true });
   for (;;) {
+    options.signal?.throwIfAborted();
     let created = false;
     const owner = ownerSchema.parse({ schema_version: 1, name: options.name, pid: process.pid, process_started_at: processStart, nonce: randomUUID(), created_at: new Date().toISOString() });
     try {
@@ -230,13 +235,13 @@ export async function acquireOwnedDirectoryLock(directory: string, options: Owne
       }
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
-    const inspection = await inspectOwnedDirectoryLock(directory);
+    const inspection = await inspectOwnedDirectoryLock(directory,options.identifyProcess);
     const fingerprint = await lockFingerprint(directory);
     let reason: OwnedLockReclaimReason | null = null;
     if (inspection.reason === 'dead_process' || inspection.reason === 'pid_reused') reason = inspection.reason;
     if (inspection.reason === 'invalid_owner' && (inspection.owner_age_ms ?? 0) >= missingOwnerProtectionMs) reason = 'invalid_owner';
     if (inspection.reason === 'missing_owner' && (inspection.owner_age_ms ?? 0) >= missingOwnerProtectionMs) reason = 'missing_owner';
-    if (reason && await reclaimIfUnchanged(directory, fingerprint, reason, missingOwnerProtectionMs,deadline)) { reclaimedReason = reason; continue; }
+    if (reason && await reclaimIfUnchanged(directory, fingerprint, reason, missingOwnerProtectionMs,deadline,options.identifyProcess)) { reclaimedReason = reason; continue; }
     if (Date.now() >= deadline) {
       const waited = Math.max(0, Date.now() - started);
       await persistTelemetry(options.telemetryFile, { name: options.name, state: 'timeout', directory, owner: inspection.owner, wait_duration_ms: waited, last_reclaim_reason: reclaimedReason, error: `${options.name} lock wait exceeded ${maxWaitMs}ms`, updated_at: new Date().toISOString() });

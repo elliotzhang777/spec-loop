@@ -1,6 +1,8 @@
-import { access, lstat, mkdir, readFile, readdir } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { homedir } from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { atomicWriteAcrossRoots, atomicWriteMany, assertSubstantive, exists, readMarkdown, recoverCrossRootTransactions, sha256, stringifyMarkdown } from './files.js';
 import { readState } from './task.js';
@@ -8,23 +10,51 @@ import { initialFiles } from './templates.js';
 import { containsRealPlaceholder, loadTargetSpecBundle, type TargetSpecBundleAsset, type TargetSpecProfile } from './target-spec.js';
 import type { TaskState } from './model.js';
 import { runManagedProcess } from './managed-process.js';
+import { confinedProviderCommand } from './provider-sandbox.js';
 
 const risk = z.enum(['light', 'standard', 'heavy']);
 const taskProtocol = z.enum(['v1', 'v2']);
+const taskIdPattern = /^(?:WEB-)?TASK-[A-Z0-9][A-Z0-9-]*$/;
+const v2Stages = new Set(['m_working','m_submitted','plan_compiled','v_passed','candidate','waiting_human_review','blocked_external','cancelled']);
 export type TaskProtocol = z.infer<typeof taskProtocol>;
 export const projectSchema = z.object({ schema_version:z.literal(1), project_id:z.string().regex(/^PROJ-[A-Z0-9-]+$/), name:z.string().min(2), repository:z.string().min(1), spec_profile:z.enum(['standard','backend','frontend','fullstack']).default('standard'), spec_root:z.string().min(1).default('spec'), default_task_protocol:taskProtocol.default('v1'), default_branch:z.string().min(1), tasks_root:z.string().min(1), output_root:z.string().min(1), risk_level:risk, external_issue:z.string().nullable(), created_at:z.iso.datetime(), updated_at:z.iso.datetime() }).strict();
 export const projectStateSchema = z.object({ schema_version:z.literal(1), project_id:z.string(), state_version:z.number().int().positive(), current_goal:z.string(), next_action:z.string(), candidates:z.array(z.string()), ignored:z.array(z.object({ item:z.string(), reason:z.string() }).strict()), updated_at:z.iso.datetime() }).strict();
 const providerId=z.enum(['codex','claude-code','qoder']);
-const providerDefinition=z.object({enabled:z.boolean(),executable:z.string(),args:z.array(z.string()),timeout_seconds:z.number().int().positive(),idle_timeout_seconds:z.number().int().min(10).max(1800).default(300)}).strict();
+const providerDefinition=z.object({enabled:z.boolean(),executable:z.string(),args:z.array(z.string()),timeout_seconds:z.number().int().positive(),idle_timeout_seconds:z.number().int().min(10).max(1800).default(300),usage_mode:z.enum(['cumulative','incremental']).default('cumulative')}).strict();
 export const providerConfigSchema = z.object({ schema_version:z.literal(1), active_provider:providerId, role_providers:z.object({M:providerId,V:providerId,R:providerId}).strict().optional(), providers:z.object({ codex:providerDefinition, 'claude-code':providerDefinition, qoder:providerDefinition }).strict() }).strict();
 const proposalFields={proposal_id:z.string().regex(/^PROP-[1-9]\d*$/),project_id:z.string(),source:z.string().min(3),suggested_goal:z.string().min(3),risk_level:risk,priority:z.enum(['P0','P1','P2','P3']),reason:z.string().min(3),initial_acceptance:z.array(z.object({id:z.string().regex(/^AC-[1-9]\d*$/),text:z.string().min(3)}).strict()).min(1),created_at:z.iso.datetime()};
 const proposalSchema = z.discriminatedUnion('schema_version',[
   z.object({schema_version:z.literal(1),...proposalFields}).strict(),
   z.object({schema_version:z.literal(2),...proposalFields,acceptance_contract:z.unknown()}).strict(),
 ]);
-const approvalSchema = z.object({ schema_version:z.literal(1), approval_id:z.string().regex(/^APR-[1-9]\d*$/), proposal_id:z.string(), proposal_hash:z.string().length(64), approved_by:z.string().min(2), approved_at:z.iso.datetime(), expires_at:z.iso.datetime(), approved_scope:z.array(z.enum(['create_task','execute_in_worktree'])).min(1), risk_level:risk }).strict();
+const approvalFields = { approval_id:z.string().regex(/^APR-[1-9]\d*$/), proposal_id:z.string(), proposal_hash:z.string().length(64), approved_by:z.string().min(2), approved_at:z.iso.datetime(), expires_at:z.iso.datetime(), approved_scope:z.array(z.enum(['create_task','execute_in_worktree'])).min(1), risk_level:risk };
+const approvalSchema = z.discriminatedUnion('schema_version', [
+  z.object({ schema_version:z.literal(1), ...approvalFields }).strict(),
+  z.object({ schema_version:z.literal(2), ...approvalFields, contract_hash:z.string().length(64).nullable() }).strict(),
+]);
 
 const control=(root:string)=>path.join(root,'.spec-loop');
+const approvalKeyFile=()=>path.join(homedir(),'.config','spec-loop','approval-authority.key');
+async function approvalAuthorityKey(create:boolean):Promise<Buffer>{
+  const file=approvalKeyFile();
+  if(create){
+    await mkdir(path.dirname(file),{recursive:true,mode:0o700});
+    try{await writeFile(file,randomBytes(32),{flag:'wx',mode:0o600})}
+    catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error}
+  }
+  const info=await lstat(file);
+  if(!info.isFile()||info.isSymbolicLink()||(info.mode&0o077)!==0)throw new Error('approval authority key must be a private regular file');
+  const key=await readFile(file);
+  if(key.length!==32)throw new Error('approval authority key is invalid');
+  return key;
+}
+function approvalSignature(key:Buffer,root:string,content:string):string{
+  return createHmac('sha256',key).update(path.resolve(root)).update('\0').update(content).digest('hex');
+}
+function sameSignature(actual:string,expected:string):boolean{
+  if(!/^[a-f0-9]{64}$/.test(actual))return false;
+  return timingSafeEqual(Buffer.from(actual,'hex'),Buffer.from(expected,'hex'));
+}
 async function entryExists(file:string):Promise<boolean>{
   try{await lstat(file);return true}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error}
 }
@@ -178,17 +208,18 @@ export async function scanTasks(root:string):Promise<TaskIndex[]>{
     const taskRoot=path.join(dir,entry.name);
     if(!(await exists(path.join(taskRoot,'TASK_STATE.md'))))continue;
     const s=await readState(taskRoot),contractExists=await exists(path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md')),runPath=path.join(taskRoot,'ACCEPTANCE_RUN.json'),runExists=await exists(runPath);
+    if(!taskIdPattern.test(s.task_id)||entry.name!==s.task_id.toLowerCase())throw new Error('invalid Task identity in project');
     let protocol:TaskProtocol=contractExists||runExists?'v2':'v1',protocolStage:string|null=null,blockingReason:string|null=null;
     if(runExists){
       try{
         const run=JSON.parse(await readFile(runPath,'utf8')) as {protocol_version?:number;stage?:string;active_conflict_id?:string|null};
-        if(run.protocol_version!==2||typeof run.stage!=='string')throw new Error('invalid v2 run metadata');
+        if(run.protocol_version!==2||typeof run.stage!=='string'||!v2Stages.has(run.stage)||(run.active_conflict_id!=null&&typeof run.active_conflict_id!=='string'))throw new Error('invalid v2 run metadata');
         protocol='v2';protocolStage=run.stage;
-        if(run.active_conflict_id)blockingReason=`active conflict: ${run.active_conflict_id}`;
+        if(run.active_conflict_id)blockingReason='active v2 conflict';
         else if(run.stage==='waiting_human_review')blockingReason='waiting for human conflict resolution';
         else if(run.stage==='blocked_external')blockingReason='blocked by an external dependency';
         else if(run.stage==='cancelled')blockingReason='v2 run is cancelled';
-      }catch(error){blockingReason=`invalid v2 run: ${(error as Error).message}`}
+      }catch{blockingReason='invalid v2 run'}
     }else if(protocol==='v2')protocolStage='contract_approved';
     out.push({task_id:s.task_id,path:taskRoot,project_id:project.project_id,status:s.status,level:s.level,round:s.current_round,state_version:s.state_version,resumable:['planned','working','verifying','iterating'].includes(s.status),protocol,protocol_stage:protocolStage,blocking_reason:blockingReason});
   }
@@ -197,11 +228,18 @@ export async function scanTasks(root:string):Promise<TaskIndex[]>{
   for(const item of out){
     if(item.protocol!=='v2'||item.blocking_reason)continue;
     try{
-      const contract=(await readMarkdown(path.join(item.path,'ACCEPTANCE_CONTRACT_V2.md'))).data as {depends_on?:unknown};
-      if(!Array.isArray(contract.depends_on)||contract.depends_on.some(id=>typeof id!=='string')){item.blocking_reason='invalid v2 contract dependencies';continue}
-      const unfinished=contract.depends_on.filter(id=>{const dependency=byId.get(id);return !dependency||(dependency.protocol==='v2'?dependency.protocol_stage!=='candidate':dependency.status!=='delivered')});
+      const contract=await (await import('./acceptance-loop.js')).readApprovedAcceptanceContract(item.path);
+      const runPath=path.join(item.path,'ACCEPTANCE_RUN.json');
+      if(await exists(runPath)){
+        const run=JSON.parse(await readFile(runPath,'utf8')) as {contract_hash?:string};
+        if(run.contract_hash!==contract.contract_hash)throw new Error('v2 Run and Contract hash differ');
+      }
+      const dependencies=z.array(z.string().regex(taskIdPattern)).safeParse(contract.depends_on);
+      if(!dependencies.success){item.blocking_reason='invalid v2 contract dependencies';continue}
+      if(dependencies.data.some(id=>!byId.has(id))){item.blocking_reason='unknown v2 contract dependency';continue}
+      const unfinished=dependencies.data.filter(id=>{const dependency=byId.get(id)!;return dependency.protocol==='v2'?dependency.protocol_stage!=='candidate':dependency.status!=='delivered'});
       if(unfinished.length)item.blocking_reason=`unfinished dependencies: ${unfinished.join(', ')}`;
-    }catch(error){item.blocking_reason=`invalid v2 contract: ${(error as Error).message}`}
+    }catch{item.blocking_reason='invalid v2 contract'}
   }
   return out.sort((a,b)=>a.task_id.localeCompare(b.task_id));
 }
@@ -229,21 +267,35 @@ export async function approveProposal(root:string,id:string,by:string,ttlHours=2
   }
   const file=path.join(control(root),'proposals',`${id}.json`),raw=await readFile(file,'utf8'),p=proposalSchema.parse(JSON.parse(raw));
   const dir=path.join(control(root),'approvals'),n=(await readdir(dir)).filter(x=>/^APR-\d+\.json$/.test(x)).length+1,approvedAt=new Date();
-  const value={schema_version:1 as const,approval_id:`APR-${n}`,proposal_id:id,proposal_hash:sha256(raw),approved_by:by,approved_at:approvedAt.toISOString(),expires_at:new Date(approvedAt.getTime()+ttlHours*3600_000).toISOString(),approved_scope:['create_task','execute_in_worktree'] as Array<'create_task'|'execute_in_worktree'>,risk_level:p.risk_level};
+  const contractHash=p.schema_version===2?sha256(JSON.stringify((await import('./acceptance-loop.js')).acceptanceContractInputSchema.parse(p.acceptance_contract))):null;
+  const value={schema_version:2 as const,approval_id:`APR-${n}`,proposal_id:id,proposal_hash:sha256(raw),contract_hash:contractHash,approved_by:by,approved_at:approvedAt.toISOString(),expires_at:new Date(approvedAt.getTime()+ttlHours*3600_000).toISOString(),approved_scope:['create_task','execute_in_worktree'] as Array<'create_task'|'execute_in_worktree'>,risk_level:p.risk_level};
   approvalSchema.parse(value);
-  const writes:Array<{file:string;content:string}>=[{file:path.join(dir,`${value.approval_id}.json`),content:JSON.stringify(value,null,2)+'\n'}];
+  const approvalContent=JSON.stringify(value,null,2)+'\n';
+  const writes:Array<{file:string;content:string}>=[
+    {file:path.join(dir,`${value.approval_id}.json`),content:approvalContent},
+    {file:path.join(dir,`${value.approval_id}.sha256`),content:`${approvalSignature(await approvalAuthorityKey(true),root,approvalContent)}\n`},
+  ];
   if(effectFile)writes.push({file:effectFile,content:`${JSON.stringify({schema_version:1,command_id:controllerCommandId,proposal_id:id,approval_id:value.approval_id},null,2)}\n`});
   await atomicWriteMany(root,writes);return value.approval_id;
 }
-export async function verifyApproval(root:string,proposalId:string,scope:'create_task'|'execute_in_worktree',expectedRisk?:z.infer<typeof risk>):Promise<z.infer<typeof approvalSchema>>{
+export async function verifyApproval(root:string,proposalId:string,scope:'create_task'|'execute_in_worktree',expectedRisk?:z.infer<typeof risk>,requireV2=false):Promise<z.infer<typeof approvalSchema>>{
   if(await (await import('./confirmation-decisions.js')).hasProposalRejection(root,proposalId))throw new Error('proposal approval was invalidated by a current structured rejection');
   const raw=await readFile(path.join(control(root),'proposals',`${proposalId}.json`),'utf8');
   const proposal=proposalSchema.parse(JSON.parse(raw));
+  if(requireV2&&proposal.schema_version!==2)throw new Error('v2 Task requires an approved v2 Proposal');
   const files=(await readdir(path.join(control(root),'approvals'))).filter(x=>x.endsWith('.json'));
   for(const f of files){
     const approvalRaw=await readFile(path.join(control(root),'approvals',f),'utf8');
     const a=approvalSchema.parse(JSON.parse(approvalRaw));
-    if(a.proposal_id===proposalId&&a.proposal_hash===sha256(raw)&&a.approved_scope.includes(scope)&&a.risk_level===proposal.risk_level&&(!expectedRisk||a.risk_level===expectedRisk)&&Date.parse(a.expires_at)>Date.now())return a;
+    if(f!==`${a.approval_id}.json`||a.proposal_id!==proposalId)continue;
+    if(proposal.schema_version===2&&a.schema_version!==2)continue;
+    if(a.schema_version===2){
+      const seal=await readFile(path.join(control(root),'approvals',`${a.approval_id}.sha256`),'utf8').catch(()=>null);
+      if(!seal||!sameSignature(seal.trim(),approvalSignature(await approvalAuthorityKey(false),root,approvalRaw)))continue;
+      const contractHash=proposal.schema_version===2?sha256(JSON.stringify((await import('./acceptance-loop.js')).acceptanceContractInputSchema.parse(proposal.acceptance_contract))):null;
+      if(a.contract_hash!==contractHash)continue;
+    }
+    if(a.proposal_hash===sha256(raw)&&a.approved_scope.includes(scope)&&a.risk_level===proposal.risk_level&&(!expectedRisk||a.risk_level===expectedRisk)&&Date.parse(a.expires_at)>Date.now())return a;
   }
   throw new Error(`proposal has no valid ${scope} approval`);
 }
@@ -272,7 +324,7 @@ export async function unfinishedTaskDependencies(root:string,taskId:string):Prom
 export async function verifyTaskDependencies(root:string,taskId:string):Promise<void>{
   const unfinished=await unfinishedTaskDependencies(root,taskId);if(unfinished.length)throw new Error(`${taskId}: blocked by unfinished dependencies: ${unfinished.join(', ')}`);
 }
-export async function verifyTaskExecutionApproval(root:string,taskId:string):Promise<void>{const item=(await scanTasks(root)).find(x=>x.task_id===taskId);if(!item)throw new Error('task not found');await verifyTaskDependencies(root,taskId);const spec=(await readMarkdown(path.join(item.path,'SPEC.md'))).data as {proposal_id?:string;level?:z.infer<typeof risk>},state=await readState(item.path);if(!spec.proposal_id)throw new Error('task is not bound to an approved proposal');if(spec.level!==state.level)throw new Error(`Task level mismatch: SPEC.md=${spec.level??'missing'}, TASK_STATE.md=${state.level}`);await verifyApproval(root,spec.proposal_id,'execute_in_worktree',state.level)}
+export async function verifyTaskExecutionApproval(root:string,taskId:string):Promise<void>{const item=(await scanTasks(root)).find(x=>x.task_id===taskId);if(!item)throw new Error('task not found');await verifyTaskDependencies(root,taskId);const spec=(await readMarkdown(path.join(item.path,'SPEC.md'))).data as {proposal_id?:string;level?:z.infer<typeof risk>},state=await readState(item.path);if(!spec.proposal_id)throw new Error('task is not bound to an approved proposal');if(spec.level!==state.level)throw new Error(`Task level mismatch: SPEC.md=${spec.level??'missing'}, TASK_STATE.md=${state.level}`);await verifyApproval(root,spec.proposal_id,'execute_in_worktree',state.level,item.protocol==='v2')}
 function normalizeCriterion(value:string):string{return value.trim().replace(/[；。.]$/u,'').trim()}
 
 function adoptTargetTask(content:string,taskId:string,title:string,proposalId:string,taskPath:string,level:z.infer<typeof risk>,criteria:Array<{id:string;text:string}>,protocol:TaskProtocol):string{
@@ -299,10 +351,14 @@ async function resolveTargetTaskFile(repository:string,targetRoot:string,taskId:
   return path.join(directory,match.name);
 }
 
-export async function createTaskFromProposal(root:string,proposalId:string,taskId:string,title:string,adoptExisting=false):Promise<string>{const approval=await verifyApproval(root,proposalId,'create_task');const p=proposalSchema.parse(JSON.parse(await readFile(path.join(control(root),'proposals',`${proposalId}.json`),'utf8'))),project=await readProject(root),bundle=await loadTargetSpecBundle(project.spec_profile);await initTargetSpecLibrary(root);await recoverCrossRootTransactions(root,[root,project.repository]);const isWeb=taskId.startsWith('WEB-TASK-'),targetRoot=isWeb?bundle.frontend_task_root:bundle.backend_task_root;if(!targetRoot)throw new Error(`${taskId}: ${project.spec_profile} profile has no ${isWeb?'frontend':'backend'} task library`);const targetTask=await resolveTargetTaskFile(project.repository,targetRoot,taskId),taskRoot=path.resolve(root,project.tasks_root,taskId.toLowerCase());if(await exists(path.join(taskRoot,'TASK_STATE.md')))throw new Error('task already exists in control root');const targetExists=await exists(targetTask);if(targetExists&&!adoptExisting)throw new Error('target task already exists; pass --adopt-existing to bind an approved draft');if(!targetExists&&adoptExisting)throw new Error('cannot adopt a missing target task');await mkdir(path.join(taskRoot,'ROUNDS'),{recursive:true});await mkdir(path.join(taskRoot,'evidence'),{recursive:true});const base=initialFiles({id:taskId,title,level:p.risk_level,repository:project.repository}).map(x=>({file:path.join(taskRoot,x.file),content:x.content}));const spec=stringifyMarkdown({schema_version:1,task_id:taskId,title,level:p.risk_level,target_spec:path.relative(project.repository,targetTask),proposal_id:proposalId},`# Goal\n\n${p.suggested_goal}\n\n## Scope\n\nImplement the approved proposal.\n\n## Non-goals\n\nDo not exceed the approved proposal scope.`),acceptance=stringifyMarkdown({schema_version:1,task_id:taskId,criteria:p.initial_acceptance,human_reviews:[],web_gates:[]},'# Acceptance Contract\n\nCreated from an approved proposal. UI or visual tasks must add a required visual review; Web functional tasks must add a required Playwright Gate before planning.'),ac=p.initial_acceptance.map(x=>`- [ ] ${x.id}：${x.text}`).join('\n'),taskPath=path.relative(project.repository,taskRoot),target=targetExists?adoptTargetTask(await readFile(targetTask,'utf8'),taskId,title,proposalId,taskPath,p.risk_level,p.initial_acceptance,p.schema_version===2?'v2':'v1'):`# ${taskId}：${title}\n\n- 状态：已批准\n- 风险等级：${p.risk_level}\n- Spec-Loop Task：${taskPath}\n- Proposal：${proposalId}\n- 协议版本：${p.schema_version===2?'P/M/V/R v2':'v1'}\n\n## 目标\n\n${p.suggested_goal}\n\n## 验收标准\n\n${ac}\n\n## 验证范围\n\n- 层级：Task 增量验证\n- 所属波次：独立 Task\n- 只覆盖：本 Task AC、改动模块和直接依赖\n- 不覆盖：已交付兄弟 Task 的完整 Gate；波次全量回归由最终 Heavy Task 统一执行一次\n\n## 交付记录\n\n任务 Delivery 后回写 Round、Evidence 和 revision。\n`;const writes=base.filter(x=>!x.file.endsWith('/SPEC.md')&&!x.file.endsWith('/ACCEPTANCE.md'));writes.push({file:path.join(taskRoot,'SPEC.md'),content:spec},{file:path.join(taskRoot,'ACCEPTANCE.md'),content:acceptance},{file:targetTask,content:target});if(p.schema_version===2){const contract=(await import('./acceptance-loop.js')).acceptanceContractInputSchema.parse(p.acceptance_contract);if(contract.task_id!==taskId)throw new Error('Task ID differs from the approved v2 Acceptance Contract');const approved=(await import('./acceptance-loop.js')).approvedAcceptanceContractValue(contract,approval.approved_by,approval.approved_at);writes.push({file:path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md'),content:stringifyMarkdown(approved,'# Acceptance Contract v2\n\nP prepared this contract inside the Proposal; human approval binds the complete Proposal and contract hash.')})}await atomicWriteAcrossRoots(root,[root,project.repository],writes);return taskRoot}
+export async function createTaskFromProposal(root:string,proposalId:string,taskId:string,title:string,adoptExisting=false):Promise<string>{const project=await readProject(root),approval=await verifyApproval(root,proposalId,'create_task',undefined,project.default_task_protocol==='v2');const p=proposalSchema.parse(JSON.parse(await readFile(path.join(control(root),'proposals',`${proposalId}.json`),'utf8'))),bundle=await loadTargetSpecBundle(project.spec_profile);await initTargetSpecLibrary(root);await recoverCrossRootTransactions(root,[root,project.repository]);const isWeb=taskId.startsWith('WEB-TASK-'),targetRoot=isWeb?bundle.frontend_task_root:bundle.backend_task_root;if(!targetRoot)throw new Error(`${taskId}: ${project.spec_profile} profile has no ${isWeb?'frontend':'backend'} task library`);const targetTask=await resolveTargetTaskFile(project.repository,targetRoot,taskId),taskRoot=path.resolve(root,project.tasks_root,taskId.toLowerCase());if(await exists(path.join(taskRoot,'TASK_STATE.md')))throw new Error('task already exists in control root');const targetExists=await exists(targetTask);if(targetExists&&!adoptExisting)throw new Error('target task already exists; pass --adopt-existing to bind an approved draft');if(!targetExists&&adoptExisting)throw new Error('cannot adopt a missing target task');await mkdir(path.join(taskRoot,'ROUNDS'),{recursive:true});await mkdir(path.join(taskRoot,'evidence'),{recursive:true});const base=initialFiles({id:taskId,title,level:p.risk_level,repository:project.repository}).map(x=>({file:path.join(taskRoot,x.file),content:x.content}));const spec=stringifyMarkdown({schema_version:1,task_id:taskId,title,level:p.risk_level,target_spec:path.relative(project.repository,targetTask),proposal_id:proposalId},`# Goal\n\n${p.suggested_goal}\n\n## Scope\n\nImplement the approved proposal.\n\n## Non-goals\n\nDo not exceed the approved proposal scope.`),acceptance=stringifyMarkdown({schema_version:1,task_id:taskId,criteria:p.initial_acceptance,human_reviews:[],web_gates:[]},'# Acceptance Contract\n\nCreated from an approved proposal. UI or visual tasks must add a required visual review; Web functional tasks must add a required Playwright Gate before planning.'),ac=p.initial_acceptance.map(x=>`- [ ] ${x.id}：${x.text}`).join('\n'),taskPath=path.relative(project.repository,taskRoot),target=targetExists?adoptTargetTask(await readFile(targetTask,'utf8'),taskId,title,proposalId,taskPath,p.risk_level,p.initial_acceptance,p.schema_version===2?'v2':'v1'):`# ${taskId}：${title}\n\n- 状态：已批准\n- 风险等级：${p.risk_level}\n- Spec-Loop Task：${taskPath}\n- Proposal：${proposalId}\n- 协议版本：${p.schema_version===2?'P/M/V/R v2':'v1'}\n\n## 目标\n\n${p.suggested_goal}\n\n## 验收标准\n\n${ac}\n\n## 验证范围\n\n- 层级：Task 增量验证\n- 所属波次：独立 Task\n- 只覆盖：本 Task AC、改动模块和直接依赖\n- 不覆盖：已交付兄弟 Task 的完整 Gate；波次全量回归由最终 Heavy Task 统一执行一次\n\n## 交付记录\n\n任务 Delivery 后回写 Round、Evidence 和 revision。\n`;const writes=base.filter(x=>!x.file.endsWith('/SPEC.md')&&!x.file.endsWith('/ACCEPTANCE.md'));writes.push({file:path.join(taskRoot,'SPEC.md'),content:spec},{file:path.join(taskRoot,'ACCEPTANCE.md'),content:acceptance},{file:targetTask,content:target});if(p.schema_version===2){const contract=(await import('./acceptance-loop.js')).acceptanceContractInputSchema.parse(p.acceptance_contract);if(contract.task_id!==taskId)throw new Error('Task ID differs from the approved v2 Acceptance Contract');const approved=(await import('./acceptance-loop.js')).approvedAcceptanceContractValue(contract,approval.approved_by,approval.approved_at);writes.push({file:path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md'),content:stringifyMarkdown(approved,'# Acceptance Contract v2\n\nP prepared this contract inside the Proposal; human approval binds the complete Proposal and contract hash.')})}await atomicWriteAcrossRoots(root,[root,project.repository],writes);return taskRoot}
 
-async function processProbe(bin:string,args:string[],timeoutMs=15_000):Promise<{code:number;output:string}>{const locale=[process.env.LC_ALL,process.env.LANG].find(value=>value&&/utf-?8/i.test(value))??'en_US.UTF-8',result=await runManagedProcess({bin,args,timeoutMs,pipeDrainTimeoutMs:1_000,maxCaptureBytes:64_000,env:{PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:process.env.TMPDIR??'/tmp',LANG:locale,LC_ALL:locale,...(process.env.JAVA_HOME?{JAVA_HOME:process.env.JAVA_HOME}:{})}});return{code:result.code,output:result.timedOut?`probe timed out after ${timeoutMs}ms`:(`${result.stdout}${result.stderr}`).trim()}}
-async function resolveExecutable(bin:string):Promise<string>{if(path.isAbsolute(bin)){await access(bin);return bin}return new Promise<string>((resolve,reject)=>{const child=spawn('/usr/bin/env',['which',bin],{stdio:['ignore','pipe','ignore']});let output='',settled=false;const timer=setTimeout(()=>{if(settled)return;settled=true;child.kill('SIGKILL');reject(new Error('executable lookup timed out'))},5_000);child.stdout.on('data',chunk=>output+=chunk);child.on('close',code=>{if(settled)return;settled=true;clearTimeout(timer);code===0&&output.trim()?resolve(output.trim().split(/\r?\n/)[0]):reject(new Error('missing'))});child.on('error',error=>{if(settled)return;settled=true;clearTimeout(timer);reject(error)})})}
+async function processProbe(bin:string,args:string[],timeoutMs=15_000):Promise<{code:number;output:string}>{const locale=[process.env.LC_ALL,process.env.LANG].find(value=>value&&/utf-?8/i.test(value))??'en_US.UTF-8',command=await confinedProviderCommand(bin,args,[]),result=await runManagedProcess({bin:command.bin,args:command.args,timeoutMs,pipeDrainTimeoutMs:1_000,maxCaptureBytes:64_000,env:{PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:process.env.TMPDIR??'/tmp',LANG:locale,LC_ALL:locale,...(process.env.JAVA_HOME?{JAVA_HOME:process.env.JAVA_HOME}:{})}});return{code:result.code,output:result.timedOut?`probe timed out after ${timeoutMs}ms`:(`${result.stdout}${result.stderr}`).trim()}}
+async function resolveExecutable(bin:string):Promise<string>{
+  const candidates=path.isAbsolute(bin)||bin.includes(path.sep)?[path.resolve(bin)]:(process.env.PATH??'').split(path.delimiter).map(directory=>path.resolve(directory||'.',bin));
+  for(const candidate of candidates){try{await access(candidate,constants.X_OK);if((await stat(candidate)).isFile())return candidate}catch{}}
+  throw new Error('missing');
+}
 async function declaredJavaMajor(repository:string):Promise<number|null>{
   const values:number[]=[];
   for(const file of ['pom.xml','build.gradle','build.gradle.kts']){
@@ -315,16 +371,29 @@ async function declaredJavaMajor(repository:string):Promise<number|null>{
   return values.length?Math.max(...values):null;
 }
 function runtimeJavaMajor(output:string):number|null{const match=output.match(/(?:version\s+"|openjdk\s+)(?:1\.)?(\d+)/i);return match?Number(match[1]):null}
-export async function providerDoctor(root:string){
+type CodexDiagnostic={version:string|null;compatible:boolean;reason:string|null};
+const providerDiagnostics=new Map<string,{expiresAt:number;result:Promise<CodexDiagnostic>}>();
+async function diagnoseCodex(resolved:string,args:string[],reuse:boolean){
+  const info=await stat(resolved,{bigint:true}),key=JSON.stringify({resolved,args,identity:[info.dev,info.ino,info.size,info.mtimeNs,info.ctimeNs].map(String),environment:[process.env.PATH,process.env.HOME,process.env.TMPDIR,process.env.LANG,process.env.LC_ALL,process.env.JAVA_HOME]});
+  const cached=providerDiagnostics.get(key);if(reuse&&cached&&cached.expiresAt>Date.now())return cached.result;
+  const entry={expiresAt:Infinity,result:(async()=>{
+    const versionProbe=await processProbe(resolved,['--version']),compatibility=await processProbe(resolved,[...args,'--help']);
+    return{version:versionProbe.output||null,compatible:versionProbe.code===0&&compatibility.code===0,reason:versionProbe.code!==0?`Codex version probe failed: ${versionProbe.output.slice(0,500)}`:compatibility.code!==0?`Codex Adapter arguments are incompatible: ${compatibility.output.slice(0,500)||`exit ${compatibility.code}`}`:null};
+  })()};
+  providerDiagnostics.set(key,entry);while(providerDiagnostics.size>32)providerDiagnostics.delete(providerDiagnostics.keys().next().value!);
+  try{const result=await entry.result;if(result.compatible)entry.expiresAt=Date.now()+30_000;else if(providerDiagnostics.get(key)===entry)providerDiagnostics.delete(key);return result;}
+  catch(error){if(providerDiagnostics.get(key)===entry)providerDiagnostics.delete(key);throw error;}
+}
+
+export async function providerDoctor(root:string,options:{provider?:string;reuse?:boolean}={}){
   const cfg=await readProviderConfig(root),results=[];
   for(const [id,p] of Object.entries(cfg.providers)){
+    if(options.provider&&id!==options.provider)continue;
     let available=true,compatible=true,resolved:string|null=null,version:string|null=null,reason:string|null=null;
     try{
       resolved=await resolveExecutable(p.executable);
       if(id==='codex'&&path.basename(resolved)==='codex'){
-        const versionProbe=await processProbe(resolved,['--version']);version=versionProbe.output||null;
-        const compatibility=await processProbe(resolved,[...p.args,'--help']);
-        if(compatibility.code!==0){compatible=false;reason=`Codex Adapter arguments are incompatible: ${compatibility.output.slice(0,500)||`exit ${compatibility.code}`}`}
+        ({version,compatible,reason}=await diagnoseCodex(resolved,p.args,options.reuse===true));
       }
     }catch(error){available=false;compatible=false;reason=`executable unavailable: ${(error as Error).message}`}
     const roles=(['M','V','R'] as const).filter(role=>(cfg.role_providers?.[role]??cfg.active_provider)===id);
@@ -340,7 +409,7 @@ export async function verifyExecutionPreflight(root:string,taskId:string,options
   if(state.level==='heavy'&&(config.coverage!=='full'||config.scope_kind!=='wave'))throw new Error('Heavy Task requires at least one wave/full Gate before M starts; set scope_kind=wave and coverage=full');
   if(state.level==='heavy'&&!config.gates.some(gate=>gate.evidence_class==='mutation'&&gate.stability_runs>=2))throw new Error('Heavy Task requires a mutation-class Gate with stability_runs >= 2 before M starts');
   if(state.level!=='heavy'&&config.coverage==='full')throw new Error(`${state.level} Task conflicts with full verification; use coverage=targeted or change the approved Task level to heavy`);
-  if(options.requireProvider!==false){const providers=await providerDoctor(root),cfg=await readProviderConfig(root);
+  if(options.requireProvider!==false){const providers=await providerDoctor(root,{reuse:true}),cfg=await readProviderConfig(root);
     for(const role of ['M','V','R'] as const){const id=providerForRole(cfg,role).id,provider=providers.find(item=>item.id===id);
       if(!provider?.available||!provider.compatible)throw new Error(`${role} Provider ${id} preflight failed: ${provider?.reason??'provider unavailable'}`);}}
   const project=await readProject(root);

@@ -1,10 +1,10 @@
 # TASK-027：执行事件协议与全入口埋点
 
-- 状态：进行中
+- 状态：已完成
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-09-04
+- 最后更新：2026-09-29
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -53,12 +53,12 @@
 
 ## 验收标准
 
-- [ ] AC-1：所有受控 step type 都能产生合法 start/terminal 配对，并可从事件计算精确耗时。
-- [ ] AC-2：并发追加不会产生重复 sequence、断链、丢事件或半行 JSON；异常后可安全继续或明确要求协调。
-- [ ] AC-3：截断、重排、篡改、重复、孤立终止、路径越界和 Secret canary 均被拒绝或明确诊断。
-- [ ] AC-4：现有 Task/Harness/Gate/Review/Delivery 主路径记录步骤事件，但原有权威文件和全量回归行为不变。
-- [ ] AC-5：崩溃产生的未闭合步骤不会被显示为成功；reconcile 追加 interruption/annotation 后形成可审计结论。
-- [ ] AC-6：旧 Project 首次使用只记录真实基线，不为无时间戳的历史状态制造虚假耗时。
+- [x] AC-1：所有受控 step type 都能产生合法 start/terminal 配对，并可从事件计算精确耗时。
+- [x] AC-2：并发追加不会产生重复 sequence、断链、丢事件或半行 JSON；异常后可安全继续或明确要求协调。
+- [x] AC-3：截断、重排、篡改、重复、孤立终止、路径越界和 Secret canary 均被拒绝或明确诊断。
+- [x] AC-4：现有 Task/Harness/Gate/Review/Delivery 主路径记录步骤事件，但原有权威文件和全量回归行为不变。
+- [x] AC-5：崩溃产生的未闭合步骤不会被显示为成功；reconcile 追加 interruption/annotation 后形成可审计结论。
+- [x] AC-6：旧 Project 首次使用只记录真实基线，不为无时间戳的历史状态制造虚假耗时。
 
 ## 验证计划
 
@@ -86,11 +86,11 @@
 
 ## 交付记录
 
-- 完成日期：核心实现完成，待正式验收关闭
+- 完成日期：2026-09-29；独立 V/R 在 `e399565ce18ea7825fb0dc0c25c42f21d55946d5` 同一干净候选通过。
 - 变更文件/交付物：`src/execution-events.ts`；Task、Harness、Gate、Review 入口埋点；协议/并发/篡改/崩溃定向测试
 - 关键实现与决策：有 owner PID 的短步骤可识别进程退出并投影为中断；跨命令持续的 Round/wait 不绑定 PID；旧项目首次写入显式 baseline annotation。
 - 与原设计的差异：writer 为追加语义、锁内原子重写完整 JSONL，而不是文件尾原地 append；这样复用现有原子事务，但大事件量优化留给 TASK-029。
-- 遗留风险：全入口故障注入和 200×200 性能验收尚未执行，工单不关闭。
+- 遗留风险：200×200 性能与最终浏览器组合验收由 TASK-029 Heavy 执行；本工单全入口定向故障注入已通过。
 
 ## 验证证据
 
@@ -98,14 +98,24 @@
 |---|---|---|---|---|
 | 2026-08-12 | Codex | Node 22，本地定向测试 | 通过（非正式关闭） | 相关 39 项测试通过，覆盖事件时间计算、并发 writer、篡改/Secret fail-closed 与死进程中断投影 |
 | 2026-09-04 | Codex/M（快速反馈） | Node 22，P4-B1 | 14/14 通过（非正式 Evidence） | `npm run build`、`node --test test/execution-view.test.mjs`；保留一次 CLI 参数包装失败记录，正确重跑后通过 |
+| 2026-09-29 | 独立 V | 干净候选 `af57702`，v1 在途定向 Gate | FAIL（AC-3/4） | `.spec-loop/output/TASK-027-V-af57702.json`；旧 `step_run_id` 重用与 Task ID Secret canary 被接受，结构化用户输入/验证授权/Heavy 等待及 `review.visual`、`task.attempt` 入口缺少生产配对事件 |
+| 2026-09-29 | 独立 V | 干净候选 `02c5fe1`，AC-5 故障注入 | FAIL（AC-5） | `.spec-loop/output/TASK-027-V-02c5fe1.json`；确认权威请求已提交而事件写入中断，恢复后缺少等待事实 |
+| 2026-09-29 | 独立 V | 干净候选 `e399565`，定向 AC-1～6 | PASS | `.spec-loop/output/TASK-027-V-e399565.json`；恢复故障注入、协议与生产入口均通过 |
+| 2026-09-29 | 独立 R | 同一干净候选 `e399565`，定向 AC-1～6 | PASS | `.spec-loop/output/TASK-027-R-e399565.json`；权威恢复、并发、Secret、ID 重用及归档复核通过 |
+
+## 2026-09-29 修复候选
+
+- reader 对全事件历史保持已使用 step ID 集合，终止后重用也拒绝；writer 对 Task/Run 身份执行 Secret 检查。
+- 托管确认请求记录分类的 `wait.user` 起止事件，并以 request ID 精确配对；过期、失效和候选替换以中断结束。视觉 Review 与 Attempt 主路径补上配对步骤事件。
+- 构建、对抗/确认等待与受影响入口定向测试通过。权威确认请求提交后若事件写入失败，读取或终止请求会补齐真实等待起止；独立 V/R 在 `e399565` 通过。本 Task 保持 v1 在途协议，不迁移到 v2。
 
 ## 关闭检查
 
-- [ ] 验收标准全部通过
-- [ ] 测试/检查结果已记录
-- [ ] 设计差异已记录
-- [ ] 上游实际结果已更新
-- [ ] 已从两个看板移除
+- [x] 验收标准全部通过
+- [x] 测试/检查结果已记录
+- [x] 设计差异已记录
+- [x] 上游实际结果已更新
+- [x] 已从两个看板移除
 
 ## 变更记录
 
@@ -116,3 +126,4 @@
 | 2026-08-12 | 完成核心实现和定向验证 | 保留正式全入口/性能验收后再关闭 |
 | 2026-09-04 | 按最新版架构定义兼容收口 | 保持 v1 在途任务不迁移，并将 v2 事件扩展明确交给 TASK-033 |
 | 2026-09-04 | 启动 P4-B1 快速反馈检查 | 构建与执行事件/视图定向测试通过；未进入正式 V/R 或 Delivery |
+| 2026-09-29 | 完成 TASK-027 v1 兼容收口 | `e399565` 独立 V/R 双 PASS，AC-1～6 全通过；页面和最终 Heavy 归后续工单 |

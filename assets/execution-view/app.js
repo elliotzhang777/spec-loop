@@ -147,14 +147,21 @@ function mountButton(host, props, onClick) {
   });
 }
 
-function mountAlert(host, { message, descriptions }) {
-  callAntd('mountAlert', [host, { message, descriptions }], () => {
+function mountAlert(host, { message, descriptions, collapsible = false }) {
+  callAntd('mountAlert', [host, { message, descriptions, collapsible }], () => {
     const detail = document.createElement('div'); detail.className = 'fallback-alert'; detail.append(text('strong', '', message));
     const items = Array.isArray(descriptions) ? descriptions : descriptions ? [descriptions] : [];
     if (items.length) {
       const list = document.createElement('ul');
-      for (const item of items) list.append(text('li', '', item));
+      for (const item of collapsible ? items.slice(0, 3) : items) list.append(text('li', '', item));
       detail.append(list);
+      if (collapsible && items.length > 3) {
+        const more = document.createElement('details');
+        more.append(text('summary', '', `查看其余 ${items.length - 3} 条`));
+        const rest = document.createElement('ul');
+        for (const item of items.slice(3)) rest.append(text('li', '', item));
+        more.append(rest); detail.append(more);
+      }
     }
     host.replaceChildren(detail);
   });
@@ -238,11 +245,11 @@ function precisionName(value) {
 }
 
 function statusName(value) {
-  return ({ running: '运行中', waiting: '等待中', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消', noted: '记录', unknown: '未知' })[value] ?? value;
+  return ({ running: '运行中', waiting: '等待中', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消', awaiting_wave_review: '待波次验收', noted: '记录', unknown: '未知' })[value] ?? value;
 }
 
 function lifecycleName(value) {
-  return ({ draft: '草稿', planned: '已计划', working: '实现中', verifying: '验证中', iterating: '迭代中', delivered: '已交付', cancelled: '已取消' })[value] ?? value;
+  return ({ draft: '草稿', planned: '已计划', working: '实现中', verifying: '验证中', iterating: '迭代中', delivered: '已交付', cancelled: '已取消', awaiting_wave_review: '待波次验收' })[value] ?? value;
 }
 
 function taskLifecycleName(task) {
@@ -289,6 +296,7 @@ const globalTaskStatuses = {
   iterating: { label: '返工中', className: 'iterating' },
   blocked: { label: '阻塞', className: 'blocked' },
   planned: { label: '已计划', className: 'planned' },
+  awaiting_wave_review: { label: '待波次验收', className: 'waiting' },
   draft: { label: '草稿', className: 'draft' },
   cancelled: { label: '已取消', className: 'cancelled' },
 };
@@ -1247,7 +1255,7 @@ function renderDetails() {
 
 function renderDiagnostics() {
   elements.projectDiagnostics.hidden = snapshot.diagnostics.length === 0;
-  if (snapshot.diagnostics.length) mountAlert(elements.projectDiagnostics, { message: '数据完整性提示', descriptions: snapshot.diagnostics });
+  if (snapshot.diagnostics.length) mountAlert(elements.projectDiagnostics, { message: `数据完整性提示 · ${snapshot.diagnostics.length} 条`, descriptions: snapshot.diagnostics, collapsible: true });
 }
 
 function snapshotStructureSignature(value) {

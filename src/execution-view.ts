@@ -1,3 +1,4 @@
+import { taskWaveReviewHold } from './wave-review.js';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -338,10 +339,15 @@ async function targetSpecTasks(repositoryRoot: string, specRoot: string): Promis
   return result;
 }
 
-async function roleRuntime(projectRoot:string,taskId:string,now:number):Promise<z.infer<typeof executionTaskSnapshotSchema>['runtime']>{
+async function roleRuntime(projectRoot:string,taskId:string,now:number,acceptance:z.infer<typeof acceptanceProjectionSchema>|null):Promise<z.infer<typeof executionTaskSnapshotSchema>['runtime']>{
+  if(acceptance&&['candidate','cancelled','waiting_human_review','blocked_external'].includes(acceptance.stage))return null;
   const directory=path.join(projectRoot,'.spec-loop','output',`${taskId}-acceptance-v2`,'invocations'),entries=await readdir(directory,{withFileTypes:true}).catch(()=>[]),records:Array<Record<string,any>>=[];
   for(const entry of entries)if(entry.isDirectory()){const file=path.join(directory,entry.name,'INVOCATION.json'),record=await readFile(file,'utf8').then(raw=>JSON.parse(raw) as Record<string,any>).catch(()=>null);if(record)records.push(record)}
   const latest=records.sort((left,right)=>String(left.created_at).localeCompare(String(right.created_at))).reverse().find(item=>item.status==='prepared'||item.status==='running'||item.status==='succeeded'&&item.result_status==='awaiting_ingestion');if(!latest)return null;
+  if(latest.status==='succeeded'&&acceptance&&(
+    latest.role==='M'&&acceptance.last_m_invocation===latest.invocation_id&&['m_submitted','plan_compiled','v_passed'].includes(acceptance.stage)||
+    latest.role==='V'&&acceptance.last_v_invocation===latest.invocation_id&&acceptance.stage==='v_passed'
+  ))return null;
   const heartbeat=await readFile(path.join(directory,latest.invocation_id,'HEARTBEAT.json'),'utf8').then(raw=>JSON.parse(raw) as Record<string,any>).catch(()=>null),deadline=typeof heartbeat?.deadline_at==='string'?heartbeat.deadline_at:null,heartbeatAt=typeof heartbeat?.heartbeat_at==='string'?heartbeat.heartbeat_at:null,lastProgressAt=typeof heartbeat?.last_progress_at==='string'?heartbeat.last_progress_at:typeof latest.last_progress_at==='string'?latest.last_progress_at:null,idleTimeoutMs=typeof heartbeat?.idle_timeout_seconds==='number'?heartbeat.idle_timeout_seconds*1000:null;
   return{role:latest.role,invocation_id:latest.invocation_id,state:latest.status==='succeeded'?'awaiting_ingestion':latest.status,heartbeat_at:heartbeatAt,heartbeat_age_ms:heartbeatAt?Math.max(0,now-Date.parse(heartbeatAt)):null,last_progress_at:lastProgressAt,progress_age_ms:lastProgressAt?Math.max(0,now-Date.parse(lastProgressAt)):null,progress_sequence:typeof heartbeat?.progress_sequence==='number'?heartbeat.progress_sequence:latest.progress_sequence??0,output_bytes:typeof heartbeat?.output_bytes==='number'?heartbeat.output_bytes:null,idle_timeout_ms:idleTimeoutMs,deadline_at:deadline,remaining_ms:deadline?Math.max(0,Date.parse(deadline)-now):null,usage_total_tokens:typeof heartbeat?.usage?.total_tokens==='number'?heartbeat.usage.total_tokens:latest.usage?.total_tokens??null,token_limit:latest.token_limit??null};
 }
@@ -503,8 +509,9 @@ function nextAction(state: TaskState, current?: ExecutionStepSnapshot): string {
 }
 
 async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoot: string, state: TaskState, taskEvents: ExecutionEvent[], current: boolean, now: number): Promise<ExecutionTaskSnapshot> {
-  const fromEvents = eventSteps(taskEvents, now, state.current_round), diagnostics: string[] = [], dependsOn = await taskDependencies(repositoryRoot, taskRoot),acceptanceFacts=await acceptanceProjection(projectRoot,taskRoot),runtime=await roleRuntime(projectRoot,state.task_id,now);
-  const projectedStatus = acceptanceFacts.protocol === 'v2'
+  const fromEvents = eventSteps(taskEvents, now, state.current_round), diagnostics: string[] = [], dependsOn = await taskDependencies(repositoryRoot, taskRoot),acceptanceFacts=await acceptanceProjection(projectRoot,taskRoot),runtime=await roleRuntime(projectRoot,state.task_id,now,acceptanceFacts.acceptance);
+  const reviewHold=await taskWaveReviewHold(projectRoot,state.task_id);
+  const projectedStatus = reviewHold ? 'awaiting_wave_review' : acceptanceFacts.protocol === 'v2'
     && acceptanceFacts.acceptance?.stage === 'candidate'
     && acceptanceFacts.acceptance.fresh
     ? 'delivered'
@@ -544,9 +551,9 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
   let wallClock: number | null = null, wallStart: number | null = null, wallEnd: number | null = null;
   let untracked: number | null = null, timing: 'exact' | 'derived' | 'unknown' = 'unknown';
   if (taskEventTimes.length) {
-    const start = Math.min(...taskEventTimes), delivered = taskEvents.find((item) => item.label === '交付关闭' && item.kind === 'step_succeeded');
+    const start = Math.min(...taskEventTimes), delivered = taskEvents.filter((item) => item.kind === 'step_succeeded' && (item.step_type === 'task.deliver' || item.step_type === 'acceptance.candidate')).at(-1);
     const cancelled = taskEvents.find((item) => item.label === 'Task 已取消' && item.kind === 'annotation');
-    const end = delivered ? Date.parse(delivered.occurred_at) : cancelled ? Date.parse(cancelled.occurred_at) : ['delivered','cancelled'].includes(projectedStatus) ? Date.parse(state.updated_at) : now;
+    const end = delivered ? Date.parse(delivered.occurred_at) : cancelled ? Date.parse(cancelled.occurred_at) : ['delivered','cancelled'].includes(projectedStatus) ? Math.max(Date.parse(state.updated_at),...taskEventTimes) : now;
     wallStart = start; wallEnd = Math.max(start, end); wallClock = wallEnd - wallStart;
     untracked = Math.max(0, wallClock - activeMs - waitingMs); timing = delivered || projectedStatus !== 'delivered' ? 'exact' : 'derived';
   }
@@ -571,6 +578,33 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
     recording_coverage_pct: recordingCoverage, detail_coverage_pct: detailCoverage, retry_count: retryCount, duration_breakdown: breakdown,
     timing_precision: timing, bottleneck_step_id: bottleneck?.id ?? null, steps, diagnostics: diagnostics.map((item) => dashboardText(item, 1_000)),
   });
+}
+
+export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapshotSchema>){
+  let bytes=Buffer.byteLength(JSON.stringify(snapshot));
+  if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)return snapshot;
+  const discardOldest=(items:unknown[])=>{const removed=items.shift();if(removed!==undefined)bytes-=Buffer.byteLength(JSON.stringify(removed))+(items.length?1:0)};
+  const compactSteps=(minimum:number,historicalOnly:boolean)=>{
+    const compactable=()=>snapshot.tasks
+      .filter(task=>(!historicalOnly||!task.current)&&task.steps.length>minimum)
+      .sort((left,right)=>Number(left.current)-Number(right.current)||right.steps.length-left.steps.length);
+    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){const task=compactable()[0];if(!task)break;discardOldest(task.steps)}
+  };
+  // Keep the existing five-step context when possible. Historical rows can
+  // shrink to one step as the Project grows; the active Task keeps five.
+  compactSteps(MIN_DASHBOARD_STEPS_PER_TASK,false);
+  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)compactSteps(1,true);
+  while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
+    const task=snapshot.tasks.filter(item=>item.diagnostics.length>1)
+      .sort((left,right)=>Number(left.current)-Number(right.current)||right.diagnostics.length-left.diagnostics.length)[0];
+    if(!task)break;discardOldest(task.diagnostics);
+  }
+  while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES&&snapshot.diagnostics.length)discardOldest(snapshot.diagnostics);
+  // Recheck the exact serialized size; no row, current status or warning is
+  // dropped merely to force an oversized base projection under the limit.
+  bytes=Buffer.byteLength(JSON.stringify(snapshot));
+  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)throw new Error(`Dashboard Snapshot exceeds ${MAX_EXECUTION_SNAPSHOT_BYTES} bytes (${bytes}); reduce bounded summaries before publishing`);
+  return snapshot;
 }
 
 export async function buildExecutionSnapshot(projectRoot: string, now = new Date()): Promise<ExecutionSnapshot> {
@@ -636,26 +670,5 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
     } : null,
     waves, tasks, diagnostics: diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS).map((item) => dashboardText(item, 1_000)),
   });
-  let bytes=Buffer.byteLength(JSON.stringify(snapshot));
-  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
-    // A project's task count grows over time, so a fixed per-task history bound
-    // is not sufficient to keep the whole projection bounded. Compact oldest
-    // historical detail first while preserving every task and the active task's
-    // most recent steps.
-    const compactable=()=>snapshot.tasks
-      .filter(task=>task.steps.length>MIN_DASHBOARD_STEPS_PER_TASK)
-      .sort((left,right)=>Number(left.current)-Number(right.current)||right.steps.length-left.steps.length);
-    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
-      const task=compactable()[0];if(!task)break;
-      task.steps.shift();
-      bytes=Buffer.byteLength(JSON.stringify(snapshot));
-    }
-    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){
-      const task=snapshot.tasks.filter(item=>item.diagnostics.length>1)
-        .sort((left,right)=>Number(left.current)-Number(right.current)||right.diagnostics.length-left.diagnostics.length)[0];
-      if(!task)break;task.diagnostics.shift();bytes=Buffer.byteLength(JSON.stringify(snapshot));
-    }
-    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES&&snapshot.diagnostics.length){snapshot.diagnostics.shift();bytes=Buffer.byteLength(JSON.stringify(snapshot));}
-  }
-  if(bytes>MAX_EXECUTION_SNAPSHOT_BYTES)throw new Error(`Dashboard Snapshot exceeds ${MAX_EXECUTION_SNAPSHOT_BYTES} bytes (${bytes}); reduce bounded summaries before publishing`);return snapshot;
+  return compactExecutionSnapshot(snapshot);
 }

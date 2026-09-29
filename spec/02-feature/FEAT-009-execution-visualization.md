@@ -68,8 +68,8 @@
 | 类型 | 文档 | 状态 |
 |---|---|---|
 | Design | [DES-009 执行事件、可重建投影与本地观察面](../03-design/DES-009-execution-visualization.md) | 已批准 |
-| Task | [TASK-027 执行事件协议与埋点](../04-task/TASK-027-execution-events.md) | 进行中 |
-| Task | [TASK-028 可重建投影与本地 Web UI](../04-task/TASK-028-execution-view.md) | 进行中 |
+| Task | [TASK-027 执行事件协议与埋点](../04-task/TASK-027-execution-events.md) | 已完成 |
+| Task | [TASK-028 可重建投影与本地 Web UI](../04-task/TASK-028-execution-view.md) | 待验证 |
 | Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 已批准 |
 | Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 已批准 |
 
@@ -77,8 +77,8 @@
 
 - 已实现行为：已提供项目级 hash-chained 执行事件、Task/Harness/Gate/Review 埋点、可重建 snapshot、loopback-only 本地 Web 页面、实时当前步骤计时、Task 四类耗时与最长步骤提示。
 - 未实现/调整项：旧数据只投影可证明的 Gate 精确耗时，未伪造历史生命周期时间；200×200 性能 Gate、真实 Playwright 路径和 revision-bound 人工视觉 Review 留在 TASK-029/正式验收。
-- 验证结论：构建和 39 项相关定向测试通过；尚未执行完整 Heavy Gate，因此特性保持“进行中”。
-- 关联完成工单：无。
+- 验证结论：TASK-027 独立 V/R 已完成；TASK-028 在 `4366ed8` 独立技术 V/R 与 Chrome 功能重新绑定通过，人工视觉 Review 待用户。完整 Heavy Gate 仍由 TASK-029 执行，特性保持“进行中”。
+- 关联完成工单：TASK-027（`e399565` 独立 V/R PASS；事件协议、入口埋点和故障恢复已定向验收）。
 
 ## 变更记录
 
@@ -86,6 +86,7 @@
 |---|---|---|---|
 | 2026-08-12 | 创建可重建执行可视化特性草案 | 用户需要查看当前任务、步骤语义和历史耗时 | TASK-027～029 |
 | 2026-08-12 | 批准并启动核心实现 | 用户明确要求先实现可视化和耗时分析能力 | TASK-027、TASK-028 |
+| 2026-09-29 | 完成执行事件底座 | TASK-027 在 `e399565` 独立 V/R PASS；视图和最终 Heavy 仍待后续工单 | TASK-027 |
 | 2026-08-13 | 增加 H1～H15 三级下钻与可逆导航 | 用户要求先看波次总览，再看子 Task 和更细步骤，并能优雅返回 | TASK-028 |
 | 2026-08-13 | 子 Task 优先派生 H 状态并默认定位当前波次 | 修复 H15 外层误绿，并减少用户每次向下滚动查找当前 H 的成本 | TASK-028 |
 | 2026-08-13 | 合并为单页折叠式 H Workflow | 默认保持 H1～H15 主链，按需原位展开一个 H 的 Task，消除二级页面和冗余传递边造成的误导 | TASK-028 |

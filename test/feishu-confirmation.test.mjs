@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { tempRoot } from './helpers.mjs'
 import { initFeishuConfig } from '../dist/connectors/feishu.js'
+import { readExecutionEvents } from '../dist/execution-events.js'
 import {
   checkConfirmationProjection,
   confirmationRequestSchema,
@@ -58,6 +59,41 @@ async function create(root, type = 'verification', overrides = {}) {
     ...overrides,
   })
 }
+
+test('managed confirmation requests produce classified and paired user waits',async()=>{
+  const root=await projectRoot('feishu-wait-events-')
+  await writeFile(path.join(root,'.spec-loop','PROJECT.md'),'---\nproject_id: PROJ-SPEC-LOOP\n---\nManaged confirmation fixture.\n')
+  const cases=[['proposal','approve_proposal','等待用户确认任务规格'],['needs_user','choose_option','等待用户提供结构化输入'],['verification','authorize_verification','等待正式验证授权'],['heavy_acceptance','accept_heavy','等待 Heavy 验收']]
+  for(let index=0;index<cases.length;index++){
+    const [kind,action,label]=cases[index],created=new Date(Date.parse('2026-08-04T10:00:00.000Z')+index*120_000)
+    const request=await create(root,kind,{now:created})
+    const start=(await readExecutionEvents(root)).find(event=>event.kind==='wait_started'&&event.run_id===request.request_id)
+    assert.equal(start?.label,label)
+    await consumeConfirmationRequest(root,request.request_id,action,actor,new Date(created.getTime()+60_000))
+    const terminal=(await readExecutionEvents(root)).find(event=>event.kind==='wait_ended'&&event.step_run_id===start.step_run_id)
+    assert.equal(terminal?.outcome,'success')
+  }
+})
+
+test('a committed confirmation wait is recovered after event-store failure',async()=>{
+  const root=await projectRoot('feishu-wait-recovery-'),control=path.join(root,'.spec-loop')
+  await writeFile(path.join(control,'PROJECT.md'),'---\nproject_id: PROJ-SPEC-LOOP\n---\nManaged fixture.\n')
+  const eventFile=path.join(control,'EXECUTION_EVENTS.jsonl'),outside=path.join(root,'outside.jsonl')
+  await writeFile(outside,'')
+  await symlink(outside,eventFile)
+  await assert.rejects(create(root,'verification'),/symbolic|execution event/)
+  await rm(eventFile)
+  const [request]=await listConfirmationRequests(root)
+  assert.equal(request.status,'pending')
+  let starts=(await readExecutionEvents(root)).filter(event=>event.kind==='wait_started'&&event.run_id===request.request_id)
+  assert.equal(starts.length,1)
+  await expireConfirmationRequests(root,new Date('2026-08-04T11:01:00.000Z'))
+  await listConfirmationRequests(root)
+  const events=await readExecutionEvents(root)
+  starts=events.filter(event=>event.kind==='wait_started'&&event.run_id===request.request_id)
+  assert.equal(starts.length,1)
+  assert.equal(events.filter(event=>event.kind==='wait_ended'&&event.step_run_id===starts[0].step_run_id).length,1)
+})
 
 test('all five request types bind immutable authority facts and fixed action allowlists', async () => {
   const root = await projectRoot()

@@ -1,3 +1,4 @@
+import { readWaveReview, decideWaveReview } from '../dist/wave-review.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -84,8 +85,10 @@ test('scheduler leases fence stale workers, serialize conflicting resources, and
   const staleDriverLock = path.join(root, '.spec-loop', 'locks', 'workflow-driver-TASK-LEASE-1.lock')
   await mkdir(staleDriverLock, { recursive: true })
   await writeFile(path.join(staleDriverLock, 'owner.json'), `${JSON.stringify({ pid: 99999999 })}\n`)
-  const effect = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});setInterval(() => {}, 1000)"], { stdio: 'ignore' })
-  const secondEffect = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});setInterval(() => {}, 1000)"], { stdio: 'ignore' })
+  const stopSignalLog = path.join(root, 'stop-signals.txt')
+  const stubbornEffect = "const fs=require('node:fs');process.on('SIGTERM',()=>fs.appendFileSync(process.argv[1],Date.now()+'\\n'));setInterval(() => {}, 1000)"
+  const effect = spawn(process.execPath, ['-e', stubbornEffect, stopSignalLog], { stdio: 'ignore' })
+  const secondEffect = spawn(process.execPath, ['-e', stubbornEffect, stopSignalLog], { stdio: 'ignore' })
   t.after(() => { try { effect.kill('SIGKILL') } catch {};try { secondEffect.kill('SIGKILL') } catch {} })
   const activeEffects = path.join(root, '.spec-loop', 'active-effects'); await mkdir(activeEffects, { recursive: true })
   const effectMarker = path.join(activeEffects, 'TASK-LEASE-1-effect.json')
@@ -104,10 +107,19 @@ test('scheduler leases fence stale workers, serialize conflicting resources, and
   assert.equal(inspection.effects.find(item => item.effect_id === 'effect-under-stop').status, 'no_progress')
   const watchdogStarted=Date.now(),appliedWatchdog=await runSchedulerWatchdog(root, 3, true)
   assert.equal(appliedWatchdog.stopped_tasks.length, 2)
-  if(process.platform!=='win32')assert.ok(Date.now()-watchdogStarted<1_900,`bounded concurrent stop took ${Date.now()-watchdogStarted}ms`)
+  if(process.platform!=='win32'){
+    assert.ok(Date.now()-watchdogStarted<10_500,`bounded concurrent stop took ${Date.now()-watchdogStarted}ms`)
+    const signals=(await readFile(stopSignalLog,'utf8')).trim().split('\n').map(Number).sort((a,b)=>a-b)
+    assert.equal(signals.length,2)
+    assert.ok(signals[1]-signals[0]<900,`stop signals were serialized by ${signals[1]-signals[0]}ms`)
+  }
   await killSchedulerControl(root)
   assert.equal((await readState(path.join(root, '.spec-loop', 'tasks', 'task-lease-1'))).status, 'cancelled')
+  const stopIntentFile=path.join(root,'.spec-loop/scheduler/stop-intents/TASK-LEASE-1.json')
+  const staleIntent=JSON.parse(await readFile(stopIntentFile,'utf8'))
+  await writeFile(stopIntentFile,JSON.stringify({...staleIntent,status:'stop_incomplete',completed_at:null,last_error:'prior bounded caller expired'}))
   const stopped = await stopTaskExecution(root, 'TASK-LEASE-1', 'duplicate stop must be idempotent')
+  assert.equal(JSON.parse(await readFile(stopIntentFile,'utf8')).status,'completed')
   assert.equal(stopped.status, 'cancelled')
   assert.equal(stopped.driver_lock_reclaimed, true)
   assert.deepEqual(stopped.cancelled_effects, ['effect-under-stop'])
@@ -145,16 +157,19 @@ test('wave executor concurrently dispatches Ready Tasks within elapsed, token an
   await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', `executable: ${provider}`))
   await configureWaveBudget(root, { maxParallel: 2, maxElapsedSeconds: 120, maxTokens: 100, maxCostUsd: 1 })
   assert.deepEqual((await planReadyWave(root)).ready.map(item => item.task_id), ['TASK-WAVE-1', 'TASK-WAVE-2'])
-  const wave = await runReadyWave(root, { owner: 'wave-test',testSessionId:'wave-executor-test',testMaxRuntimeSeconds:120 })
-  assert.equal(wave.status, 'completed', JSON.stringify(wave.results))
+  const wave = await runReadyWave(root, { owner: 'wave-test',singleStage:true,testSessionId:'wave-executor-test',testMaxRuntimeSeconds:120 })
+  assert.equal(wave.status, 'awaiting_wave_review', JSON.stringify(wave.results))
   assert.ok(wave.supervisor.pid > 0)
-  assert.equal((await schedulerSupervisorStatus(root)).healthy, true)
+  // An in-flight checking cycle is not a completed health proof. Await the
+  // bounded Supervisor readiness path instead of sampling that transient.
+  assert.equal((await startManagedSchedulerSupervisor(root,{testMode:true,testSessionId:'wave-executor-test',maxRuntimeSeconds:120})).healthy, true)
   assert.equal(wave.results.length, 2)
   assert.equal(wave.usage.total_tokens, 20, JSON.stringify(wave.results))
   assert.equal(wave.usage.cost_usd, 0.02)
   assert.ok(wave.results.reduce((sum, item) => sum + item.reservation.tokens, 0) <= wave.budget.max_tokens)
   assert.equal((await readFile(starts, 'utf8')).trim().split('\n').length, 2)
-  assert.deepEqual((await planReadyWave(root)).ready.map(item => [item.task_id, item.role]), [['TASK-WAVE-1', 'V'], ['TASK-WAVE-2', 'V']])
+  assert.equal((await planReadyWave(root)).ready.length,0)
+  assert.equal((await planReadyWave(root)).held.filter(item=>item.reason.startsWith('awaiting_wave_review')).length,2)
 
   await addTask(root, repository, 'TASK-WAVE-3'); await addTask(root, repository, 'TASK-WAVE-4')
   runGit(repository, ['add', '.']); runGit(repository, ['commit', '-m', 'add usage fuse fixtures'])
@@ -166,6 +181,31 @@ test('wave executor concurrently dispatches Ready Tasks within elapsed, token an
   assert.equal(unknown.status, 'usage_unknown')
   assert.equal(unknown.results.length, 1)
   assert.equal(unknown.usage.recorded, false)
+
+  const review=await readWaveReview(root,unknown.wave_id)
+  await decideWaveReview(root,unknown.wave_id,{bundle_hash:review.bundle.bundle_hash,request_id:randomUUID(),actor:'owner',note:'重试超时停止测试',choices:review.bundle.tasks.map(item=>({task_id:item.task_id,action:'return_to_m'}))})
+
+  // An elapsed fuse must bound the whole stop batch, even while roles are
+  // preparing or running, and retain every unverified stop for retry.
+  await writeFile(provider, `#!/bin/sh\nfor arg in "$@"; do if [ "$arg" = "--version" ]; then printf 'codex fixture 1.0\\n'; exit 0; fi; done\nsleep 60\n`)
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', `executable: ${provider}`))
+  await configureWaveBudget(root, { maxParallel: 2, maxElapsedSeconds: 3, maxTokens: 100, maxCostUsd: 1 })
+  const began = performance.now()
+  const elapsed = await runReadyWave(root, { owner: 'elapsed-fuse-test', testSessionId: 'wave-executor-test', testMaxRuntimeSeconds: 120 })
+  assert.ok(performance.now() - began < 18_000, `wave shutdown exceeded its deadline: ${performance.now() - began}ms`)
+  assert.match(elapsed.fuse_reason, /elapsed budget reached/)
+  assert.ok(['budget_stopped', 'usage_unknown', 'stop_incomplete'].includes(elapsed.status), JSON.stringify(elapsed))
+  assert.deepEqual(elapsed.pending_stops, elapsed.stop_results.filter(item => item.stop_complete !== true).map(item => item.task_id))
+  for (const stop of elapsed.stop_results) {
+    const intent = JSON.parse(await readFile(path.join(root, '.spec-loop', 'scheduler', 'stop-intents', `${stop.task_id}.json`), 'utf8'))
+    if(intent.request_id===stop.request_id)assert.equal(intent.status,stop.stop_complete?'completed':'stop_incomplete')
+    else {
+      // The independent Supervisor can already be retrying the incomplete stop.
+      // Its newer generation must not be compared with the old wave receipt.
+      assert.ok(Date.parse(intent.requested_at)>=Date.parse(elapsed.started_at))
+      assert.ok(['requested','stop_incomplete','completed'].includes(intent.status))
+    }
+  }
 })
 
 test('dead wave drivers are reconciled into an explicit requeue state', async () => {

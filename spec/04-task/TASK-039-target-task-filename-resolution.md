@@ -1,10 +1,10 @@
 # TASK-039：目标规格 Task 文件名解析兼容
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-09-19
-- 最后更新：2026-09-19
+- 最后更新：2026-09-29
 - 所属设计：[DES-004](../03-design/DES-004-controlled-automation-controller.md)
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -30,7 +30,7 @@
 
 - 批量重命名目标工程规格；
 - 改变 Proposal、Approval、P 契约或跨根事务语义；
-- 正式 V/R、完整 Gate、merge、push 或发布。
+- 完整 Gate、merge、push 或发布；独立定向 V/R 已在批准范围内完成。
 
 ## 验收标准
 
@@ -49,15 +49,16 @@
 ## 验证范围
 
 - `scope_kind: task`，`coverage: targeted`。
-- 本轮只做实现与快速反馈；正式独立 V/R 需另获当前稳定候选授权。
+- 当前执行约定允许已批准 Task 内连续完成定向 V/R；候选变化只重新绑定证据，不重复申请授权。
 
 ## 交付记录
 
-- 完成日期：2026-09-19，实现候选待正式验证。
+- 完成日期：2026-09-29；候选 `eca847d` 独立 Light V/R 双 PASS。
 - 变更文件/交付物：`src/project.ts`、`test/project.test.mjs`。
 - 快速反馈：`npm run build` 通过；`node --test test/project.test.mjs test/target-spec.test.mjs` 18/18 通过。
 - 关键实现：精确文件和单一带名称文件共用确定性解析；多个同 ID 候选 fail closed；运行 Task 记录解析后的真实相对路径。
-- 遗留风险：正式独立 V/R 尚未授权，本轮结果不能替代正式 Gate。
+- 正式证据：`.spec-loop/output/TASK-039-{V,R}-eca847d.json`。构建与 Project/Target Spec 定向 18/18 通过；独立 fixture 证明双候选不覆盖任一文件、精确文件仍可采用。海工 live `backend/spec/05-task/` 的 TASK-001 仅一份，运行 SPEC 指向带名称真实路径，业务仓库保持干净。
+- 遗留风险：本工单仅覆盖目标 Task 文件解析兼容；完整 Heavy、merge、push 和发布仍按各自任务执行。
 
 ## 变更记录
 
@@ -65,3 +66,4 @@
 |---|---|---|
 | 2026-09-19 | 创建并开始实施 | 海工项目采用标准命名的 TASK-001 草稿时发现现有解析只识别 `TASK-001.md` |
 | 2026-09-19 | 实现候选进入待验证 | 构建与 18 项定向回归通过，等待独立正式 V/R |
+| 2026-09-29 | 完成独立 Light V/R 并关闭工单 | AC-1～4 全通过，海工 live 目录无同 ID 重复规格 |

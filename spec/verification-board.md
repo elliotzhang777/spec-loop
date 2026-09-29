@@ -6,23 +6,14 @@
 
 | 工单 | 验证范围 | 验证方式 | 验证人 | 状态 | 环境/入口 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-030](04-task/TASK-030-pmvr-acceptance-loop.md) | v2 Contract、HEAD/计划/Evidence 绑定、V/R 路由、预算、Conflict/Inbox、调度和 v1 兼容 | 独立 V 执行定向 Gate；独立 R 复核 Evidence，必要时再申请 Heavy | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs` | 2026-09-04 |
-| [TASK-031](04-task/TASK-031-v2-contract-onboarding.md) | 默认 v2、P 契约同步、Proposal hash、v1/v2 双轨、doctor/status、不可变 v5 模板 | 独立 V 执行协议切换/篡改/模板摘要定向 Gate；独立 R 复核 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/project.ts`、`src/target-spec.ts`、`test/project.test.mjs`、`test/target-spec.test.mjs` | 2026-09-04 |
-| [TASK-032](04-task/TASK-032-pmvr-role-orchestration.md) | M/V/R invocation、候选权限隔离、Provider 生命周期、reconcile、强制结果绑定和 Candidate 新鲜度 | 独立 V 执行伪 Provider/篡改/超时/取消/崩溃定向 Gate；独立 R 复核 | 2026-09-06 防卡死专项 V/R 已完成；全工单仍待独立验收 | 待验证 | `src/role-orchestrator.ts`、`src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs` | 2026-09-06 |
-| [TASK-034](04-task/TASK-034-report-only-scheduler.md) | canonical report、cursor、去重、Ready/blocked、质量指标、Pause 和并发扫描 | 独立 V 执行多 Project/过期/损坏/并发/Secret 定向 Gate；独立 R 复核 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/report-scheduler.ts`、`test/report-scheduler.test.mjs` | 2026-09-04 |
-| [TASK-035](04-task/TASK-035-scheduler-leases-controls.md) | Project/Task lease、fencing、resource claim、Pause/Kill/reconcile 和 denylist | 独立 V 执行并发、故障注入、陈旧 Worker 和 PID/回调对抗；独立 R 复核 | 2026-09-06 Supervisor/取消/锁/波次熔断专项 V/R 已完成；全工单仍待独立验收 | 待验证 | `src/scheduler-control.ts`、`test/scheduler-control.test.mjs` | 2026-09-06 |
-| [TASK-036](04-task/TASK-036-gate-planner-spring-toolchain.md) | v2 Gate Planner、阶段/范围、影响升级、Spring Maven/Gradle 检测和原生 Evidence | 独立 V 执行真实 Maven/Gradle Fixture、零测试/篡改/漂移；独立 R 复核 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/toolchain.ts`、`test/toolchain.test.mjs` | 2026-09-04 |
-| [TASK-038](04-task/TASK-038-unified-product-output.md) | `products/` 目录契约、Git 忽略、manifest 与 SHA-256、首个 APK 迁移 | 独立 V 复核目录、清单、忽略规则与哈希；必要时扩展 CLI 发布设计 | 待独立 V/R；未获得正式验证授权 | 待验证 | `products/README.md`、`products/concert-ticket-assistant/0.2.0/` | 2026-09-04 |
-| [TASK-039](04-task/TASK-039-target-task-filename-resolution.md) | 精确/带名称 Task 规格解析、歧义拒绝、target_spec 真实路径与旧行为兼容 | 独立 V 运行 Project/Target Spec 定向 Gate；独立 R 复核目标工程无重复规格 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/project.ts`、`test/project.test.mjs` | 2026-09-19 |
-| [TASK-040](04-task/TASK-040-m-worktree-git-admin-sandbox.md) | M linked-worktree Git 管理目录最小写根、路径逃逸拒绝、参数去重与 V/R 隔离兼容 | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核沙箱边界 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
-| [TASK-041](04-task/TASK-041-candidate-quality-portable-files.md) | 示例环境文件 allowlist、CRLF 兼容与真实 Secret/尾随空格 fail closed | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核质量策略未被弱化 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
-| [TASK-042](04-task/TASK-042-v2-controlled-v-harness-freeze.md) | v2 Controlled V 自动冻结干净候选、collect Evidence 与旧 Harness 状态 fail closed | 独立 V 运行 acceptance-loop 定向 Gate；独立 R 复核候选绑定与状态迁移 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/execution.ts`、`src/acceptance-loop.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
-| [TASK-043](04-task/TASK-043-approved-repository-bash-gates.md) | 仅允许 P 契约精确批准、位于候选 `scripts/` 内的单参数 Bash Gate，并保持 dispatcher fail closed | 独立 V 运行 acceptance-loop/hardening 定向 Gate；独立 R 复核命令和路径边界 | 待独立 V/R；未获得正式验证授权 | 待验证 | `src/execution.ts`、`test/acceptance-loop.test.mjs` | 2026-09-19 |
+| [TASK-028](04-task/TASK-028-execution-view.md) | 当前候选的受管 Playwright Gate 与 v1 Delivery | `4366ed8` 独立技术 V/R 和 REVIEW-1 视觉已 PASS；锁定 Playwright 已真实跑通，待最终工作树 Gate 记录 | Codex | 待验证 | `.spec-loop/output/TASK-028-browser-4366ed8.json`、`reviews/REVIEW-1.md` | 2026-09-29 |
+| [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | v2 Candidate 观察面的当前 revision 人工视觉 | `ed8d0fa` 独立技术 V/R 与桌面/390px Chrome 已 PASS；人工视觉单独决定 | 用户 | 待验证 | `.spec-loop/output/TASK-033-browser-ed8d0fa.json` 与两张 PNG | 2026-09-29 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 
 ## 使用规则
 
+- 已批准 Task/波次内正式 V/R 随执行授权连续推进；新 HEAD 作废旧证据，不要求重复授权。待验证表示证据或验收尚未齐备，不表示每个候选都需要重新授权；按根目录 [执行与交付授权约定](../AGENT.md) 核对范围、Gate、预算和依赖。
 - 只有实现完成且具备验证条件的工单才能进入。
 - 验证失败时写回工单，恢复为进行中并移回待完成看板。
 - 验证通过时同步 Task、Design、Feature、Product，然后删除看板条目。

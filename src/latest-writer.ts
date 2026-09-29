@@ -21,6 +21,20 @@ export async function withOperationTimeout<T>(operation:Promise<T>,timeoutMs:num
   finally{if(timer)clearTimeout(timer)}
 }
 
+export async function withAbortableOperationTimeout<T>(operation: (signal: AbortSignal) => Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('abortable operation timeout must be positive');
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([operation(controller.signal), new Promise<T>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`${label} exceeded ${timeoutMs}ms`);
+        controller.abort(error); reject(error);
+      }, timeoutMs);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
 export function createLatestValueWriter<T>(write: (value: T) => Promise<void>): LatestValueWriter<T> {
   let pending: T | undefined, running: Promise<void> | null = null, closed = false, failed:Error|null=null;
   const stats: LatestWriterStats = { writes_started: 0, writes_completed: 0, coalesced_updates: 0, last_duration_ms: null, max_duration_ms: 0, consecutive_failures: 0, last_error: null, last_write_at: null };

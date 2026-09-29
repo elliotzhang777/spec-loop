@@ -1,10 +1,10 @@
 # TASK-041：候选质量检查兼容示例配置与 CRLF
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-09-19
-- 最后更新：2026-09-19
+- 最后更新：2026-09-29
 - 所属设计：[DES-004](../03-design/DES-004-controlled-automation-controller.md)
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -30,7 +30,7 @@
 
 - 放宽真实 Secret 检查；
 - 忽略普通源码或脚本中的尾随空格；
-- 正式 V/R、完整 Gate、merge、push 或发布。
+- 完整 Gate、merge、push 或发布；独立定向 V/R 已在批准范围内完成。
 
 ## 验收标准
 
@@ -42,15 +42,16 @@
 ## 验证范围
 
 - `scope_kind: task`，`coverage: targeted`。
-- 本轮只做实现与快速反馈；正式独立 V/R 需另获当前稳定候选授权。
+- 当前执行约定允许已批准 Task 内连续完成定向 V/R；候选变化重新绑定证据。
 
 ## 交付记录
 
-- 完成日期：2026-09-19，实现候选待正式验证。
+- 完成日期：2026-09-29；候选 `eca847d` 独立 Light V/R 双 PASS。
 - 变更文件/交付物：`src/role-orchestrator.ts`、`test/acceptance-loop.test.mjs`。
 - 快速反馈：`npm run build` 通过；`node --test test/acceptance-loop.test.mjs` 18/18 通过。
 - 关键实现：明确 allowlist 三种公开环境示例文件；Git 空白检查启用 `cr-at-eol`，测试候选同时包含 `.env.example` 和 CRLF 文件。
-- 遗留风险：正式独立 V/R 尚未授权。
+- 正式证据：`.spec-loop/output/TASK-041-{V,R}-eca847d.json`。隔离 Git fixture 证实三种公开示例与纯 CRLF PASS；`.env`、其他环境文件、私钥和 LF/CRLF 尾随空格 FAIL。同 HEAD 的构建与 acceptance-loop 34/34 复用 TASK-040 Gate。
+- 遗留风险：此策略按文件名识别敏感文件，不代表示例文件内容的 Secret 扫描；完整 Heavy、merge、push 和发布仍按各自任务执行。
 
 ## 变更记录
 
@@ -58,3 +59,4 @@
 |---|---|---|
 | 2026-09-19 | 创建并开始实施 | 海工 TASK-001 首个干净候选暴露公开示例配置与 Maven Wrapper CRLF 误报 |
 | 2026-09-19 | 实现候选进入待验证 | 构建与 18 项 acceptance-loop 定向回归通过，等待独立正式 V/R |
+| 2026-09-29 | 完成独立 Light V/R 并关闭工单 | AC-1～4 全通过，文件名策略与真实尾随空格边界未弱化 |

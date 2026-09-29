@@ -50,13 +50,13 @@ test('published target-spec releases remain byte-for-byte immutable',async()=>{
   const lock=JSON.parse(await readFile(path.join(root,'releases.json'),'utf8'));
   assert.equal(lock.schema_version,1);
   assert.equal(lock.algorithm,'sha256-path-content-v1');
-  assert.deepEqual(Object.keys(lock.releases),['v1','v2','v3','v4','v5']);
+  assert.deepEqual(Object.keys(lock.releases),['v1','v2','v3','v4','v5','v6']);
   for(const [version,expected] of Object.entries(lock.releases))assert.equal(await digestRelease(path.join(root,version)),expected,`${version} was modified after release`);
 });
 
 test('current backend, frontend and fullstack profiles load the split source specification libraries',async()=>{
   const backend=await loadTargetSpecBundle('backend'),frontend=await loadTargetSpecBundle('frontend'),fullstack=await loadTargetSpecBundle('fullstack');
-  assert.equal(backend.template_version,'2.1.0');
+  assert.equal(backend.template_version,'2.1.1');
   assert.equal(backend.primary_spec_root,'spec');
   assert.equal(backend.backend_task_root,'spec/05-task');
   assert.equal(backend.frontend_task_root,null);

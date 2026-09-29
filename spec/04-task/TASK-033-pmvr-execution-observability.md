@@ -1,10 +1,10 @@
 # TASK-033：P/M/V/R 执行事件与观察面接入
 
-- 状态：进行中
+- 状态：待验证
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-09-04
-- 最后更新：2026-09-06
+- 最后更新：2026-09-29
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -60,7 +60,8 @@
 - cancelled 已成为终态投影，阶段不再继续显示 running；历史完成但无事件的 Task 明示“耗时未记录”，不绘制虚构 DAG。
 - Dashboard 每 Task 最多返回最近 100 个步骤，每步摘要 500 字、引用 10 个，项目诊断 200 条；完整 Event Log 仍保留原始事实。
 - 2026-09-04 快速反馈：`npm run build` 通过；受管角色投影用例通过；`test/execution-view.test.mjs` 15/15 通过。
-- 尚缺真实桌面/窄屏浏览器路径和视觉 Review；当前 in-app Browser 没有可用浏览器实例，因此不能标记待验证或完成。
+- `4366ed8` 独立 V 发现 Candidate 后旧角色仍显示“等待摄入”、v1 State 时间早于 v2 Candidate 使 wall=0；均已在 `ed8d0fa` 修复。独立 [V](../../.spec-loop/output/TASK-033-V-ed8d0fa.json) 与 [R](../../.spec-loop/output/TASK-033-R-ed8d0fa.json) 对 AC-1～7 技术项 PASS；真实 Chrome 桌面/390px、事件链、并发和证据哈希通过。
+- 人工视觉 Review 尚未对 TASK-033 当前 revision 作出独立决定；因此工单保持待验证，不能沿用 TASK-028 的视觉结论。
 
 ## 变更记录
 
@@ -69,3 +70,4 @@
 | 2026-09-04 | 创建并批准 | 为最新版架构补齐 v2 运行事实与观察面之间的显式桥梁 |
 | 2026-09-04 | 开始实现 | 角色事件、v2 Snapshot 投影和 UI 协议标识已接入；等待真实浏览器反馈 |
 | 2026-09-06 | 故障加固 | 修复 cancelled/历史 Task 投影并加入 Snapshot 大小边界与 EPIPE 处理 |
+| 2026-09-29 | 修复 Candidate 终态角色与耗时投影并完成独立技术 V/R | 旧角色不再冒充实时进度，生命周期终点取 Candidate 事件；人工视觉仍待当前 revision 决定 |

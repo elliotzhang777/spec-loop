@@ -80,7 +80,7 @@ Docker/Podman 容器创建、删除命令，Harness 将 coverage、lifecycle 和
 目标进程并记录到 Evidence。只有迁移、初始化、升级/回滚或隔离证明类 Heavy Task
 可以使用 `disposable`，且必须给出原因。
 
-Gate Planner 的影响判断不能自行改变验证阶段。Task/Loop 启动仅进入 `feedback`；只有用户对当前稳定候选显式授权后，Controller 才可请求 `delivery`，阶段验收则单独授权。候选变化后旧授权失效。选择范围必须可解释、可审计；定向 Gate 失败、依赖关系不明确或 touched files 超出声明范围时，Planner 只能建议扩大检查并请求授权，不得静默缩小范围或自行启动正式交付。
+Gate Planner 只生成可解释的建议，不自行授予执行权限。Controller 使用已批准 Task/波次的范围、权限、Gate 计划和预算作为持续执行授权，可在该范围内进入 delivery 并修复复验；候选变化要求重建计划/Evidence，不要求再次授权同一范围。单独 feedback 不升级为 delivery；新增 AC、权限、Gate 计划或预算先暂停受影响范围。最终视觉/Heavy/阶段验收和外部动作统一提交明确决定；既有覆盖与 Evidence 核实不降低。
 
 ### Spring Boot 工具链
 
@@ -121,7 +121,8 @@ Phase 3 T1 runner、TASK-016 验证范围规范和 TASK-019 Playwright Web Gate 
 ## 实际实现
 
 - 已实现：T1 runner 使用固定 cwd、受限环境、timeout，记录退出码、stdout/stderr、artifact hash 与真实 Git HEAD；显式 Playwright Web Gate 解析原生 JSON、归档 HTML/截图/附件 Manifest，并由 Harness Report 复核；显式 task/wave、targeted/full、数据库生命周期和 AC 映射会进入 Gate Evidence。
-- 已形成待验证候选：v2 自动 Gate Plan；Spring Boot Maven/Gradle/Java/module 发现与 Surefire/Gradle JUnit、JaCoCo 原生 Evidence 解析。
+- 已完成：TASK-036 的 v2 Gate Plan 与 Spring Boot Maven/Gradle/Java/module 发现、Surefire/Gradle JUnit 和 JaCoCo Evidence 在 `af57702` 独立 V/R PASS；计划校验批准契约追踪，原生报告绑定同 HEAD 已验证 Gate、环境和候选内容指纹，新增或篡改报告失效。
+- 已完成：TASK-038 的本机 `products/<project-slug>/<version>/` 出口、manifest/SHA256SUMS 与 Git 忽略边界在 `eca847d` 独立 V/R PASS；示例 APK 与源构建物字节哈希一致。版本目录不在 Git HEAD 中，源码为未提交工作树，不能据此推断可重构或真机验收。
 - 未实现：自动 Web 检测；Xcode/iOS、微信小程序的 T2/T3 平台预设和原生结果解析（按本设计保留为后续独立工单）。
 
 ## 变更记录
@@ -135,3 +136,4 @@ Phase 3 T1 runner、TASK-016 验证范围规范和 TASK-019 Playwright Web Gate 
 | 2026-07-26 | 增加 task_scope 与 wave_scope | 多 Task 波次只在最终阶段运行一次全量组合验证 | TASK-016 |
 | 2026-07-26 | 增加 coverage 与数据库生命周期门禁 | 非 Heavy 只跑定向 Gate，普通验证复用长期数据库 | TASK-016 |
 | 2026-09-04 | 将 v2 Gate Planner 与 Spring Boot T2 拆为 TASK-036 | 对齐 P 契约、Controller 计划、V 执行和 R 证据复核边界 | TASK-036 |
+| 2026-09-29 | 本机成品出口完成定向验收 | TASK-038 的目录、清单、哈希和忽略规则独立 V/R PASS；保留本机证据边界 | TASK-038 |

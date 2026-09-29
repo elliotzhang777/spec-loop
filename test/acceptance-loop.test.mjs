@@ -1,18 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { chmod, lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { chmod, lstat, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { processStartedAt } from '../dist/process-control.js'
 import { spawnSync } from 'node:child_process'
 
-import { cli, fillContracts, tempRoot, writeMd } from './helpers.mjs'
+import { cli, fillContracts, readMd, tempRoot, writeMd } from './helpers.mjs'
 import {
+  acceptanceContractInputSchema,
   buildAcceptanceSchedule,
+  cancelAcceptanceRun,
   compileAcceptancePlan,
   readAcceptanceRun,
   reconcileCandidateBaseline,
   recordRResult,
   recordVResult,
   resolveAcceptanceConflict,
+  returnAcceptanceToMaker,
   runControlledV,
   startAcceptanceRun,
   submitMakerCandidate,
@@ -21,6 +26,7 @@ import { addWritableRoots, buildProviderArgs, cancelRoleInvocation, ingestSuccee
 import { inspectSchedulerLiveness, stopTaskExecution } from '../dist/scheduler-control.js'
 import { readExecutionEvents } from '../dist/execution-events.js'
 import { buildExecutionSnapshot } from '../dist/execution-view.js'
+import { freezeControlledVerificationCandidate, runGates } from '../dist/execution.js'
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
@@ -58,6 +64,20 @@ function contract(taskId, overrides = {}) {
   }
 }
 
+test('initial contract IDs are continuous, while revised contracts keep stable ordered IDs', () => {
+  const initial = contract('TASK-REVISION-IDS')
+  const skipped = {
+    ...initial, criteria: [initial.criteria[1]],
+    use_cases: initial.use_cases.filter(item => item.ac.includes('AC-2')),
+    assertions: initial.assertions.filter(item => item.ac.includes('AC-2')),
+    evidence_requirements: initial.evidence_requirements.filter(item => item.ac.includes('AC-2')),
+  }
+  assert.equal(acceptanceContractInputSchema.safeParse(skipped).success, false)
+  assert.equal(acceptanceContractInputSchema.safeParse({ ...skipped, version: 2 }).success, true)
+  assert.equal(acceptanceContractInputSchema.safeParse({ ...initial, version: 2, criteria: [...initial.criteria].reverse() }).success, false)
+  assert.equal(acceptanceContractInputSchema.safeParse({ ...initial, version: 2, criteria: [initial.criteria[0], initial.criteria[0]] }).success, false)
+})
+
 async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true, extraGates = [], environmentPassthrough = []) {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
   const level = contractOverrides.risk ?? 'standard'
@@ -90,7 +110,7 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   await writeMd(path.join(root, '.spec-loop', 'GATES.md'), {
     schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
     environment_passthrough: environmentPassthrough,
-    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: contractValue.tools[0].command, timeout_seconds: 30 }, ...extraGates],
+    gates: [{ id: 'acceptance-test', ac: contractValue.criteria.map(item => item.id), command: contractValue.tools[0].command, timeout_seconds: 30 }, ...extraGates],
   }, '# Gates\n\nThe v2 fixture executes the approved unit acceptance tool.')
   git(repository, ['add', '.'])
   git(repository, ['commit', '-m', 'approved project specification'])
@@ -191,6 +211,24 @@ test('V and R resolve relative Evidence paths from the Project root', async () =
   assert.equal((await recordRResult(f.root, f.taskId, r)).stage, 'candidate')
 })
 
+test('V and R accept plain Evidence filenames beside their RESULT file', async () => {
+  const f = await fixture('acceptance-sibling-evidence-', 'TASK-SIBLING-EVIDENCE-1')
+  for (const role of ['V', 'R']) {
+    const file = await roleInput(f.root, f.taskId, role, 'sibling', {
+      invocation_id: `${role}-sibling`, verdict: 'pass', classification: null, failed_ac: [], message: 'sibling evidence passed',
+    })
+    const result = JSON.parse(await readFile(file, 'utf8'))
+    const directory = path.join(f.root, 'role-evidence', role)
+    await mkdir(directory, { recursive: true })
+    const evidenceName = path.basename(result.evidence[0].file)
+    await writeFile(path.join(directory, evidenceName), await readFile(result.evidence[0].file))
+    result.evidence = result.evidence.map((item) => ({ ...item, file: evidenceName }))
+    const siblingResult = path.join(directory, 'RESULT.json')
+    await writeFile(siblingResult, `${JSON.stringify(result, null, 2)}\n`)
+    assert.equal((role === 'V' ? await recordVResult(f.root, f.taskId, siblingResult) : await recordRResult(f.root, f.taskId, siblingResult)).stage, role === 'V' ? 'v_passed' : 'candidate')
+  }
+})
+
 test('Candidate baseline drift is detected read-only and explicitly requeues M/V/R without merging', async () => {
   const f = await fixture('acceptance-rebaseline-', 'TASK-REBASELINE-1')
   const v = await roleInput(f.root, f.taskId, 'V', 'pass', { invocation_id: 'verifier-rebaseline', verdict: 'pass', classification: null, failed_ac: [], message: 'candidate passed before baseline drift' })
@@ -257,6 +295,9 @@ test('managed role invocations isolate M/V/R and fail closed after snapshot muta
   const secondHeartbeat = JSON.parse(await readFile(heartbeatFile, 'utf8')).heartbeat_at
   assert.ok(Date.parse(secondHeartbeat) > Date.parse(firstHeartbeat))
   assert.equal((await inspectSchedulerLiveness(f.root, 3)).invocations.find(item => item.invocation_id === cancellable.invocation_id).status, 'healthy')
+  const beforeUnknown = await readRoleInvocation(f.root, f.taskId, cancellable.invocation_id)
+  await assert.rejects(reconcileRoleInvocation(f.root, f.taskId, cancellable.invocation_id, { identifyProcess: async () => null }), /identity.*unknown|cannot.*identity/i)
+  assert.deepEqual(await readRoleInvocation(f.root, f.taskId, cancellable.invocation_id), beforeUnknown)
   assert.equal((await cancelRoleInvocation(f.root, f.taskId, cancellable.invocation_id)).status, 'cancelled')
   assert.equal((await running).status, 'cancelled')
   await writeFile(providersFile, fastProviderConfig)
@@ -319,6 +360,86 @@ test('Controlled V freezes a clean v2 candidate and runs only its exactly approv
   assert.equal(harness.head, git(f.workspace, ['rev-parse', 'HEAD']))
 })
 
+test('Controlled V rejects an approved Bash Gate with an absolute interpreter path', async () => {
+  const f = await fixture('acceptance-absolute-bash-', 'TASK-ABSOLUTE-BASH', {
+    tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['/bin/bash', 'scripts/gates/check.sh'], playwright: null }],
+  })
+  await freezeControlledVerificationCandidate(f.root, f.taskId)
+  await assert.rejects(runGates(f.root, f.taskId), /shell or command dispatcher is forbidden/)
+  await assert.rejects(lstat(path.join(f.root, '.spec-loop', 'output', `${f.taskId}-gate-acceptance-test.txt`)), { code: 'ENOENT' })
+})
+
+test('Controlled V rejects a forged approved Bash Gate contract before execution', async () => {
+  const f = await fixture('acceptance-forged-bash-', 'TASK-FORGED-BASH', {
+    tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }],
+  })
+  await freezeControlledVerificationCandidate(f.root, f.taskId)
+  const contractFile = path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md')
+  const original = await readMd(contractFile)
+  const forgedHash = 'a'.repeat(64)
+  original.data.tools[0].command = ['/bin/bash', 'scripts/gates/check.sh']
+  original.data.contract_hash = forgedHash
+  original.data.approval.contract_hash = forgedHash
+  await writeMd(contractFile, original.data, original.body)
+  await writeMd(path.join(f.root, '.spec-loop', 'GATES.md'), {
+    schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    environment_passthrough: [],
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: ['/bin/bash', 'scripts/gates/check.sh'], timeout_seconds: 30 }],
+  }, '# Gates\n\nForged contract must be rejected.')
+  await assert.rejects(runGates(f.root, f.taskId), /v2 Acceptance Contract integrity failure/)
+  await assert.rejects(lstat(path.join(f.root, '.spec-loop', 'output', `${f.taskId}-gate-acceptance-test.txt`)), { code: 'ENOENT' })
+})
+
+test('Controlled V rejects a self-consistent Bash Gate contract that differs from the current Run', async () => {
+  const f = await fixture('acceptance-changed-bash-', 'TASK-CHANGED-BASH', {
+    tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }],
+  })
+  await freezeControlledVerificationCandidate(f.root, f.taskId)
+  const contractFile = path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md')
+  const original = await readMd(contractFile)
+  original.data.tools[0].command = ['bash', 'scripts/gates/./check.sh']
+  const { contract_hash: _stored, approval: _approval, ...input } = original.data
+  const changedHash = createHash('sha256').update(JSON.stringify(acceptanceContractInputSchema.parse(input))).digest('hex')
+  original.data.contract_hash = changedHash
+  original.data.approval.contract_hash = changedHash
+  await writeMd(contractFile, original.data, original.body)
+  await writeMd(path.join(f.root, '.spec-loop', 'GATES.md'), {
+    schema_version: 1, scope_kind: 'task', wave_id: 'WPMVR', coverage: 'targeted', database: { lifecycle: 'persistent', reset: 'fixtures' },
+    environment_passthrough: [],
+    gates: [{ id: 'acceptance-test', ac: ['AC-1', 'AC-2'], command: ['bash', 'scripts/gates/./check.sh'], timeout_seconds: 30 }],
+  }, '# Gates\n\nChanged contract must be rejected.')
+  await assert.rejects(runGates(f.root, f.taskId), /not bound to the current Acceptance Run/)
+  await assert.rejects(lstat(path.join(f.root, '.spec-loop', 'output', `${f.taskId}-gate-acceptance-test.txt`)), { code: 'ENOENT' })
+})
+
+test('Controlled V does not resolve an approved Bash Gate or its tools from injected PATH entries', async () => {
+  const f = await fixture('acceptance-path-bash-', 'TASK-PATH-BASH', {
+    tools: [{ id: 'acceptance-tool', kind: 'command', gate_id: 'acceptance-test', command: ['bash', 'scripts/gates/check.sh'], playwright: null }],
+  })
+  await freezeControlledVerificationCandidate(f.root, f.taskId)
+  const fakebin = path.join(f.root, 'fakebin'), shellCanary = path.join(f.root, 'fake-bash-ran'), nodeCanary = path.join(f.root, 'fake-node-ran')
+  await mkdir(fakebin)
+  await writeFile(path.join(fakebin, 'bash'), `#!/bin/sh\nprintf FAKE_GATE\nprintf x > ${JSON.stringify(shellCanary)}\n`)
+  await writeFile(path.join(fakebin, 'node'), `#!/bin/sh\nprintf FAKE_NODE\nprintf x > ${JSON.stringify(nodeCanary)}\n`)
+  await chmod(path.join(fakebin, 'bash'), 0o755)
+  await chmod(path.join(fakebin, 'node'), 0o755)
+  const oldPath = process.env.PATH
+  process.env.PATH = `${fakebin}${path.delimiter}${oldPath ?? ''}`
+  let results
+  try {
+    results = await runGates(f.root, f.taskId)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+  }
+  assert.equal(results[0].exit_code, 0)
+  const evidence = await readFile(path.join(f.root, results[0].artifact), 'utf8')
+  assert.match(evidence, /acceptance pass/)
+  assert.doesNotMatch(evidence, /FAKE_GATE|FAKE_NODE/)
+  await assert.rejects(lstat(shellCanary), { code: 'ENOENT' })
+  await assert.rejects(lstat(nodeCanary), { code: 'ENOENT' })
+})
+
 test('Controlled V passes only explicitly named task-scoped environment variables to Gates', async () => {
   const f = await fixture('acceptance-controlled-env-', 'TASK-CONTROLLED-ENV-1', {}, true, true, [], ['TASK_GATE_FIXTURE'])
   const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
@@ -343,9 +464,12 @@ test('Controlled V ignores numbered environment variables belonging to other tas
   }
 })
 
-test('Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access', async () => {
+test('Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access', async (t) => {
   const f = await fixture('acceptance-runtime-probe-', 'TASK-RUNTIME-PROBE-1', {}, true)
-  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md'), fakeCodex = path.join(f.root, 'codex'), count = path.join(f.root, 'probe-count.txt')
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md'), fakeCodex = path.join(f.root, 'codex'), count = path.join(f.root,'.spec-loop','shared-cache','tmp','probe-count.txt')
+  const oldHome=process.env.CODEX_HOME,probeHome=path.join(f.root,'probe-home'),workspaceFile=path.join(f.root,'.spec-loop','shared-cache','tmp','probe-workspace.txt');
+  await mkdir(probeHome);await writeFile(path.join(probeHome,'config.toml'),'model = \"fixture\"\n');process.env.CODEX_HOME=probeHome;
+  t.after(()=>{if(oldHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=oldHome});
   await writeFile(fakeCodex, `#!/bin/sh
 set -eu
 for argument in "$@"; do
@@ -356,6 +480,7 @@ case "\${LC_ALL:-}" in *UTF-8*|*utf8*) ;; *) echo 'locale is not UTF-8' >&2; exi
 current=0
 if [ -f ${JSON.stringify(count)} ]; then current=$(sed -n '1p' ${JSON.stringify(count)}); fi
 echo $((current + 1)) > ${JSON.stringify(count)}
+printf '%s\\n' "$PWD" > ${JSON.stringify(workspaceFile)}
 printf '%s\n' SPEC_LOOP_PROBE_OK > "$SPEC_LOOP_EVIDENCE_ROOT/probe-ok.txt"
 printf '%s\n' SPEC_LOOP_PROBE_OK
 `)
@@ -364,10 +489,50 @@ printf '%s\n' SPEC_LOOP_PROBE_OK
   const first = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.match(first.runtime_probe_hash, /^[a-f0-9]{64}$/)
   assert.equal((await readFile(count, 'utf8')).trim(), '1')
+  const probeWorkspace=(await readFile(workspaceFile,'utf8')).trim();assert.match(probeWorkspace,/spec-loop-provider-probe-/);assert.ok(path.relative(f.root,probeWorkspace).startsWith('..'));await assert.rejects(lstat(probeWorkspace),{code:'ENOENT'});
   await cancelRoleInvocation(f.root, f.taskId, first.invocation_id)
+  await utimes(path.join(probeHome,'config.toml'),new Date(),new Date(Date.now()+60_000));
   const second = await prepareRoleInvocation(f.root, f.taskId, 'V')
   assert.equal(second.runtime_probe_hash, first.runtime_probe_hash)
   assert.equal((await readFile(count, 'utf8')).trim(), '1')
+  await writeFile(path.join(probeHome,'config.toml'),'model = \"changed\"\n');
+  const changed=await prepareRoleInvocation(f.root,f.taskId,'V');assert.notEqual(changed.runtime_probe_hash,first.runtime_probe_hash);assert.equal((await readFile(count,'utf8')).trim(),'2');
+  await rm(path.join(f.root,'.spec-loop','provider-probes',`${changed.runtime_probe_hash}.json`))
+  const concurrent=await Promise.all([prepareRoleInvocation(f.root,f.taskId,'V'),prepareRoleInvocation(f.root,f.taskId,'V')])
+  assert.equal(concurrent[0].runtime_probe_hash,concurrent[1].runtime_probe_hash)
+  assert.equal((await readFile(count,'utf8')).trim(),'3','uncached concurrent callers share one paid probe')
+  const runFile=path.join(f.taskRoot,'ACCEPTANCE_RUN.json'),run=JSON.parse(await readFile(runFile,'utf8'));
+  // Only stage the controller fixtures; the assertions below concern startup capability reuse.
+  await writeFile(runFile,JSON.stringify({...run,stage:'v_passed'}));
+  const vRoot=path.join(f.root,'.spec-loop','output',`${f.taskId}-acceptance-v2`,'V');await mkdir(vRoot,{recursive:true});await writeFile(path.join(vRoot,'fixture.json'),'{}');
+  const reviewer=await prepareRoleInvocation(f.root,f.taskId,'R');assert.equal(reviewer.runtime_probe_hash,changed.runtime_probe_hash);assert.equal((await readFile(count,'utf8')).trim(),'3','V and R share startup capability checks, not executions');
+  await writeFile(runFile,JSON.stringify({...run,stage:'m_working'}));
+  const implementer=await prepareRoleInvocation(f.root,f.taskId,'M');assert.notEqual(implementer.runtime_probe_hash,reviewer.runtime_probe_hash);assert.equal((await readFile(count,'utf8')).trim(),'4','writable M capability stays separate');
+})
+
+test('startup probe inherits cancellation and reports consumption before aborting',async()=>{
+  const f=await fixture('acceptance-probe-abort-','TASK-PROBE-ABORT-1',{},true),provider=path.join(f.root,'codex'),pidFile=path.join(f.root,'.spec-loop','shared-cache','tmp','probe.pid')
+  await writeFile(provider,`#!/bin/sh\nfor arg in "$@"; do if [ "$arg" = "--version" ] || [ "$arg" = "--help" ]; then echo 'codex-test 1.0'; exit 0; fi; done\necho $$ > '${pidFile}'\nprintf '%s\\n' '{"usage":{"total_tokens":2,"cost_usd":0.001}}'\nsleep 60 &\nwait\n`)
+  await chmod(provider,0o755)
+  const config=path.join(f.root,'.spec-loop','PROVIDERS.md');await writeFile(config,(await readFile(config,'utf8')).replace('executable: /usr/bin/true',`executable: ${provider}`))
+  const controller=new AbortController(),usage=[]
+  const preparing=prepareRoleInvocation(f.root,f.taskId,'V',{signal:controller.signal,onProbeUsage:value=>usage.push(value)})
+  const assertion=assert.rejects(preparing,/stop probe/),deadline=Date.now()+15_000
+  while(!await readFile(pidFile,'utf8').catch(()=>null)){if(Date.now()>deadline)throw Error('probe failed to start');await new Promise(resolve=>setTimeout(resolve,50))}
+  const pid=Number(await readFile(pidFile,'utf8')),began=Date.now();controller.abort(new Error('stop probe'));await assertion
+  assert.ok(Date.now()-began<5000)
+  assert.equal(usage.length,1);assert.equal(usage[0].total_tokens,2)
+  assert.equal(await processStartedAt(pid),null)
+})
+
+test('heartbeat chatter and token growth do not prevent the Provider idle fuse',async()=>{
+  const f=await fixture('acceptance-noise-idle-','TASK-NOISE-IDLE-1',{},true),provider=path.join(f.root,'noise-provider.mjs')
+  await writeFile(provider,`#!/usr/bin/env node\nif(process.argv.includes('--version')||process.argv.includes('--help')){console.log('codex-test 1.0');process.exit(0)}\nlet tokens=0;setInterval(()=>{console.error('same repeated error');console.log(JSON.stringify({type:'heartbeat',timestamp:Date.now()}));console.log(JSON.stringify({usage:{total_tokens:++tokens,cost_usd:0.001}}));},100);\n`)
+  await chmod(provider,0o755)
+  const config=path.join(f.root,'.spec-loop','PROVIDERS.md');await writeFile(config,(await readFile(config,'utf8')).replace('executable: /usr/bin/true',`executable: ${provider}`).replaceAll('idle_timeout_seconds: 300','idle_timeout_seconds: 10'))
+  const invocation=await prepareRoleInvocation(f.root,f.taskId,'V'),began=Date.now(),result=await runRoleInvocation(f.root,f.taskId,invocation.invocation_id)
+  assert.equal(result.status,'failed');assert.match(result.last_error,/no observable progress/)
+  assert.equal(result.progress_sequence,0);assert.ok(Date.now()-began<20_000)
 })
 
 test('live usage fuse kills the complete Provider process tree before its long sleep finishes', async () => {
@@ -455,6 +620,106 @@ test('provider identity changes fail closed and repeated deterministic launch fa
   git(failed.workspace, ['add', 'new-head.txt'])
   git(failed.workspace, ['commit', '-m', 'different candidate head'])
   await assert.rejects(prepareRoleInvocation(failed.root, failed.taskId, 'V'), /current clean stable candidate HEAD/)
+})
+
+test('custom verification Provider cannot write outside its Evidence root', async () => {
+  const f = await fixture('acceptance-provider-boundary-', 'TASK-PROVIDER-BOUNDARY', {}, true)
+  const marker = `${f.root}-external-side-effect.txt`
+  const script = path.join(f.root, 'external-write-provider.sh')
+  await writeFile(script, `#!/bin/sh\nset -eu\nprintf forbidden > '${marker}'\nprintf evidence > "$SPEC_LOOP_EVIDENCE_ROOT/result.txt"\n`)
+  await chmod(script, 0o755)
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md')
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', `executable: ${script}`))
+  const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+  if (process.platform === 'darwin') {
+    const result = await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)
+    assert.equal(result.status, 'failed')
+  } else await assert.rejects(runRoleInvocation(f.root, f.taskId, invocation.invocation_id), /supported OS process sandbox/)
+  await assert.rejects(readFile(marker, 'utf8'))
+})
+
+test('a PATH alias named codex cannot bypass the Provider sandbox', async () => {
+  const f = await fixture('acceptance-provider-alias-', 'TASK-PROVIDER-ALIAS', {}, true)
+  const marker = `${f.root}-codex-alias-side-effect.txt`
+  const alias = path.join(f.root, 'codex')
+  await writeFile(alias, `#!/bin/sh\nset -eu\nfor arg in "$@"; do if [ "$arg" = "--version" ] || [ "$arg" = "--help" ]; then echo codex-fixture; exit 0; fi; done\ncase "$SPEC_LOOP_INVOCATION_ID" in PROBE-*) printf SPEC_LOOP_PROBE_OK > "$SPEC_LOOP_EVIDENCE_ROOT/probe-ok.txt"; echo SPEC_LOOP_PROBE_OK; exit 0;; esac\nprintf forbidden > '${marker}'\n`)
+  await chmod(alias, 0o755)
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md')
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', 'executable: codex'))
+  const originalPath = process.env.PATH
+  process.env.PATH = `${f.root}${path.delimiter}${originalPath ?? ''}`
+  try {
+    const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+    if (process.platform === 'darwin') assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'failed')
+    else await assert.rejects(runRoleInvocation(f.root, f.taskId, invocation.invocation_id), /supported OS process sandbox/)
+    await assert.rejects(readFile(marker, 'utf8'))
+  } finally { process.env.PATH = originalPath }
+})
+
+test('a forged Codex package path cannot become a trusted Provider', async () => {
+  const f = await fixture('acceptance-provider-forged-codex-', 'TASK-FORGED-CODEX', {}, true)
+  const marker = `${f.root}-forged-codex-side-effect.txt`
+  const packageBin = path.join(f.root, 'node_modules', '@openai', 'codex', 'bin')
+  await mkdir(packageBin, { recursive: true })
+  const fake = path.join(packageBin, 'codex.js')
+  await writeFile(fake, `#!/bin/sh\nset -eu\nfor arg in "$@"; do if [ "$arg" = "--version" ] || [ "$arg" = "--help" ]; then echo codex-fixture; exit 0; fi; done\ncase "$SPEC_LOOP_INVOCATION_ID" in PROBE-*) printf SPEC_LOOP_PROBE_OK > "$SPEC_LOOP_EVIDENCE_ROOT/probe-ok.txt"; echo SPEC_LOOP_PROBE_OK; exit 0;; esac\nprintf forbidden > '${marker}'\n`)
+  await chmod(fake, 0o755)
+  await symlink(fake, path.join(f.root, 'codex'))
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md')
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', 'executable: codex'))
+  const originalPath = process.env.PATH
+  process.env.PATH = `${f.root}${path.delimiter}${originalPath ?? ''}`
+  try {
+    const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+    if (process.platform === 'darwin') assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'failed')
+    else await assert.rejects(runRoleInvocation(f.root, f.taskId, invocation.invocation_id), /supported OS process sandbox/)
+    await assert.rejects(readFile(marker, 'utf8'))
+  } finally { process.env.PATH = originalPath }
+})
+
+test('a forged Codex installation under a substituted HOME stays confined', async () => {
+  const fakeHome = await realpath(await tempRoot('acceptance-fake-home-'))
+  const originalPath = process.env.PATH, originalHome = process.env.HOME
+  process.env.HOME = fakeHome
+  try {
+  const f = await fixture('acceptance-provider-forged-home-', 'TASK-FORGED-HOME', {}, true)
+  const marker = `${f.root}-outside.txt`
+  const install = path.join(fakeHome, '.nvm', 'versions', 'node', 'v99.99.99')
+  const packageBin = path.join(install, 'lib', 'node_modules', '@openai', 'codex', 'bin')
+  const executableBin = path.join(install, 'bin')
+  await mkdir(packageBin, { recursive: true })
+  await mkdir(executableBin, { recursive: true })
+  const fake = path.join(packageBin, 'codex.js')
+  await writeFile(fake, `#!/bin/sh\nset -eu\nfor arg in "$@"; do if [ "$arg" = "--version" ] || [ "$arg" = "--help" ]; then echo codex-fixture; exit 0; fi; done\ncase "$SPEC_LOOP_INVOCATION_ID" in PROBE-*) printf SPEC_LOOP_PROBE_OK > "$SPEC_LOOP_EVIDENCE_ROOT/probe-ok.txt"; echo SPEC_LOOP_PROBE_OK; exit 0;; esac\nprintf forbidden > '${marker}'\n`)
+  await chmod(fake, 0o755)
+  await symlink(fake, path.join(executableBin, 'codex'))
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md')
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', 'executable: codex'))
+  process.env.PATH = `${executableBin}${path.delimiter}${originalPath ?? ''}`
+  const invocation = await prepareRoleInvocation(f.root, f.taskId, 'V')
+  if (process.platform === 'darwin') assert.equal((await runRoleInvocation(f.root, f.taskId, invocation.invocation_id)).status, 'failed')
+  else await assert.rejects(runRoleInvocation(f.root, f.taskId, invocation.invocation_id), /supported OS process sandbox/)
+  await assert.rejects(readFile(marker, 'utf8'))
+  } finally {
+    process.env.PATH = originalPath
+    process.env.HOME = originalHome
+  }
+})
+
+test('Codex diagnostics cannot write outside the Project before role sandboxing', async () => {
+  const f = await fixture('acceptance-codex-diagnostic-', 'TASK-CODEX-DIAGNOSTIC', {}, true)
+  const marker = `${f.root}-outside.txt`
+  const alias = path.join(f.root, 'codex')
+  await writeFile(alias, `#!/bin/sh\nset -eu\nfor arg in "$@"; do if [ "$arg" = "--version" ] || [ "$arg" = "--help" ]; then printf forbidden > '${marker}'; echo codex-fixture; exit 0; fi; done\ncase "$SPEC_LOOP_INVOCATION_ID" in PROBE-*) printf SPEC_LOOP_PROBE_OK > "$SPEC_LOOP_EVIDENCE_ROOT/probe-ok.txt"; echo SPEC_LOOP_PROBE_OK; exit 0;; esac\n`)
+  await chmod(alias, 0o755)
+  const providers = path.join(f.root, '.spec-loop', 'PROVIDERS.md')
+  await writeFile(providers, (await readFile(providers, 'utf8')).replace('executable: /usr/bin/true', 'executable: codex'))
+  const originalPath = process.env.PATH
+  process.env.PATH = `${f.root}${path.delimiter}${originalPath ?? ''}`
+  try {
+    await prepareRoleInvocation(f.root, f.taskId, 'V').catch(() => {})
+    await assert.rejects(readFile(marker, 'utf8'))
+  } finally { process.env.PATH = originalPath }
 })
 
 test('scope, executable and Java requirements fail before an acceptance Run or role invocation starts', async () => {
@@ -616,6 +881,87 @@ test('protected AC cannot be waived and spec replacement must be a newly approve
     action: 'revise_spec_and_reauthorize', actor: 'human-owner', note: 'reuse old contract without version change', ac: [], contract_file: path.join(f.root, `${f.taskId}-contract.json`), reauthorize_budget: true,
   }), /increase version/)
   assert.equal((await readAcceptanceRun(f.root, f.taskId)).stage, 'waiting_human_review')
+})
+
+test('waiving one optional AC preserves every protected criterion and its evidence contract', async () => {
+  const f = await fixture('acceptance-waiver-boundary-', 'TASK-WAIVER-BOUNDARY', { criteria: [
+    { id: 'AC-1', text: 'authorization is enforced', risk_tags: ['authorization'], waivable: false },
+    { id: 'AC-2', text: 'optional formatting remains readable', risk_tags: ['functional'], waivable: true },
+  ] })
+  const input = await roleInput(f.root, f.taskId, 'V', 'waiver-conflict', {
+    invocation_id: 'verifier-waiver-conflict', verdict: 'fail', classification: 'high_risk', failed_ac: ['AC-1'], message: 'authorization requires review',
+  })
+  assert.equal((await recordVResult(f.root, f.taskId, input)).stage, 'waiting_human_review')
+  const oldContract = JSON.parse(await readFile(path.join(f.root, `${f.taskId}-contract.json`), 'utf8'))
+  const replacement = {
+    ...oldContract, version: 2,
+    criteria: oldContract.criteria.filter(item => item.id !== 'AC-2'),
+    use_cases: oldContract.use_cases.filter(item => !item.ac.includes('AC-2')),
+    assertions: oldContract.assertions.filter(item => !item.ac.includes('AC-2')),
+    evidence_requirements: oldContract.evidence_requirements.filter(item => !item.ac.includes('AC-2')),
+  }
+  const file = path.join(f.root, 'waiver-replacement.json')
+  await writeFile(file, `${JSON.stringify({ ...replacement, criteria: [{ ...replacement.criteria[0], text: 'cosmetic check only', risk_tags: ['functional'] }] })}\n`)
+  const decision = { action: 'waive_noncritical', actor: 'human-owner', note: 'waive only optional formatting', ac: ['AC-2'], contract_file: file }
+  await assert.rejects(resolveAcceptanceConflict(f.root, f.taskId, decision), /may only remove the specified AC/)
+  assert.equal((await readAcceptanceRun(f.root, f.taskId)).stage, 'waiting_human_review')
+  await writeFile(file, `${JSON.stringify(replacement)}\n`)
+  assert.equal((await resolveAcceptanceConflict(f.root, f.taskId, decision)).stage, 'm_working')
+  const stored = await readFile(path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), 'utf8')
+  assert.match(stored, /authorization is enforced/)
+  assert.doesNotMatch(stored, /optional formatting remains readable/)
+})
+
+test('waiving a middle AC preserves stable IDs for both surviving criteria', async () => {
+  const taskId = 'TASK-WAIVER-MIDDLE'
+  const original = contract(taskId)
+  const f = await fixture('acceptance-waiver-middle-', taskId, {
+    criteria: [
+      { id: 'AC-1', text: 'authorization is enforced', risk_tags: ['authorization'], waivable: false },
+      { id: 'AC-2', text: 'optional formatting remains readable', risk_tags: ['functional'], waivable: true },
+      { id: 'AC-3', text: 'data integrity is enforced', risk_tags: ['data_integrity'], waivable: false },
+    ],
+    use_cases: [...original.use_cases, { id: 'UC-3', ac: ['AC-3'], scenario: 'check integrity of saved data' }],
+    assertions: [...original.assertions, { id: 'AS-3', ac: ['AC-3'], tool_id: 'acceptance-tool', operator: 'exit_code_zero', expected: 'exit code is zero' }],
+    evidence_requirements: [...original.evidence_requirements, { id: 'ER-3', ac: ['AC-3'], tool_id: 'acceptance-tool', kind: 'test_report', required: true }],
+  })
+  const input = await roleInput(f.root, taskId, 'V', 'middle-conflict', {
+    invocation_id: 'verifier-middle-conflict', verdict: 'fail', classification: 'high_risk', failed_ac: ['AC-1'], message: 'authorization requires review',
+  })
+  assert.equal((await recordVResult(f.root, taskId, input)).stage, 'waiting_human_review')
+  const oldContract = JSON.parse(await readFile(path.join(f.root, `${taskId}-contract.json`), 'utf8'))
+  const replacement = {
+    ...oldContract, version: 2,
+    criteria: oldContract.criteria.filter(item => item.id !== 'AC-2'),
+    use_cases: oldContract.use_cases.filter(item => !item.ac.includes('AC-2')),
+    assertions: oldContract.assertions.filter(item => !item.ac.includes('AC-2')),
+    evidence_requirements: oldContract.evidence_requirements.filter(item => !item.ac.includes('AC-2')),
+  }
+  const file = path.join(f.root, 'middle-waiver.json')
+  await writeFile(file, `${JSON.stringify(replacement)}\n`)
+  assert.equal((await resolveAcceptanceConflict(f.root, taskId, {
+    action: 'waive_noncritical', actor: 'human-owner', note: 'waive only optional formatting', ac: ['AC-2'], contract_file: file,
+  })).stage, 'm_working')
+  const stored = await readFile(path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), 'utf8')
+  assert.match(stored, /AC-3/)
+  assert.doesNotMatch(stored, /optional formatting remains readable/)
+})
+
+test('cancel and return-to-M resolve active conflicts and clear the Review Inbox', async () => {
+  for (const action of ['cancel', 'return']) {
+    const f = await fixture(`acceptance-conflict-${action}-`, `TASK-CONFLICT-${action.toUpperCase()}`)
+    const input = await roleInput(f.root, f.taskId, 'V', action, {
+      invocation_id: `verifier-${action}`, verdict: 'fail', classification: 'high_risk', failed_ac: ['AC-1'], message: 'high risk issue',
+    })
+    const waiting = await recordVResult(f.root, f.taskId, input)
+    assert.equal(waiting.stage, 'waiting_human_review')
+    if (action === 'cancel') assert.equal((await cancelAcceptanceRun(f.root, f.taskId)).stage, 'cancelled')
+    else assert.equal((await returnAcceptanceToMaker(f.root, f.taskId, 'human-owner', 'retry after review', 'command-1')).stage, 'm_working')
+    const conflict = JSON.parse(await readFile(path.join(f.root, '.spec-loop', 'conflicts', `${waiting.active_conflict_id}.json`), 'utf8'))
+    const inbox = JSON.parse(await readFile(path.join(f.root, '.spec-loop', 'REVIEW_INBOX.json'), 'utf8'))
+    assert.equal(conflict.status, 'resolved')
+    assert.deepEqual(inbox.items, [])
+  }
 })
 
 test('R evidence failure routes back to V and both roles require fresh Evidence', async () => {

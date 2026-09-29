@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import { realpath } from 'node:fs/promises'
+import { processStartedAt } from '../dist/process-control.js'
 import { createHash } from 'node:crypto'
 import { Script } from 'node:vm'
 
@@ -16,7 +19,7 @@ import {
 } from '../dist/execution-events.js'
 import { cancelTask } from '../dist/task.js'
 import { finishWorkActivity, runWorkCommand, startWorkActivity } from '../dist/work-activity.js'
-import { buildExecutionSnapshot, MAX_EXECUTION_SNAPSHOT_BYTES } from '../dist/execution-view.js'
+import { buildExecutionSnapshot, compactExecutionSnapshot, MAX_EXECUTION_SNAPSHOT_BYTES } from '../dist/execution-view.js'
 import { closeExecutionViewServer, executionViewStatus, startExecutionViewServer, startManagedExecutionView, stopManagedExecutionView } from '../dist/execution-view-server.js'
 import { unfinishedTaskDependencies } from '../dist/project.js'
 
@@ -74,6 +77,27 @@ test('execution events produce exact active, waiting, wall-clock and current ela
   assert.equal(events[0].kind, 'annotation')
   assert.equal(events.at(-1).kind, 'step_started')
   assert.equal(events.every((event, index) => event.sequence === index + 1), true)
+})
+
+test('a growing Project retains every Task and active detail inside the snapshot limit', async () => {
+  const { root } = await projectFixture('execution-view-project-budget-')
+  await annotateExecution(root, { taskId: 'TASK-VIEW', round: 1, label: '历史进展', summary: '历史步骤', occurredAt: new Date() })
+  const baseline = await buildExecutionSnapshot(root)
+  const step = baseline.tasks[0].steps.at(-1)
+  assert.ok(step)
+  const expanded = structuredClone(baseline)
+  expanded.tasks = Array.from({ length: 74 }, (_, index) => ({
+    ...structuredClone(baseline.tasks[0]), task_id: `TASK-BUDGET-${index + 1}`, current: index === 0,
+    steps: Array.from({ length: 20 }, (_, number) => ({ ...step, id: `STEP-${index}-${number}`, summary: '历史上下文'.repeat(45), order: number })),
+  }))
+  assert.ok(Buffer.byteLength(JSON.stringify(expanded)) > MAX_EXECUTION_SNAPSHOT_BYTES)
+  const bounded = compactExecutionSnapshot(expanded)
+  assert.equal(bounded.tasks.length, 74)
+  assert.equal(bounded.tasks[0].steps.length, 5, 'current Task keeps recent detail')
+  assert.ok(bounded.tasks.slice(1).every(task => task.steps.length >= 1))
+  assert.ok(bounded.tasks.some(task => task.steps.length < 5), 'older detail is compacted as the Project grows')
+  assert.equal(bounded.revision, baseline.revision)
+  assert.ok(Buffer.byteLength(JSON.stringify(bounded)) <= MAX_EXECUTION_SNAPSHOT_BYTES)
 })
 
 test('cancelled tasks close active steps, freeze elapsed time, and bound Dashboard history', async () => {
@@ -320,12 +344,36 @@ approval:
     v_evidence_set_hash: null, r_evidence_set_hash: null,
   }, null, 2)}\n`)
 
-  const snapshot = await buildExecutionSnapshot(root)
+  const invocationId='INV-TASK-VIEW-V-stale',invocation=path.join(output,'invocations',invocationId)
+  await mkdir(invocation,{recursive:true})
+  await writeFile(path.join(invocation,'INVOCATION.json'),JSON.stringify({invocation_id:invocationId,role:'V',status:'succeeded',result_status:'awaiting_ingestion',created_at:new Date().toISOString()}))
+  const startedAt=new Date(Date.now()+1_000)
+  const role=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'role.v',label:'V review',summary:'Independent verification',occurredAt:startedAt})
+  await finishExecutionStep(root,role,{outcome:'success',occurredAt:new Date(startedAt.getTime()+80)})
+  const candidate=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'acceptance.candidate',label:'Candidate',summary:'V and R passed',occurredAt:new Date(startedAt.getTime()+100)})
+  await finishExecutionStep(root,candidate,{outcome:'success',occurredAt:new Date(startedAt.getTime()+120)})
+
+  const snapshot = await buildExecutionSnapshot(root,new Date(startedAt.getTime()+200))
   const task = snapshot.tasks.find((item) => item.task_id === 'TASK-VIEW')
   assert.equal(task.acceptance.fresh, true)
   assert.equal(task.status, 'delivered')
-  assert.equal(task.record_kind, 'historical_no_runtime')
+  assert.equal(task.record_kind, 'historical_runtime')
+  assert.equal(task.runtime, null)
+  assert.ok(task.wall_clock_ms >= 120)
+  assert.ok(task.wall_clock_ms >= task.active_ms)
   assert.equal(snapshot.active_task, null)
+
+  const holds=path.join(root,'.spec-loop/scheduler/wave-reviews/tasks');await mkdir(holds,{recursive:true})
+  const hold=path.join(holds,'TASK-VIEW.json')
+  const factsHash='b'.repeat(64),reviewBase={schema_version:1,wave_id:'WAVE-pending',project_id:'PROJ-VIEW',tasks:[{task_id:'TASK-VIEW',facts_hash:factsHash}]}
+  const bundleHash=createHash('sha256').update(JSON.stringify(reviewBase)).digest('hex')
+  await writeFile(path.join(root,'.spec-loop/scheduler/wave-reviews/WAVE-pending.json'),JSON.stringify({schema_version:1,bundle:{...reviewBase,bundle_hash:bundleHash},status:'awaiting_wave_review',decision:null}))
+  await writeFile(hold,JSON.stringify({schema_version:1,task_id:'TASK-VIEW',wave_id:'WAVE-pending',bundle_hash:bundleHash,facts_hash:factsHash,status:'awaiting_wave_review'}))
+  assert.equal((await buildExecutionSnapshot(root)).tasks.find(item=>item.task_id==='TASK-VIEW').status,'awaiting_wave_review')
+  const decisionId='00000000-0000-4000-8000-000000000000'
+  await writeFile(path.join(root,'.spec-loop/scheduler/wave-reviews/WAVE-pending.json'),JSON.stringify({schema_version:1,bundle:{...reviewBase,bundle_hash:bundleHash},status:'reviewed',decision:{request_id:decisionId,bundle_hash:bundleHash,applied:['TASK-VIEW'],choices:[{task_id:'TASK-VIEW',action:'accept'}]}}))
+  await writeFile(hold,JSON.stringify({schema_version:1,task_id:'TASK-VIEW',wave_id:'WAVE-pending',bundle_hash:bundleHash,status:'accepted',decision_id:decisionId}))
+  assert.equal((await buildExecutionSnapshot(root)).tasks.find(item=>item.task_id==='TASK-VIEW').status,'delivered')
 })
 
 test('target-only Heavy Tasks remain visible without fabricated execution timing', async () => {
@@ -625,4 +673,36 @@ test('background execution view lifecycle is idempotent and rejects stale proces
   } finally {
     if ((await executionViewStatus(root).catch(() => ({ running: false }))).running) await stopManagedExecutionView(root)
   }
+})
+
+test('a living slow dashboard keeps its owner marker and is not started twice',async()=>{
+  const {root}=await projectFixture('execution-view-slow-'),server=createServer(()=>{})
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  try{
+    const marker={schema_version:1,project_root:await realpath(root),pid:process.pid,process_started_at:await processStartedAt(process.pid),url:`http://127.0.0.1:${server.address().port}/`,started_at:new Date().toISOString()},file=path.join(root,'.spec-loop','execution-view.json')
+    await writeFile(file,JSON.stringify(marker))
+    const status=await executionViewStatus(root);assert.equal(status.running,true);assert.equal(status.reason,'unhealthy')
+    assert.deepEqual(await startManagedExecutionView(root),marker)
+    assert.deepEqual(JSON.parse(await readFile(file,'utf8')),marker)
+  }finally{await closeExecutionViewServer(server)}
+})
+
+test('dashboard shutdown bounds requests that never finish',async()=>{
+  const server=createServer(()=>{});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  const pending=fetch(`http://127.0.0.1:${server.address().port}/`,{signal:AbortSignal.timeout(5000)}).catch(()=>null)
+  await new Promise(resolve=>setTimeout(resolve,50))
+  const began=Date.now();await closeExecutionViewServer(server);assert.ok(Date.now()-began<2000);assert.equal(await pending,null)
+})
+
+test('verified event cache isolates callers, handles appended history and still rejects rewritten prefixes',async()=>{
+  const {root}=await projectFixture('execution-events-cache-')
+  const start=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'task.attempt',label:'缓存校验开始',summary:'验证追加与调用方隔离'})
+  const first=await readExecutionEvents(root),expected=first[0].summary;first[0].summary='caller mutation'
+  assert.equal((await readExecutionEvents(root))[0].summary,expected)
+  await finishExecutionStep(root,start,{outcome:'success',summary:'追加终态后验证完整链'})
+  const updated=await readExecutionEvents(root);assert.equal(updated.length,first.length+1)
+  assert.equal(updated.at(-1).outcome,'success')
+  const file=path.join(root,'.spec-loop','EXECUTION_EVENTS.jsonl'),raw=await readFile(file,'utf8'),tampered=JSON.parse(raw.split('\n')[0]);tampered.summary='modified cached prefix'
+  await writeFile(file,JSON.stringify(tampered)+'\n'+raw.split('\n').slice(1).join('\n'))
+  await assert.rejects(readExecutionEvents(root),/hash mismatch/)
 })

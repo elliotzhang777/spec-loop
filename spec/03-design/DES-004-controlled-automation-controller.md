@@ -116,14 +116,24 @@ R: independent evidence review → Candidate | M | V | human
 
 | 工单 | 交付物 | 依赖 | 状态 |
 |---|---|---|---|
-| [TASK-030](../04-task/TASK-030-pmvr-acceptance-loop.md) | v2 旁路协议、执行计划、V/R 结果、预算和人工冲突 | TASK-013、019 | 待验证 |
-| [TASK-031](../04-task/TASK-031-v2-contract-onboarding.md) | P 契约同步生成、新任务默认 v2 与模板接入 | TASK-030 | 待验证 |
-| [TASK-032](../04-task/TASK-032-pmvr-role-orchestration.md) | M/V/R 真实 invocation 隔离与 Controller 调度 | TASK-031 | 已批准 |
+| [TASK-030](../04-task/TASK-030-pmvr-acceptance-loop.md) | v2 旁路协议、执行计划、V/R 结果、预算和人工冲突 | TASK-013、019 | 已完成 |
+| [TASK-031](../04-task/TASK-031-v2-contract-onboarding.md) | P 契约同步生成、新任务默认 v2 与模板接入 | TASK-030 | 已完成 |
+| [TASK-032](../04-task/TASK-032-pmvr-role-orchestration.md) | M/V/R 真实 invocation 隔离与 Controller 调度 | TASK-031 | 已完成 |
+| [TASK-039](../04-task/TASK-039-target-task-filename-resolution.md) | 精确/带名称目标 Task 规格解析与歧义拒绝 | TASK-031 | 已完成 |
+| [TASK-040](../04-task/TASK-040-m-worktree-git-admin-sandbox.md) | M linked-worktree Git 管理根最小授权与 V/R 隔离 | TASK-032 | 已完成 |
+| [TASK-041](../04-task/TASK-041-candidate-quality-portable-files.md) | 公开示例配置与 CRLF 候选质量兼容 | TASK-032、040 | 已完成 |
+| [TASK-042](../04-task/TASK-042-v2-controlled-v-harness-freeze.md) | v2 Controlled V 自动冻结干净候选与 collect 证据 | TASK-030、032 | 已完成 |
+| [TASK-043](../04-task/TASK-043-approved-repository-bash-gates.md) | P 契约与 Run 精确绑定的仓库 Bash Gate | TASK-030、042 | 已完成 |
 | [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 唯一全量 P/M/V/R Heavy Dogfood | TASK-026、029、031～036 | 已批准 |
 
 ## 实际实现
 
-- 最终实现：TASK-030/031 已形成待验证候选；真实隔离角色编排由 TASK-032 继续实现。
+- 实际实现：TASK-030/031 在候选 `af57702` 重新通过独立 V/R。v2 批准以项目目录外的本机私有密钥签署，doctor/status 校验 Contract 与 Run hash；TASK-032 的真实隔离角色编排在 `af57702` 重新通过独立 V/R，包含 Provider 准备/诊断与运行阶段的进程沙箱及真实 Codex 探针。
+- 已完成：TASK-039 在 `eca847d` 独立 V/R PASS；`triage create-task --adopt-existing` 按精确或唯一带名称规格原位采用，同 ID 多候选 fail closed，海工 live 目录仅保留一份 TASK-001。
+- 已完成：TASK-040 在 `eca847d` 独立 V/R PASS；M 仅附加真实 worktree/admin 与 common Git 根，参数去重并拒绝越界/符号链接，V/R 仍只给独立 Evidence 根。
+- 已完成：TASK-041 在 `eca847d` 独立 V/R PASS；精确放行三种 `.env` 示例、允许纯 CRLF，真实环境/私钥文件与尾随空格保持 fail closed。
+- 已完成：TASK-042 在 `eca847d` 独立 V/R PASS；缺失旧 Harness state 可自动产生 HEAD/base/status/diff/content 指纹及 collect hash，脏树和不匹配候选 fail closed。
+- 已完成：TASK-043 在 `4366ed8` 独立 V/R PASS；`bash <scripts/...sh>` 必须精确匹配经完整性校验且与当前 Run 相符的 P 契约，脚本不可越界/链接，实际运行固定 `/bin/bash` 和受控 PATH。完整 Phase 4 Heavy 尚未执行。
 
 ## 变更记录
 
@@ -132,3 +142,8 @@ R: independent evidence review → Candidate | M | V | human
 | 2026-07-12 | 加入 Approval 驱动和自动角色链 | 最终 Roadmap | - |
 | 2026-08-31 | 将 Checker/Judge 明确拆分为 V/R，并新增共享返工预算、Conflict Record 与 v1 双轨兼容 | 用户确认的新验收治理流程 | TASK-030 |
 | 2026-09-04 | 将目标架构拆为内核、接入、真实角色编排和最终 Heavy | 避免一个工单同时承担协议、运行时和阶段验收 | TASK-030～032、037 |
+| 2026-09-29 | 目标 Task 文件名解析完成定向验收 | TASK-039 独立 V/R PASS，保持目标规格单一权威与真实路径绑定 | TASK-039 |
+| 2026-09-29 | M Git 管理根最小授权完成定向验收 | TASK-040 独立 V/R PASS；不扩大到仓库父目录或 V/R 候选写权限 | TASK-040 |
+| 2026-09-29 | 候选质量兼容完成定向验收 | TASK-041 独立 V/R PASS，保留敏感文件和真实空白错误拒绝 | TASK-041 |
+| 2026-09-29 | Controlled V 自动冻结完成定向验收 | TASK-042 独立 V/R PASS，同候选幂等且不跳过 Gate 前后指纹校验 | TASK-042 |
+| 2026-09-29 | 仓库 Bash Gate 完成定向验收 | TASK-043 独立 V/R PASS；契约完整性、Run 绑定及 PATH 假解释器复现均封闭 | TASK-043 |

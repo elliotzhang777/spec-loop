@@ -4,6 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, sha256 } from '../files.js';
 import { withOwnedDirectoryLock } from '../owned-lock.js';
+import { finishConfirmationWait, readExecutionEvents, startConfirmationWait, type ConfirmationWaitKind } from '../execution-events.js';
 import { feishuConnectorRoot } from './feishu.js';
 
 const requestTypeSchema = z.enum(['proposal', 'needs_user', 'visual_review', 'verification', 'heavy_acceptance']);
@@ -23,6 +24,15 @@ const actionsByType: Record<z.infer<typeof requestTypeSchema>, Array<z.infer<typ
   verification: ['authorize_verification', 'defer_verification'],
   heavy_acceptance: ['accept_heavy', 'reject_heavy'],
 };
+function waitKind(type:ConfirmationRequest['type']):ConfirmationWaitKind|null{return type==='visual_review'?null:type}
+async function startRequestWait(root:string,request:ConfirmationRequest){const kind=waitKind(request.type);if(kind)await startConfirmationWait(root,{taskId:request.task_id,round:request.round,requestId:request.request_id,kind,occurredAt:new Date(request.created_at)})}
+async function finishRequestWait(root:string,request:ConfirmationRequest,now:Date){
+  if(!waitKind(request.type)||request.status==='pending')return;
+  // Authority may have committed while the event store was unavailable. Repair the
+  // missing start from the immutable request before recording its terminal state.
+  await startRequestWait(root,request);
+  await finishConfirmationWait(root,{requestId:request.request_id,outcome:request.status==='consumed'?'success':request.status==='rejected'?'failure':'interrupted',occurredAt:request.consumed_at?new Date(request.consumed_at):now});
+}
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const publicTextSchema = z.string().trim().min(1).max(500).refine(
@@ -351,7 +361,7 @@ export async function createConfirmationRequest(projectRoot: string, input: {
 }): Promise<ConfirmationRequest> {
   if (!Number.isInteger(input.ttlSeconds) || input.ttlSeconds < 60 || input.ttlSeconds > 7 * 24 * 60 * 60) throw new Error('confirmation ttl is outside the allowed range');
   const root = await confirmationRoot(projectRoot);
-  return withConfirmationLock(root, async () => {
+  const request=await withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events).catch((error) => { throw error; });
     const authority = await readAuthorityProjection(root) ?? emptyAuthorityProjection();
@@ -382,20 +392,39 @@ export async function createConfirmationRequest(projectRoot: string, input: {
     await appendEvent(projectRoot, root, events, authority, 'created', request, request.created_at);
     return request;
   });
+  await startRequestWait(projectRoot,request);
+  return request;
 }
 
 export async function listConfirmationRequests(projectRoot: string): Promise<ConfirmationRequest[]> {
   const root = await confirmationRoot(projectRoot);
-  return withConfirmationLock(root, async () => {
+  const { requests, terminalTimes } = await withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     if (!(await verifyProjection(root, events))) {
       const authority = await readAuthorityProjection(root);
-      if (!authority && events.length === 0) return [];
+      if (!authority && events.length === 0) return { requests: [], terminalTimes: new Map<string, string>() };
       if (!authority) throw new Error('confirmation current authority projection is missing; it cannot be rebuilt from request history');
       await writeStore(projectRoot, root, events, authority);
     }
-    return deriveRequests(events);
+    return {
+      requests: deriveRequests(events),
+      terminalTimes: new Map(events.map((event) => [event.request.request_id, event.occurred_at])),
+    };
   });
+  if (requests.some((request) => waitKind(request.type)) && await lstat(path.join(projectRoot, '.spec-loop', 'PROJECT.md')).catch(() => null)) {
+    const execution = await readExecutionEvents(projectRoot);
+    const starts = new Map(execution.filter((event) => event.kind === 'wait_started' && event.run_id).map((event) => [event.run_id, event]));
+    const ended = new Set(execution.filter((event) => event.kind === 'wait_ended').map((event) => event.step_run_id));
+    for (const request of requests) {
+      if (!waitKind(request.type)) continue;
+      const start = starts.get(request.request_id);
+      if (!start) await startRequestWait(projectRoot, request);
+      if (request.status !== 'pending' && (!start || !ended.has(start.step_run_id))) {
+        await finishRequestWait(projectRoot, request, new Date(terminalTimes.get(request.request_id) ?? request.created_at));
+      }
+    }
+  }
+  return requests;
 }
 
 export async function readConfirmationRequestSnapshot(projectRoot: string, requestId: string): Promise<ConfirmationRequest | null> {
@@ -432,7 +461,7 @@ export async function checkConfirmationProjection(projectRoot: string): Promise<
 
 async function mutateRequest(projectRoot: string, requestId: string, mutation: (request: ConfirmationRequest, now: Date, root: string, authority: z.infer<typeof authorityProjectionSchema>['authorities'][number]) => { event: HistoryEvent['event_type']; request: ConfirmationRequest } | null | Promise<{ event: HistoryEvent['event_type']; request: ConfirmationRequest } | null>, now = new Date()): Promise<ConfirmationRequest> {
   const root = await confirmationRoot(projectRoot);
-  return withConfirmationLock(root, async () => {
+  const request=await withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events);
     const authorities = await readAuthorityProjection(root);
@@ -448,6 +477,8 @@ async function mutateRequest(projectRoot: string, requestId: string, mutation: (
     await appendEvent(projectRoot, root, events, authorities, result.event, result.request, now.toISOString());
     return result.request;
   });
+  await finishRequestWait(projectRoot,request,now);
+  return request;
 }
 
 export async function invalidateConfirmationRequest(projectRoot: string, requestId: string, reason: string, now = new Date()): Promise<ConfirmationRequest> {
@@ -526,7 +557,7 @@ export async function consumeConfirmationRequest(projectRoot: string, requestId:
 
 export async function expireConfirmationRequests(projectRoot: string, now = new Date()): Promise<number> {
   const root = await confirmationRoot(projectRoot);
-  return withConfirmationLock(root, async () => {
+  const expired=await withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events);
     const authorities = await readAuthorityProjection(root);
@@ -538,8 +569,10 @@ export async function expireConfirmationRequests(projectRoot: string, now = new 
       authorities.authorities = authorities.authorities.filter((item) => item.request_id !== current.request_id);
     }
     if (expired.length) await writeStore(projectRoot, root, events, authorities);
-    return expired.length;
+    return expired;
   });
+  for(const request of expired)await finishRequestWait(projectRoot,{...request,status:'expired'},now);
+  return expired.length;
 }
 
 export async function regenerateConfirmationRequest(projectRoot: string, requestId: string, input: {
@@ -553,7 +586,7 @@ export async function regenerateConfirmationRequest(projectRoot: string, request
 }): Promise<ConfirmationRequest> {
   if (!Number.isInteger(input.ttlSeconds) || input.ttlSeconds < 60 || input.ttlSeconds > 7 * 24 * 60 * 60) throw new Error('confirmation ttl is outside the allowed range');
   const root = await confirmationRoot(projectRoot);
-  return withConfirmationLock(root, async () => {
+  const replacement=await withConfirmationLock(root, async () => {
     const events = await readHistory(root);
     await verifyProjection(root, events);
     const authorities = await readAuthorityProjection(root);
@@ -579,8 +612,11 @@ export async function regenerateConfirmationRequest(projectRoot: string, request
     appendEventValue(events, 'created', replacement, replacement.created_at);
     authorities.authorities.push({ request_id: replacement.request_id, revision: replacement.revision, round: replacement.round, risk: replacement.risk, content_hash: replacement.content_hash, facts: replacement.facts, generation: 1, updated_at: replacement.created_at });
     await writeStore(projectRoot, root, events, authorities);
-    return replacement;
+    return { current, replacement };
   });
+  await finishRequestWait(projectRoot,{...replacement.current,status:'invalidated'},input.now??new Date());
+  await startRequestWait(projectRoot,replacement.replacement);
+  return replacement.replacement;
 }
 
 const actionLabels: Record<ConfirmationAction, string> = {

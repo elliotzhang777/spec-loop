@@ -1,10 +1,10 @@
 # TASK-038：统一最终成品出口
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-09-04
-- 最后更新：2026-09-04
+- 最后更新：2026-09-29
 - 所属设计：[DES-006](../03-design/DES-006-engineering-toolchain-adapters.md)
 - 所属特性：[FEAT-006](../02-feature/FEAT-006-engineering-toolchains.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -46,16 +46,16 @@
 
 ## 交付记录
 
-- 完成日期：待正式验证
+- 完成日期：2026-09-29；候选 `eca847d` 独立 Light V/R 双 PASS
 - 变更文件/交付物：`products/README.md`、根目录规范、点点助手 0.2.0 APK
-- 遗留风险：当前只建立目录与手工发布约定，尚未实现 CLI 原子发布命令。
+- 遗留风险：当前只建立目录与手工发布约定，尚未实现 CLI 原子发布命令；本机忽略的版本目录不在候选 HEAD 中，manifest 标记源代码为 `uncommitted-working-tree`，不能声称可由该 HEAD 重构或已完成真机验收。
 
 ## 定向检查记录
 
 - `manifest.json` 已通过 Node.js JSON 解析。
 - `shasum -a 256 -c SHA256SUMS`：`TapFlow-0.2.0-universal-debug.apk: OK`。
 - `git check-ignore`：版本目录内 APK 与元数据均命中 `products/*`；`products/README.md` 可被 Git 跟踪。
-- 尚未获得正式 Verification/Delivery 授权，工单保持“待验证”。
+- 2026-09-29 独立 V/R 在干净候选 `eca847d` 对 AC-1～4 均 PASS：`.spec-loop/output/TASK-038-{V,R}-eca847d.json`。本机源构建 APK 与成品 APK 均为 41,886 字节、SHA-256 `ad50b1ef105a40a08e5c7d1db6ff228e6379e9530169fc9739cf383863d61506`；设备测试仍为 pending。
 
 ## 变更记录
 
@@ -63,3 +63,4 @@
 |---|---|---|
 | 2026-09-04 | 创建工单并开始实施 | 用户要求集中保存各项目最终成品 |
 | 2026-09-04 | 完成目录规范、首个成品迁移和定向检查 | 形成统一最终成品入口 |
+| 2026-09-29 | 完成独立 Light V/R 并关闭工单 | AC-1～4 全通过；本机 APK 事实与未入 Git、未真机验收的边界已明确记录 |

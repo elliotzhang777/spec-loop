@@ -1,10 +1,10 @@
 # TASK-030：P/M/V/R 验收闭环内核
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P0
 - 负责人：Codex
 - 创建日期：2026-08-31
-- 最后更新：2026-09-04
+- 最后更新：2026-09-29
 - 所属设计：[DES-004](../03-design/DES-004-controlled-automation-controller.md)
 - 所属特性：[FEAT-004](../02-feature/FEAT-004-controlled-automation.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -19,9 +19,9 @@
 
 ## 批次边界
 
-- M 实现和自测已经完成；当前只等待稳定候选上的独立 V 与独立 R。
-- 用户本次“开始批次任务”授权 P4-B1 的整理、实现和快速反馈检查，不自动升级为正式 V/R、完整 Gate 或 Heavy Delivery。
-- TASK-030 正式通过后才能启动 TASK-031 的新任务默认 v2 接入。
+- 项目批准入口变更后的最终候选 `7177a72` 已重新通过独立 V/R。
+- 2026-09-26 起按根目录执行约定：已批准工单范围内的定向正式 V/R 随执行授权连续推进；本工单仍不自动升级为最终 Heavy Delivery、全量 Gate 或合并/发布。
+- TASK-030 已在 `7177a72` 重新通过独立 V/R，TASK-031 的依赖条件满足。
 
 ## 工作范围
 
@@ -93,14 +93,27 @@
 | 日期 | 验证人 | 环境 | 结果 | 证据/输出 |
 |---|---|---|---|---|
 | 2026-08-31 | M/Codex（非独立 V/R） | Node 22，本地临时 Git/Worktree fixture | 自测 PASS | `npm run build`；`node --test test/acceptance-loop.test.mjs`：7/7；v1 `project.test.mjs + e2e.test.mjs`：9/9 |
+| 2026-09-29 | 独立 V | 干净候选 `cbc1a5d`，定向夹具 | FAIL（AC-7/9） | `.spec-loop/output/TASK-030-V-cbc1a5d.json`；常规 36/36 PASS，但对抗夹具复现豁免弱化受保护 AC、取消后幽灵 Inbox、退回 M 后陈旧 Inbox |
+| 2026-09-29 | 独立 V | 干净候选 `5bc623d`，定向夹具 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-V-5bc623d.json`；构建、38/38 定向测试及补充对抗复现通过 |
+| 2026-09-29 | 独立 R | 干净候选 `5bc623d`，定向复核 | FAIL（AC-9） | `.spec-loop/output/TASK-030-R-5bc623d.json`；中间非关键 AC 的合法豁免被初版连续编号规则拒绝 |
+| 2026-09-29 | 独立 V | 干净候选 `eb05e92`，定向夹具 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-V-eb05e92.json`；构建、40/40 定向测试、7/7 独立 Schema 对抗检查通过 |
+| 2026-09-29 | 独立 R | 干净候选 `eb05e92`，定向复核 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-R-eb05e92.json`；5/5 关键测试和 Evidence/hash/中间 AC 豁免复核通过 |
+| 2026-09-29 | 独立 V | 干净候选 `aba8744`，直接依赖重绑 | FAIL（AC-1） | `.spec-loop/output/TASK-030-V-aba8744.json`；批准 JSON 与同目录摘要一并改写后，旧批准可启动 Run |
+| 2026-09-29 | 独立 V/R | 干净候选 `7177a72`，定向重绑 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-V-7177a72.json`、`.spec-loop/output/TASK-030-R-7177a72.json`；构建、合并定向 52/52、R 6/6 及批准对抗复验通过 |
+| 2026-09-29 | 独立 V/R | 干净候选 `7233571`，直接依赖重绑 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-V-7233571.json`、`.spec-loop/output/TASK-030-R-7233571.json` |
+| 2026-09-29 | 独立 V/R | 干净候选 `af57702`，直接依赖重绑 | PASS（AC-1～10） | `.spec-loop/output/TASK-030-V-af57702.json`、`.spec-loop/output/TASK-030-R-af57702.json` |
+
+2026-09-29 M 已集中修复上述三个缺口：`waive_noncritical` 的替换契约只能移除明确豁免的 AC 与相关覆盖，其他 criteria、依赖、风险、工具、断言、证据和预算必须保持；取消时原子结清活动 Conflict，退回 M 后重建 Inbox。
+
+独立 R 的 AC-9 缺口已修复：初版契约要求连续编号，修订契约允许豁免造成的稳定编号空洞，仍校验唯一、顺序及全量覆盖；豁免操作仍逐字段比对非豁免内容。后续批准入口的 AC-1 回归已通过本机私有密钥修复并在 `7177a72` 独立 V/R 复验。最终 Phase 4 Heavy 和真实业务角色属后续工单。
 
 ## 关闭检查
 
-- [ ] 验收标准全部通过
-- [ ] 测试/检查结果已记录
-- [ ] 设计差异已记录
-- [ ] 上游实际结果已更新
-- [ ] 已从两个看板移除
+- [x] 验收标准全部通过
+- [x] 测试/检查结果已记录
+- [x] 设计差异已记录
+- [x] 上游实际结果已更新
+- [x] 已从两个看板移除
 
 ## 变更记录
 
@@ -109,3 +122,5 @@
 | 2026-08-31 | 创建工单并开始实施 | 用户批准按新 P/M/V/R 流程重构引擎 |
 | 2026-08-31 | 完成 v2 旁路内核与定向自测，转待验证 | 不以实现者自测替代独立 V/R |
 | 2026-09-04 | 纳入 P4-B1 | 与 TASK-027/028 的 v1 兼容收口并行准备，保留正式 V/R 授权边界 |
+| 2026-09-29 | `eb05e92` 独立 V/R PASS 并关闭 | 修复中间 AC 豁免编号冲突，逐项验收通过 |
+| 2026-09-29 | `7177a72` 独立 V/R 重绑 PASS | 批准入口改动后关闭 AC-1 回归 |

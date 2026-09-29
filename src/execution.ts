@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, readlink, realpath, rm } from 'node:fs
 import path from 'node:path';
 import { z } from 'zod';
 import YAML from 'yaml';
-import { atomicWriteMany, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
+import { atomicWriteMany, atomicWriteTelemetry, removeTelemetryFile, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
 import { readProject, readProviderConfig, scanTasks, verifyTaskExecutionApproval } from './project.js';
 import { evidenceRecords, readState } from './task.js';
 import { acceptanceSchema, planSchema } from './schemas.js';
@@ -13,7 +13,8 @@ import type { WebGateRequirement } from './model.js';
 import { validImage } from './review.js';
 import { finishExecutionStep, reconcileInterruptedExecutionSteps, startExecutionStep, type ExecutionOutcome, type ExecutionStepType } from './execution-events.js';
 import { startManagedProcess } from './managed-process.js';
-import { withOperationTimeout } from './latest-writer.js';
+import { createProviderObservations } from './provider-observations.js';
+import { withOperationTimeout, withAbortableOperationTimeout } from './latest-writer.js';
 
 const exec = promisify(execFile);
 const control = (root:string) => path.join(root, '.spec-loop');
@@ -85,6 +86,7 @@ const gateResultSchema = z.object({
   database_lifecycle:z.enum(['persistent','disposable']).default('persistent'),
   evidence_class:z.enum(['text','compile','unit','integration','behavior','mutation']).default('text'),stability_runs:z.number().int().min(1).max(3).default(1),
   plan_sha256:z.string().regex(/^[a-f0-9]{64}$/),
+  environment_hash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
   ac:z.array(z.string().regex(/^AC-[1-9]\d*$/)).optional(),
   command:z.array(z.string()),cwd:z.string(),exit_code:z.number().int(),timed_out:z.boolean(),output_truncated:z.boolean().default(false),duration_ms:z.number().int().nonnegative(),
   base_commit:z.string(),head:z.string(),artifact:z.string(),sha256:z.string().regex(/^[a-f0-9]{64}$/),
@@ -238,20 +240,22 @@ function interpreterFamily(bin:string):string{
   if(/^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(bin))return bin.endsWith('.exe')?'python3.exe':'python3';
   return bin;
 }
+async function boundApprovedGateContract(root:string,taskId:string){
+  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)return null;const file=path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md');if(!await exists(file))return null;
+  const acceptance=await import('./acceptance-loop.js'),contract=await acceptance.readApprovedAcceptanceContract(task.path),run=await acceptance.readAcceptanceRun(root,taskId);
+  if(contract.task_id!==taskId||run.task_id!==taskId||run.contract_hash!==contract.contract_hash)throw new Error('approved Gate contract is not bound to the current Acceptance Run');
+  return contract;
+}
 async function approvedBashGateCommands(root:string,taskId:string):Promise<Set<string>>{
-  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)return new Set();const file=path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md');if(!await exists(file))return new Set();
-  const digest=z.string().regex(/^[a-f0-9]{64}$/),contract=z.object({contract_hash:digest,approval:z.object({contract_hash:digest}).passthrough(),tools:z.array(z.object({command:z.array(z.string()).min(1)}).passthrough())}).passthrough().parse((await readMarkdown(file)).data);
-  if(contract.approval.contract_hash!==contract.contract_hash)throw new Error('approved Gate contract hash mismatch');
-  return new Set(contract.tools.map((tool)=>JSON.stringify(tool.command)));
+  const contract=await boundApprovedGateContract(root,taskId);if(!contract)return new Set();
+  return new Set(contract.tools.flatMap((tool)=>tool.command?[JSON.stringify(tool.command)]:[]));
 }
 async function approvedV2GateIds(root:string,taskId:string):Promise<Set<string>|null>{
-  const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)return null;const file=path.join(task.path,'ACCEPTANCE_CONTRACT_V2.md');if(!await exists(file))return null;
-  const digest=z.string().regex(/^[a-f0-9]{64}$/),contract=z.object({contract_hash:digest,approval:z.object({contract_hash:digest}).passthrough(),tools:z.array(z.object({gate_id:z.string().min(1)}).passthrough())}).passthrough().parse((await readMarkdown(file)).data);
-  if(contract.approval.contract_hash!==contract.contract_hash)throw new Error('approved Gate contract hash mismatch');
+  const contract=await boundApprovedGateContract(root,taskId);if(!contract)return null;
   return new Set(contract.tools.map((tool)=>tool.gate_id));
 }
 async function assertGateCommand(command:string[],worktree:string,approvedBash:Set<string>){
-  const bin=path.basename(command[0]).toLowerCase(),script=command[1]??'',approvedScript=bin==='bash'&&command.length===2&&approvedBash.has(JSON.stringify(command))&&safeRelativePathSchema.safeParse(script).success&&/^scripts\/[A-Za-z0-9._/-]+\.sh$/.test(script);
+  const bin=path.basename(command[0]).toLowerCase(),script=command[1]??'',approvedScript=command[0]==='bash'&&command.length===2&&approvedBash.has(JSON.stringify(command))&&safeRelativePathSchema.safeParse(script).success&&/^scripts\/[A-Za-z0-9._/-]+\.sh$/.test(script);
   if(approvedScript){const target=path.resolve(worktree,script),root=await realpath(worktree),scriptsRoot=path.join(root,'scripts'),info=await lstat(target).catch(()=>null),actual=info?await realpath(target):'';if(!info?.isFile()||info.isSymbolicLink()||!actual.startsWith(`${scriptsRoot}${path.sep}`))throw new Error(`approved Bash Gate script is missing, symbolic, or escapes the candidate: ${script}`)}
   if(SHELLS.has(bin)&&!approvedScript)throw new Error(`shell or command dispatcher is forbidden in gate: ${command[0]}`);
   if(COMMAND_DISPATCHERS.has(bin))throw new Error(`shell or command dispatcher is forbidden in gate: ${command[0]}`);
@@ -292,15 +296,53 @@ function gateEnvironment(config:z.infer<typeof gateConfigSchema>,taskId:string):
   }
   return environment;
 }
+function gateRuntimeEnvironmentHash(config:z.infer<typeof gateConfigSchema>,taskId:string):string{
+  return sha256(JSON.stringify({platform:process.platform,arch:process.arch,node:process.version,PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:process.env.TMPDIR??'/tmp',JAVA_HOME:process.env.JAVA_HOME??null,gate:gateEnvironment(config,taskId)}));
+}
+export async function currentGateEnvironmentHash(root:string,taskId:string):Promise<string>{return gateRuntimeEnvironmentHash(await readGateConfig(root),taskId)}
 const MAX_CAPTURE_BYTES=1_048_576;
 async function runProcess(bin:string,args:string[],cwd:string,timeout:number,input?:string,extraEnv:Record<string,string>={},effect?:{root:string;taskId:string;kind:'provider'|'gate';idleTimeoutSeconds?:number}):Promise<{code:number;stdout:string;stderr:string;timedOut:boolean;outputTruncated:boolean;termination_verified:boolean;pipe_drain_timed_out:boolean}>{
-  let stdoutBytes=0,stderrBytes=0,lastProgressAt=new Date().toISOString(),progressSequence=0,idleTimedOut=false,settled=false,idleError='';
-  const progress=(target:'stdout'|'stderr',chunk:Buffer)=>{lastProgressAt=new Date().toISOString();progressSequence+=1;if(target==='stdout')stdoutBytes+=chunk.length;else stderrBytes+=chunk.length};
+  let stdoutBytes=0,stderrBytes=0,lastProgressAt=new Date().toISOString(),lastProgressMono=performance.now(),progressSequence=0,idleTimedOut=false,settled=false,idleError='';
+  const observations=createProviderObservations();
+  const progress=(target:'stdout'|'stderr',chunk:Buffer)=>{if(observations.push(chunk,target)){lastProgressAt=new Date().toISOString();lastProgressMono=performance.now();progressSequence=observations.progressSequence()}if(target==='stdout')stdoutBytes+=chunk.length;else stderrBytes+=chunk.length};
   const managed=startManagedProcess({bin,args,cwd,timeoutMs:timeout,pipeDrainTimeoutMs:1_000,maxCaptureBytes:MAX_CAPTURE_BYTES,input,env:{PATH:process.env.PATH??'',HOME:process.env.HOME??'',TMPDIR:process.env.TMPDIR??'/tmp',...(process.env.JAVA_HOME?{JAVA_HOME:process.env.JAVA_HOME}:{}),...extraEnv},onStdout:chunk=>progress('stdout',chunk),onStderr:chunk=>progress('stderr',chunk)}),child=managed.child;
   const completion=managed.completion.finally(()=>{settled=true});
-  let marker:string|null=null,markerTimer:NodeJS.Timeout|undefined,markerWork:Promise<void>=Promise.resolve(),markerValue:Record<string,unknown>|null=null;
-  if(effect&&child.pid){const id=randomUUID(),dir=path.join(control(effect.root),'active-effects'),startedAt=new Date().toISOString(),identity=await managed.processStartedAt,idleTimeoutSeconds=effect.idleTimeoutSeconds??Math.max(10,Math.min(300,Math.ceil(timeout/1000)));marker=path.join(dir,`${effect.taskId}-${id}.json`);markerValue={schema_version:2,effect_id:id,task_id:effect.taskId,kind:effect.kind,pid:child.pid,process_started_at:identity,process_group:process.platform!=='win32',started_at:startedAt,heartbeat_at:startedAt};await mkdir(dir,{recursive:true});const pulse=()=>{markerTimer=setTimeout(()=>{if(Date.now()-Date.parse(lastProgressAt)>=idleTimeoutSeconds*1000&&!settled){idleTimedOut=true;idleError=`process made no observable progress for ${idleTimeoutSeconds}s`;void managed.terminate({timedOut:true})}markerWork=atomicWriteMany(effect.root,[{file:marker!,content:`${JSON.stringify({...markerValue,heartbeat_at:new Date().toISOString(),last_progress_at:lastProgressAt,progress_sequence:progressSequence,output_bytes:stdoutBytes+stderrBytes,idle_timeout_seconds:idleTimeoutSeconds,idle_timed_out:idleTimedOut},null,2)}\n`}]).catch(()=>undefined).finally(()=>{if(!settled)pulse()})},2_000)};await atomicWriteMany(effect.root,[{file:marker,content:`${JSON.stringify({...markerValue,last_progress_at:lastProgressAt,progress_sequence:progressSequence,output_bytes:0,idle_timeout_seconds:idleTimeoutSeconds,idle_timed_out:false},null,2)}\n`}]);pulse()}
-  try{const result=await completion;return idleError?{...result,stderr:`${result.stderr}\n${idleError}`.trim(),timedOut:true,code:124}:result}finally{if(markerTimer)clearTimeout(markerTimer);await withOperationTimeout(markerWork,5_000,'Effect heartbeat drain').catch(()=>undefined);if(marker)await rm(marker,{force:true}).catch(()=>undefined)}
+  let marker: string | null = null, markerTimer: NodeJS.Timeout | undefined, markerWork: Promise<void> = Promise.resolve();
+  try {
+    if (effect && child.pid) {
+      const id = randomUUID(), dir = path.join(control(effect.root), 'active-effects'), startedAt = new Date().toISOString();
+      const identity = await managed.processStartedAt;
+      const idleTimeoutSeconds = effect.idleTimeoutSeconds ?? Math.max(10, Math.min(300, Math.ceil(timeout / 1000)));
+      if (identity) {
+        marker = path.join(dir, `${effect.taskId}-${id}.json`);
+        const markerValue = { schema_version: 2, effect_id: id, task_id: effect.taskId, kind: effect.kind, pid: child.pid, process_started_at: identity, process_group: process.platform !== 'win32', started_at: startedAt };
+        const writeMarker = () => withAbortableOperationTimeout(signal => atomicWriteTelemetry(effect.root, {
+          file: marker!, content: `${JSON.stringify({ ...markerValue, heartbeat_at: new Date().toISOString(), last_progress_at: lastProgressAt, progress_sequence: progressSequence, output_bytes: stdoutBytes + stderrBytes, idle_timeout_seconds: idleTimeoutSeconds, idle_timed_out: idleTimedOut }, null, 2)}\n`,
+        }, signal), 5_000, 'Effect heartbeat write');
+        const pulse = () => {
+          markerTimer = setTimeout(() => {
+            if (performance.now() - lastProgressMono >= idleTimeoutSeconds * 1000 && !settled) {
+              idleTimedOut = true; idleError = `process made no observable progress for ${idleTimeoutSeconds}s`;
+              void managed.terminate({ timedOut: true });
+            }
+            markerWork = writeMarker().catch(error => {
+              idleError = `Effect heartbeat failed: ${(error as Error).message}`;
+              void managed.terminate();
+            }).finally(() => { if (!settled) pulse(); });
+          }, 2_000);
+        };
+        await writeMarker(); if (!settled) pulse();
+      }
+    }
+    const result = await completion;
+    return idleError ? { ...result, stderr: `${result.stderr}\n${idleError}`.trim(), timedOut: true, code: 124 } : result;
+  } catch (error) {
+    await managed.terminate(); await completion; throw error;
+  } finally {
+    if (markerTimer) clearTimeout(markerTimer);
+    await markerWork;
+    if (marker && effect) await withOperationTimeout(removeTelemetryFile(effect.root, marker), 5_000, 'Effect heartbeat removal').catch(() => undefined);
+  }
 }
 
 export async function prepareHarness(root:string,taskId:string,prompt:string){
@@ -496,7 +538,7 @@ async function assertSafePlaywrightInput(worktree:string,value:string,label:stri
 
 async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,gate:z.infer<typeof playwrightGateSchema>,config:z.infer<typeof gateConfigSchema>,startHead:string,startFingerprint:string):Promise<GateResult>{
   const started=Date.now(),createdAt=new Date().toISOString();
-  const webRoot=path.join(control(root),'output',`${taskId}-web-${gate.id}`);
+  const webRoot=path.resolve(control(root),'output',`${taskId}-web-${gate.id}`);
   await rm(webRoot,{recursive:true,force:true});await mkdir(webRoot,{recursive:true});
   const resultsDir=path.join(webRoot,'test-results'),htmlDir=path.join(webRoot,'html-report'),jsonFile=path.join(webRoot,'results.json');
   if(gate.config){
@@ -511,10 +553,16 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
   if(gate.config)args.push('--config',gate.config);
   for(const projectName of gate.projects)args.push('--project',projectName);
   if(gate.grep)args.push('--grep',gate.grep);
-  args.push('--output',resultsDir,'--reporter','line,json,html');
+  const artifactReporter='frontend/tests/e2e/artifact-reporter.ts';
+  const hasArtifactReporter=await exists(path.join(m.worktree,artifactReporter));
+  if(hasArtifactReporter)await assertSafePlaywrightInput(m.worktree,artifactReporter,`${gate.id}: Playwright artifact reporter`);
+  args.push('--output',resultsDir,'--reporter',hasArtifactReporter?`${artifactReporter},line,json,html`:'line,json,html');
+  const webTaskNumber=/^WEB-TASK-(\d{3})$/.exec(taskId)?.[1];
   const result=await runProcess(process.execPath,args,m.worktree,gate.timeout_seconds*1000,undefined,{
     CI:'1',PLAYWRIGHT_HTML_OPEN:'never',PLAYWRIGHT_HTML_OUTPUT_DIR:htmlDir,PLAYWRIGHT_JSON_OUTPUT_FILE:jsonFile,
     ...gateEnvironment(config,taskId),
+    ...(webTaskNumber?{[`TASKWEB${webTaskNumber}_EVIDENCE_DIR`]:webRoot}:{}),
+    ...(webTaskNumber?{[`WEB${webTaskNumber}_EVIDENCE_DIR`]:webRoot}:{}),
   },{root,taskId,kind:'gate'});
   const head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);
   if(head!==startHead)throw new Error('Playwright Gate changed Git HEAD');
@@ -581,13 +629,29 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
   for(const gate of gates){
     if(gate.kind==='playwright'){
       const result=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.playwright',label:`Gate ${gate.id}`,summary:'执行目标工程真实浏览器验证路径',refs:[`.spec-loop/output/${taskId}-gates.json`]},()=>runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint),(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');
-      results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),ac:gate.ac}));
+      results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),environment_hash:gateRuntimeEnvironmentHash(config,taskId),ac:gate.ac}));
       continue;
     }
     await assertGateCommand(gate.command,m.worktree,approvedBash);assertDatabaseLifecycle(gate.command,config);
-    const gateResult=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.command',label:`Gate ${gate.id}`,summary:`执行确定性命令：${gate.command[0]}（稳定性 ${gate.stability_runs} 次）`,refs:[`.spec-loop/output/${taskId}-gate-${gate.id}.txt`]},async()=>{const started=Date.now(),createdAt=new Date().toISOString(),attempts=[];for(let attempt=1;attempt<=gate.stability_runs;attempt++)attempts.push(await runProcess(gate.command[0],gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnvironment(config,taskId),{root,taskId,kind:'gate'}));const result={code:attempts.find(item=>item.code!==0)?.code??0,timedOut:attempts.some(item=>item.timedOut),terminationVerified:attempts.every(item=>item.termination_verified),pipeDrainTimedOut:attempts.some(item=>item.pipe_drain_timed_out),outputTruncated:attempts.some(item=>item.outputTruncated),stdout:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stdout}`).join('\n'),stderr:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stderr}`).join('\n')},head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nEVIDENCE_CLASS ${gate.evidence_class}\nSTABILITY_RUNS ${gate.stability_runs}\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nTERMINATION_VERIFIED ${result.terminationVerified}\nPIPE_DRAIN_TIMED_OUT ${result.pipeDrainTimedOut}\nOUTPUT_TRUNCATED ${result.outputTruncated}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);return gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,output_truncated:result.outputTruncated,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt})},(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');results.push(gateResult)
+    const gateResult=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.command',label:`Gate ${gate.id}`,summary:`执行确定性命令：${gate.command[0]}（稳定性 ${gate.stability_runs} 次）`,refs:[`.spec-loop/output/${taskId}-gate-${gate.id}.txt`]},async()=>{const started=Date.now(),createdAt=new Date().toISOString(),environmentHash=gateRuntimeEnvironmentHash(config,taskId),attempts=[],approvedBashGate=gate.command[0]==='bash',gateBin=approvedBashGate?'/bin/bash':gate.command[0],gateEnv={...gateEnvironment(config,taskId),...(approvedBashGate?{PATH:['/usr/bin','/bin','/usr/sbin','/sbin',path.dirname(process.execPath)].join(path.delimiter)}:{})};for(let attempt=1;attempt<=gate.stability_runs;attempt++)attempts.push(await runProcess(gateBin,gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnv,{root,taskId,kind:'gate'}));const result={code:attempts.find(item=>item.code!==0)?.code??0,timedOut:attempts.some(item=>item.timedOut),terminationVerified:attempts.every(item=>item.termination_verified),pipeDrainTimedOut:attempts.some(item=>item.pipe_drain_timed_out),outputTruncated:attempts.some(item=>item.outputTruncated),stdout:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stdout}`).join('\n'),stderr:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stderr}`).join('\n')},head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nEVIDENCE_CLASS ${gate.evidence_class}\nSTABILITY_RUNS ${gate.stability_runs}\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nTERMINATION_VERIFIED ${result.terminationVerified}\nPIPE_DRAIN_TIMED_OUT ${result.pipeDrainTimedOut}\nOUTPUT_TRUNCATED ${result.outputTruncated}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);return gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),environment_hash:environmentHash,ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,output_truncated:result.outputTruncated,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt})},(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');results.push(gateResult)
   }
   const serialized=JSON.stringify(results,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-gates.json`),content:serialized}]);await advance(root,taskId,'collected','verified',m,startHead,results.every(x=>x.exit_code===0)?null:'one or more gates failed',{gates:sha256(serialized)});return results;
+}
+
+export async function verifiedGateResults(root:string,taskId:string):Promise<GateResult[]>{
+  const m=await readWorkspace(root,taskId),state=await readHarnessState(root,taskId);
+  if(state.stage!=='verified'&&state.stage!=='reported')throw new Error('Spring Evidence requires a verified Gate run');
+  const raw=await readFile(path.join(control(root),'output',`${taskId}-gates.json`),'utf8');
+  if(state.evidence_hashes.gates!==sha256(raw))throw new Error('Gate Evidence hash mismatch');
+  const head=await git(m.worktree,['rev-parse','HEAD']);
+  if(head!==state.head)throw new Error('Gate Evidence candidate HEAD is stale');
+  const collectRaw=await readFile(path.join(control(root),'output',`${taskId}-collect.json`),'utf8');
+  if(state.evidence_hashes.collect!==sha256(collectRaw))throw new Error('Collect Evidence hash mismatch');
+  const collected=collectSchema.parse(JSON.parse(collectRaw));
+  if(collected.head!==head||collected.workspace!==m.worktree||await worktreeStatus(m.worktree)!==collected.status.join('\n')||await worktreeFingerprint(m.worktree)!==collectedFingerprint(collected))throw new Error('candidate worktree changed after Gate');
+  const gates=gateResultsSchema.parse(JSON.parse(raw));
+  await validateGateEvidence(root,taskId,m,head,gates);
+  return gates;
 }
 
 async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifest,head:string,gates:GateResult[]):Promise<void>{
@@ -603,6 +667,7 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
   }
   for(const g of gates){
     if(g.task_id!==taskId||g.cwd!==m.worktree||g.base_commit!==m.base_commit||g.head!==head)throw new Error(`${g.id}: stale or mismatched gate evidence`);
+    if(g.environment_hash&&g.environment_hash!==gateRuntimeEnvironmentHash(config,taskId))throw new Error(`${g.id}: Gate environment changed after execution`);
     const definition=definitions.find((item)=>item.id===g.id);
     if(!definition)throw new Error(`${g.id}: Gate definition is missing`);
     if(g.scope_kind!==config.scope_kind||g.wave_id!==config.wave_id||g.coverage!==config.coverage||g.database_lifecycle!==config.database.lifecycle||!sameStrings(g.ac??[],definition.ac??[])||g.plan_sha256!==gatePlanHash(config))
