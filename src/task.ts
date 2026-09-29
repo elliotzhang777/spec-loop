@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { atomicWriteMany, assertSubstantive, exists, readMarkdown, recoverTransactions, sha256, stringifyMarkdown } from './files.js';
@@ -58,15 +58,30 @@ async function readUserControl(root: string): Promise<z.infer<typeof userControl
   return value;
 }
 
+const stateReadCache=new Map<string,{fingerprint:string;state:TaskState}>();
+async function stateFingerprint(root:string):Promise<string>{
+  const files=await Promise.all(['TASK_STATE.md','STATE_HISTORY.jsonl'].map(async name=>{
+    const info=await lstat(path.join(root,name),{bigint:true});
+    if(!info.isFile()||info.isSymbolicLink())throw new Error(`${name} is not a regular Task control file`);
+    return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+  }));
+  return files.join('|');
+}
 export async function readState(root: string): Promise<TaskState> {
   await recoverTransactions(root);
+  const cacheKey=path.resolve(root),fingerprint=await stateFingerprint(root),cached=stateReadCache.get(cacheKey);
+  if(cached?.fingerprint===fingerprint)return structuredClone(cached.state);
   const state=stateSchema.parse((await readMarkdown(path.join(root, 'TASK_STATE.md'))).data);
   const history=(await readFile(path.join(root,'STATE_HISTORY.jsonl'),'utf8')).trim().split(/\r?\n/).filter(Boolean);
   if(!history.length)throw new Error('STATE_HISTORY.jsonl is empty');
   let tail:{state_version?:number;status?:string;round?:number;state_hash?:string};
   try{tail=JSON.parse(history.at(-1) as string) as typeof tail}catch{throw new Error('STATE_HISTORY.jsonl tail is malformed')}
   if(tail.state_version!==state.state_version||tail.status!==state.status||tail.round!==state.current_round||tail.state_hash!==sha256(JSON.stringify(state)))throw new Error('TASK_STATE.md does not match CLI state history');
-  return state;
+  if(await stateFingerprint(root)===fingerprint){
+    stateReadCache.set(cacheKey,{fingerprint,state});
+    while(stateReadCache.size>500)stateReadCache.delete(stateReadCache.keys().next().value!);
+  }
+  return structuredClone(state);
 }
 
 function nextState(state: TaskState, command: keyof typeof LEGAL_TRANSITIONS): TaskState {

@@ -706,3 +706,15 @@ test('verified event cache isolates callers, handles appended history and still 
   await writeFile(file,JSON.stringify(tampered)+'\n'+raw.split('\n').slice(1).join('\n'))
   await assert.rejects(readExecutionEvents(root),/hash mismatch/)
 })
+
+test('snapshot task state cache rejects changed authority history',async()=>{
+  const {root,taskRoot}=await projectFixture('execution-view-state-cache-')
+  await buildExecutionSnapshot(root)
+  await buildExecutionSnapshot(root)
+  const file=path.join(taskRoot,'STATE_HISTORY.jsonl'),raw=await readFile(file,'utf8')
+  const lines=raw.trim().split('\n'),tail=JSON.parse(lines.at(-1))
+  tail.state_hash='0'.repeat(64)
+  lines[lines.length-1]=JSON.stringify(tail)
+  await writeFile(file,`${lines.join('\n')}\n`)
+  await assert.rejects(buildExecutionSnapshot(root),/does not match CLI state history/)
+})

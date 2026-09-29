@@ -5,8 +5,7 @@ import { z } from 'zod';
 import { assertNoSecrets, exists, readMarkdown, sha256 } from './files.js';
 import type { TaskState } from './model.js';
 import { readExecutionEvents, type ExecutionEvent, type ExecutionStepType } from './execution-events.js';
-import { readProject, scanTasks, selectActiveTask } from './project.js';
-import { readState } from './task.js';
+import { readProject, scanTaskStates, selectActiveTask } from './project.js';
 
 const precisionSchema = z.enum(['exact', 'derived', 'unknown']);
 const stepStatusSchema = z.enum(['running', 'waiting', 'succeeded', 'failed', 'cancelled', 'interrupted', 'noted', 'unknown']);
@@ -585,10 +584,16 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
   if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)return snapshot;
   const discardOldest=(items:unknown[])=>{const removed=items.shift();if(removed!==undefined)bytes-=Buffer.byteLength(JSON.stringify(removed))+(items.length?1:0)};
   const compactSteps=(minimum:number,historicalOnly:boolean)=>{
-    const compactable=()=>snapshot.tasks
-      .filter(task=>(!historicalOnly||!task.current)&&task.steps.length>minimum)
-      .sort((left,right)=>Number(left.current)-Number(right.current)||right.steps.length-left.steps.length);
-    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){const task=compactable()[0];if(!task)break;discardOldest(task.steps)}
+    const candidates=snapshot.tasks.flatMap((task,taskIndex)=>
+      historicalOnly&&task.current?[]:task.steps.slice(0,Math.max(0,task.steps.length-minimum))
+        .map((step,index)=>({taskIndex,index,startedAt:step.started_at??'\uffff',size:Buffer.byteLength(JSON.stringify(step))})));
+    candidates.sort((left,right)=>left.startedAt.localeCompare(right.startedAt)||left.taskIndex-right.taskIndex||left.index-right.index);
+    for(const candidate of candidates){
+      if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)break;
+      const steps=snapshot.tasks[candidate.taskIndex].steps;
+      steps.shift();
+      bytes-=candidate.size+(steps.length?1:0);
+    }
   };
   // Keep the existing five-step context when possible. Historical rows can
   // shrink to one step as the Project grows; the active Task keeps five.
@@ -608,11 +613,17 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
 }
 
 export async function buildExecutionSnapshot(projectRoot: string, now = new Date()): Promise<ExecutionSnapshot> {
-  const project = await readProject(projectRoot), indexed = await scanTasks(projectRoot), events = await readExecutionEvents(projectRoot);
-  const states = await Promise.all(indexed.map(async (task) => ({ task, state: await readState(task.path) })));
+  const project = await readProject(projectRoot), states = await scanTaskStates(projectRoot), events = await readExecutionEvents(projectRoot,{copy:false});
   const nowMs = now.getTime(), diagnostics: string[] = [];
+  const eventsByTask=new Map<string,ExecutionEvent[]>();
+  for(const event of events){
+    if(!event.task_id)continue;
+    const taskEvents=eventsByTask.get(event.task_id);
+    if(taskEvents)taskEvents.push(event);
+    else eventsByTask.set(event.task_id,[event]);
+  }
   const managedTasks = await Promise.all(states.map(({ task, state }) => taskSnapshot(
-    projectRoot, project.repository, task.path, state, events.filter((event) => event.task_id === state.task_id), false, nowMs,
+    projectRoot, project.repository, task.path, state, eventsByTask.get(state.task_id)??[], false, nowMs,
   )));
   const managedIds = new Set(managedTasks.map((task) => task.task_id));
   const targetOnly = (await targetSpecTasks(project.repository, project.spec_root)).filter((task) => !managedIds.has(task.task_id));

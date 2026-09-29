@@ -64,15 +64,28 @@ type AnnotationInput = Omit<EventInput, 'runId' | 'stepType'>;
 const eventFile = (projectRoot: string) => path.join(projectRoot, '.spec-loop', 'EXECUTION_EVENTS.jsonl');
 
 function parseLine(raw: string, line: number): unknown {
-  const keys = new Set<string>();
-  const keyRe = /"((?:\\.|[^"\\])*)"\s*:/g;
-  let match: RegExpExecArray | null;
-  while ((match = keyRe.exec(raw)) !== null) {
-    const key = JSON.parse(`"${match[1]}"`) as string;
-    if (keys.has(key)) throw new Error(`EXECUTION_EVENTS.jsonl:${line}: duplicate field ${key}`);
-    keys.add(key);
+  try {
+    const value = JSON.parse(raw);
+    let objectDepth = 0, fieldCount = 0;
+    for (let index = 0; index < raw.length; index += 1) {
+      const char = raw[index];
+      if (char === '"') {
+        do {
+          index += 1;
+          if (raw[index] === '\\') index += 1;
+        } while (index < raw.length && raw[index] !== '"');
+        if (objectDepth === 1) {
+          let next = index + 1;
+          while (next < raw.length && /\s/.test(raw[next])) next += 1;
+          if (raw[next] === ':') fieldCount += 1;
+        }
+      } else if (char === '{') objectDepth += 1;
+      else if (char === '}') objectDepth -= 1;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value) && fieldCount !== Object.keys(value).length)
+      throw new Error('duplicate field');
+    return value;
   }
-  try { return JSON.parse(raw); }
   catch (error) { throw new Error(`EXECUTION_EVENTS.jsonl:${line}: malformed JSON: ${(error as Error).message}`); }
 }
 
@@ -127,8 +140,12 @@ const SEGMENT_BYTES=8*1024*1024;
 const archiveIndex=(root:string)=>path.join(root,'.spec-loop','EXECUTION_EVENT_ARCHIVE.json');
 const archiveDir=(root:string)=>path.join(root,'.spec-loop','execution-event-archive');
 const segmentPattern=/^(\d{12})-(\d{12})-([a-f0-9]{64})\.jsonl$/;
-type EventCache={key:string;events:ExecutionEvent[]};
+type EventCache={
+  key:string;events:ExecutionEvent[];open:Map<string,ExecutionEvent>;seen:Set<string>;
+  files:Array<{file:string;size:number;appendIdentity:string;key:string;hash:string}>;
+};
 const eventCache=new Map<string,EventCache>();
+const MAX_CACHED_EVENT_BYTES=32*1024*1024;
 async function eventFiles(root:string){
   const dir=archiveDir(root),directory=await lstat(dir).catch(error=>{if(error.code==='ENOENT')return null;throw error});
   if(directory&&(!directory.isDirectory()||directory.isSymbolicLink()))throw new Error('invalid execution event archive directory');
@@ -147,14 +164,38 @@ async function eventFiles(root:string){
     const info=await lstat(file,{bigint:true}).catch(error=>{if(error.code==='ENOENT'&&file===eventFile(root))return null;throw error});
     if(!info)continue;
     if(!info.isFile()||info.isSymbolicLink())throw new Error('execution event store is symbolic or not a regular file');
-    files.push({file,size:Number(info.size),key:`${indexKey}:${file}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`});
+    files.push({file,size:Number(info.size),appendIdentity:`${indexKey}:${file}`,key:`${indexKey}:${file}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`});
   }
   return files;
 }
-async function readExecutionEventsUnlocked(root:string):Promise<ExecutionEvent[]>{
+async function readExecutionEventsUnlocked(root:string,copy=true):Promise<ExecutionEvent[]>{
   const files=await eventFiles(root),key=files.map(item=>item.key).join('|'),cached=eventCache.get(root);
-  if(cached?.key===key)return structuredClone(cached.events);
+  if(cached?.key===key)return copy?structuredClone(cached.events):cached.events;
+  const oldFile=cached?.files.at(-1),newFile=files.at(-1);
+  if(cached&&oldFile&&newFile&&newFile.file===eventFile(root)&&newFile.size>oldFile.size
+    && newFile.appendIdentity===oldFile.appendIdentity&&files.length===cached.files.length
+    && files.slice(0,-1).every((item,index)=>item.key===cached.files[index]?.key)
+    && newFile.size<=MAX_CACHED_EVENT_BYTES){
+    const hash=createHash('sha256');
+    if(oldFile.size>0)for await(const chunk of createReadStream(newFile.file,{start:0,end:oldFile.size-1,highWaterMark:65_536}))hash.update(chunk);
+    if(hash.copy().digest('hex')===oldFile.hash){
+      const additions:ExecutionEvent[]=[];const decoder=new StringDecoder('utf8');let pending='',lineNumber=cached.events.length;
+      const parse=(line:string)=>{if(Buffer.byteLength(line)>65_536)throw new Error('execution event line exceeds bounded reader');if(line.trim())additions.push(executionEventSchema.parse(parseLine(line,++lineNumber)));};
+      for await(const chunk of createReadStream(newFile.file,{start:oldFile.size,highWaterMark:65_536})){
+        hash.update(chunk);pending+=decoder.write(chunk as Buffer);let end;
+        while((end=pending.indexOf('\n'))!==-1){parse(pending.slice(0,end));pending=pending.slice(end+1);}
+        if(Buffer.byteLength(pending)>65_536)throw new Error('execution event line exceeds bounded reader');
+      }
+      pending+=decoder.end();if(pending)parse(pending);
+      const events=[...cached.events,...additions],validated=validateEventSequence(events,cached.events.length,cached.open,cached.seen);
+      if((await eventFiles(root)).map(item=>item.key).join('|')===key){
+        eventCache.set(root,{key,events,...validated,files:[...cached.files.slice(0,-1),{file:newFile.file,size:newFile.size,appendIdentity:newFile.appendIdentity,key:newFile.key,hash:hash.digest('hex')}]});
+        return copy?structuredClone(events):events;
+      }
+    }
+  }
   const events:ExecutionEvent[]=[];let open=new Map<string,ExecutionEvent>(),seen=new Set<string>();
+  const cachedFiles:EventCache['files']=[];
   for(const {file} of files){
     const offset=events.length,decoder=new StringDecoder('utf8'),hash=createHash('sha256');let pending='',lineNumber=0;
     const parse=(line:string)=>{if(Buffer.byteLength(line)>65_536)throw new Error('execution event line exceeds bounded reader');if(line.trim())events.push(executionEventSchema.parse(parseLine(line,++lineNumber)));};
@@ -164,16 +205,18 @@ async function readExecutionEventsUnlocked(root:string):Promise<ExecutionEvent[]
       if(Buffer.byteLength(pending)>65_536)throw new Error('execution event line exceeds bounded reader');
     }
     pending+=decoder.end();if(pending)parse(pending);
-    const match=path.basename(file).match(segmentPattern);
-    if(match&&(Number(match[1])!==offset+1||Number(match[2])!==events.length||match[3]!==hash.digest('hex')))throw new Error('execution event archive integrity failure');
+    const digest=hash.digest('hex'),match=path.basename(file).match(segmentPattern);
+    if(match&&(Number(match[1])!==offset+1||Number(match[2])!==events.length||match[3]!==digest))throw new Error('execution event archive integrity failure');
+    const info=files.find(item=>item.file===file)!;
+    cachedFiles.push({file,size:info.size,appendIdentity:info.appendIdentity,key:info.key,hash:digest});
     ({open,seen}=validateEventSequence(events,offset,open,seen));
   }
   if(files.some(item=>item.file!==eventFile(root))){const index=JSON.parse(await readFile(archiveIndex(root),'utf8'));if(events[index.last_sequence-1]?.event_hash!==index.last_event_hash)throw new Error('execution event archive chain integrity failure');}
   eventCache.delete(root);
-  if(files.reduce((sum,item)=>sum+item.size,0)<=SEGMENT_BYTES&&(await eventFiles(root)).map(item=>item.key).join('|')===key){eventCache.set(root,{key,events});while(eventCache.size>4)eventCache.delete(eventCache.keys().next().value!);}
-  return structuredClone(events);
+  if(files.reduce((sum,item)=>sum+item.size,0)<=MAX_CACHED_EVENT_BYTES&&(await eventFiles(root)).map(item=>item.key).join('|')===key){eventCache.set(root,{key,events,open,seen,files:cachedFiles});while(eventCache.size>4)eventCache.delete(eventCache.keys().next().value!);return copy?structuredClone(events):events;}
+  return events;
 }
-export async function readExecutionEvents(root:string):Promise<ExecutionEvent[]>{return withEventLock(root,()=>readExecutionEventsUnlocked(root));}
+export async function readExecutionEvents(root:string,options:{copy?:boolean}={}):Promise<ExecutionEvent[]>{return withEventLock(root,()=>readExecutionEventsUnlocked(root,options.copy!==false));}
 async function writeEventHistory(root:string,events:ExecutionEvent[],forceArchive=false){
   const files=await eventFiles(root),lastArchive=files.filter(item=>item.file!==eventFile(root)).at(-1),lastSequence=lastArchive?Number(path.basename(lastArchive.file).match(segmentPattern)![2]):0;
   const pending=events.filter(event=>event.sequence>lastSequence),writes:Array<{file:string;content:string}>=[];
@@ -183,7 +226,7 @@ async function writeEventHistory(root:string,events:ExecutionEvent[],forceArchiv
   if(forceArchive)archive();
   const newSegments=writes.map(item=>path.basename(item.file));
   if(newSegments.length){const segments=[...files.filter(item=>item.file!==eventFile(root)).map(item=>path.basename(item.file)),...newSegments],end=Number(segments.at(-1)!.match(segmentPattern)![2]);writes.push({file:archiveIndex(root),content:JSON.stringify({schema_version:1,segments,last_sequence:end,last_event_hash:events[end-1].event_hash})+'\n'});}
-  writes.push({file:eventFile(root),content});await atomicWriteMany(root,writes);eventCache.delete(root);
+  writes.push({file:eventFile(root),content});await atomicWriteMany(root,writes);
 }
 export async function archiveExecutionEvents(root:string){return withEventLock(root,async()=>{await recoverTransactions(root);const events=await readExecutionEventsUnlocked(root);await writeEventHistory(root,events,true);return{schema_version:1,event_count:events.length,last_event_hash:events.at(-1)?.event_hash??null,segments:(await eventFiles(root)).filter(item=>item.file!==eventFile(root)).length,history_preserved:true};});}
 
