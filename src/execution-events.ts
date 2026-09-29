@@ -142,7 +142,7 @@ const archiveDir=(root:string)=>path.join(root,'.spec-loop','execution-event-arc
 const segmentPattern=/^(\d{12})-(\d{12})-([a-f0-9]{64})\.jsonl$/;
 type EventCache={
   key:string;events:ExecutionEvent[];open:Map<string,ExecutionEvent>;seen:Set<string>;
-  files:Array<{file:string;size:number;appendIdentity:string;key:string;hash:string}>;
+  files:Array<{file:string;size:number;appendIdentity:string;key:string;hash:string;endsWithNewline:boolean}>;
 };
 const eventCache=new Map<string,EventCache>();
 const MAX_CACHED_EVENT_BYTES=32*1024*1024;
@@ -172,7 +172,7 @@ async function readExecutionEventsUnlocked(root:string,copy=true):Promise<Execut
   const files=await eventFiles(root),key=files.map(item=>item.key).join('|'),cached=eventCache.get(root);
   if(cached?.key===key)return copy?structuredClone(cached.events):cached.events;
   const oldFile=cached?.files.at(-1),newFile=files.at(-1);
-  if(cached&&oldFile&&newFile&&newFile.file===eventFile(root)&&newFile.size>oldFile.size
+  if(cached&&oldFile&&newFile&&(oldFile.size===0||oldFile.endsWithNewline)&&newFile.file===eventFile(root)&&newFile.size>oldFile.size
     && newFile.appendIdentity===oldFile.appendIdentity&&files.length===cached.files.length
     && files.slice(0,-1).every((item,index)=>item.key===cached.files[index]?.key)
     && newFile.size<=MAX_CACHED_EVENT_BYTES){
@@ -186,10 +186,10 @@ async function readExecutionEventsUnlocked(root:string,copy=true):Promise<Execut
         while((end=pending.indexOf('\n'))!==-1){parse(pending.slice(0,end));pending=pending.slice(end+1);}
         if(Buffer.byteLength(pending)>65_536)throw new Error('execution event line exceeds bounded reader');
       }
-      pending+=decoder.end();if(pending)parse(pending);
+      pending+=decoder.end();const endsWithNewline=pending.length===0;if(pending)parse(pending);
       const events=[...cached.events,...additions],validated=validateEventSequence(events,cached.events.length,cached.open,cached.seen);
       if((await eventFiles(root)).map(item=>item.key).join('|')===key){
-        eventCache.set(root,{key,events,...validated,files:[...cached.files.slice(0,-1),{file:newFile.file,size:newFile.size,appendIdentity:newFile.appendIdentity,key:newFile.key,hash:hash.digest('hex')}]});
+        eventCache.set(root,{key,events,...validated,files:[...cached.files.slice(0,-1),{file:newFile.file,size:newFile.size,appendIdentity:newFile.appendIdentity,key:newFile.key,hash:hash.digest('hex'),endsWithNewline}]});
         return copy?structuredClone(events):events;
       }
     }
@@ -204,11 +204,11 @@ async function readExecutionEventsUnlocked(root:string,copy=true):Promise<Execut
       while((end=pending.indexOf('\n'))!==-1){parse(pending.slice(0,end));pending=pending.slice(end+1);}
       if(Buffer.byteLength(pending)>65_536)throw new Error('execution event line exceeds bounded reader');
     }
-    pending+=decoder.end();if(pending)parse(pending);
+    pending+=decoder.end();const endsWithNewline=pending.length===0;if(pending)parse(pending);
     const digest=hash.digest('hex'),match=path.basename(file).match(segmentPattern);
     if(match&&(Number(match[1])!==offset+1||Number(match[2])!==events.length||match[3]!==digest))throw new Error('execution event archive integrity failure');
     const info=files.find(item=>item.file===file)!;
-    cachedFiles.push({file,size:info.size,appendIdentity:info.appendIdentity,key:info.key,hash:digest});
+    cachedFiles.push({file,size:info.size,appendIdentity:info.appendIdentity,key:info.key,hash:digest,endsWithNewline});
     ({open,seen}=validateEventSequence(events,offset,open,seen));
   }
   if(files.some(item=>item.file!==eventFile(root))){const index=JSON.parse(await readFile(archiveIndex(root),'utf8'));if(events[index.last_sequence-1]?.event_hash!==index.last_event_hash)throw new Error('execution event archive chain integrity failure');}

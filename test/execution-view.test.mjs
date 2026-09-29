@@ -718,3 +718,16 @@ test('snapshot task state cache rejects changed authority history',async()=>{
   await writeFile(file,`${lines.join('\n')}\n`)
   await assert.rejects(buildExecutionSnapshot(root),/does not match CLI state history/)
 })
+
+test('event cache does not treat an append after an unterminated line as a valid event',async()=>{
+  const {root}=await projectFixture('execution-events-boundary-')
+  const start=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'task.attempt',label:'边界校验开始',summary:'检测缺少换行的追加'})
+  const file=path.join(root,'.spec-loop','EXECUTION_EVENTS.jsonl')
+  const unterminated=(await readFile(file,'utf8')).trimEnd()
+  await writeFile(file,unterminated)
+  await readExecutionEvents(root)
+  await finishExecutionStep(root,start,{outcome:'success',summary:'生成合法终态作为追加样本'})
+  const terminal=(await readFile(file,'utf8')).trimEnd().split('\n').at(-1)
+  await writeFile(file,`${unterminated}${terminal}\n`)
+  await assert.rejects(readExecutionEvents(root),/malformed JSON/)
+})
