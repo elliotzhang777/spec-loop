@@ -373,7 +373,7 @@ main { max-width: 1540px; margin: 0 auto; padding: 24px; }
   .wave-sidebar { width: 238px !important; min-width: 238px !important; max-width: 238px !important; flex: 0 0 238px !important; }
   .content-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 760px) {
+@media (max-width: 920px) {
   .execution-shell.ant-layout.ant-layout-has-sider { display: block; }
   .execution-shell.ant-layout.ant-layout-has-sider > .execution-content { width: 100%; }
   .wave-sidebar { width: 100% !important; min-width: 0 !important; max-width: none !important; min-height: 0; max-height: none; position: static; overflow: visible; flex: 0 0 auto !important; border-right: 0; border-bottom: 1px solid light-dark(#273044, #242b38); }
