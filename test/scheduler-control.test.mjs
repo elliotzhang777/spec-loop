@@ -150,7 +150,7 @@ test('wave executor concurrently dispatches Ready Tasks within elapsed, token an
   runGit(repository, ['add', '.']); runGit(repository, ['commit', '-m', 'approved wave specifications'])
   const firstWorkspace = cli(['workspace', 'create', root, 'TASK-WAVE-1', '--json']); assert.equal(firstWorkspace.code, 0, firstWorkspace.stderr)
   const secondWorkspace = cli(['workspace', 'create', root, 'TASK-WAVE-2', '--json']); assert.equal(secondWorkspace.code, 0, secondWorkspace.stderr)
-  const provider = path.join(root, 'wave-provider.sh'), starts = path.join(root, 'wave-starts.txt')
+  const provider = path.join(root, 'wave-provider.sh'), starts = path.join(root, '.spec-loop', 'shared-cache', 'wave-starts.txt')
   await writeFile(provider, `#!/bin/sh\nset -eu\nfor arg in "$@"; do if [ "$arg" = "--version" ]; then printf 'codex fixture 1.0\\n'; exit 0; fi; done\nprintf '%s\\n' "$SPEC_LOOP_INVOCATION_ID" >> ${JSON.stringify(starts)}\nattempt=0\nwhile [ "$(wc -l < ${JSON.stringify(starts)})" -lt 2 ] && [ "$attempt" -lt 400 ]; do attempt=$((attempt + 1)); sleep 0.05; done\n[ "$(wc -l < ${JSON.stringify(starts)})" -ge 2 ] || { printf 'provider was serialized\\n' >&2; exit 9; }\nprintf '%s\\n' "$SPEC_LOOP_INVOCATION_ID" > "$SPEC_LOOP_INVOCATION_ID.txt"\ngit add "$SPEC_LOOP_INVOCATION_ID.txt"\ngit commit -m "$SPEC_LOOP_INVOCATION_ID" >/dev/null\nprintf '%s\\n' 'candidate self-test passed' > "$SPEC_LOOP_EVIDENCE_ROOT/self-test.txt"\nprintf '%s\\n' '{"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10,"cost_usd":0.01}}'\n`)
   await import('node:fs/promises').then(fs => fs.chmod(provider, 0o755))
   const providers = path.join(root, '.spec-loop', 'PROVIDERS.md')

@@ -10,6 +10,7 @@ import { annotateExecution } from '../dist/execution-events.js'
 import { buildExecutionSnapshot } from '../dist/execution-view.js'
 import { acquireOwnedDirectoryLock } from '../dist/owned-lock.js'
 import { createWaveReview } from '../dist/wave-review.js'
+import { approvedAcceptanceContractValue } from '../dist/acceptance-loop.js'
 
 async function taskFingerprint(root) {
   const files = []
@@ -127,8 +128,17 @@ test('report-only rejects private source text and duplicate feedback without pub
 
 test('damaged wave-review holds fail closed and valid holds use a generic report reason', async () => {
   const f = await fixture('PROJ-REVIEW-HOLD', 'TASK-HOLD-1')
-  await writeFile(path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), '---\nschema_version: 2\ndepends_on: []\n---\n')
-  await writeFile(path.join(f.taskRoot, 'ACCEPTANCE_RUN.json'), `${JSON.stringify({ protocol_version: 2, stage: 'm_working' })}\n`)
+  const contract = approvedAcceptanceContractValue({
+    schema_version: 2, task_id: 'TASK-HOLD-1', version: 1, risk: 'standard', critical_path: false, depends_on: [],
+    criteria: [{ id: 'AC-1', text: 'The report describes the current hold', risk_tags: ['functional'], waivable: false }],
+    use_cases: [{ id: 'UC-1', ac: ['AC-1'], scenario: 'Inspect a pending wave review hold' }],
+    tools: [{ id: 'report', kind: 'command', gate_id: 'hold-check', command: [process.execPath, '--version'], playwright: null }],
+    assertions: [{ id: 'AS-1', ac: ['AC-1'], tool_id: 'report', operator: 'exit_code_zero', expected: 'Report command exits successfully' }],
+    evidence_requirements: [{ id: 'ER-1', ac: ['AC-1'], tool_id: 'report', kind: 'command_log', required: true }],
+    budgets: { max_semantic_reworks: 2, max_infrastructure_retries_per_stage: 1, repeated_failure_limit: 2 },
+  }, 'owner')
+  await writeMd(path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'), contract, '# Approved report fixture')
+  await writeFile(path.join(f.taskRoot, 'ACCEPTANCE_RUN.json'), `${JSON.stringify({ protocol_version: 2, stage: 'm_working', contract_hash: contract.contract_hash })}\n`)
   const baseline = await runReportScheduler(f.root)
   assert.equal(baseline.suggestions[0].ready, true)
   const reportPath = path.join(f.root, '.spec-loop', 'output', 'scheduler-report.json')

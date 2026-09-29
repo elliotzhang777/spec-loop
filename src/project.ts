@@ -243,15 +243,16 @@ export async function scanTasks(root:string):Promise<TaskIndex[]>{
   for(const item of out){
     if(item.protocol!=='v2'||item.blocking_reason)continue;
     try{
+      const declared=(await readMarkdown(path.join(item.path,'ACCEPTANCE_CONTRACT_V2.md'))).data as {depends_on?:unknown};
+      const dependencies=z.array(z.string().regex(taskIdPattern)).safeParse(declared.depends_on);
+      if(!dependencies.success){item.blocking_reason='invalid v2 contract dependencies';continue}
+      if(dependencies.data.some(id=>!byId.has(id))){item.blocking_reason='unknown v2 contract dependency';continue}
       const contract=await (await import('./acceptance-loop.js')).readApprovedAcceptanceContract(item.path);
       const runPath=path.join(item.path,'ACCEPTANCE_RUN.json');
       if(await exists(runPath)){
         const run=JSON.parse(await readFile(runPath,'utf8')) as {contract_hash?:string};
         if(run.contract_hash!==contract.contract_hash)throw new Error('v2 Run and Contract hash differ');
       }
-      const dependencies=z.array(z.string().regex(taskIdPattern)).safeParse(contract.depends_on);
-      if(!dependencies.success){item.blocking_reason='invalid v2 contract dependencies';continue}
-      if(dependencies.data.some(id=>!byId.has(id))){item.blocking_reason='unknown v2 contract dependency';continue}
       const unfinished=dependencies.data.filter(id=>{const dependency=byId.get(id)!;return dependency.protocol==='v2'?dependency.protocol_stage!=='candidate':dependency.status!=='delivered'});
       if(unfinished.length)item.blocking_reason=`unfinished dependencies: ${unfinished.join(', ')}`;
     }catch{item.blocking_reason='invalid v2 contract'}

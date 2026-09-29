@@ -133,7 +133,7 @@ R: independent evidence review → Candidate | M | V | human
 - 已完成：TASK-040 在 `eca847d` 独立 V/R PASS；M 仅附加真实 worktree/admin 与 common Git 根，参数去重并拒绝越界/符号链接，V/R 仍只给独立 Evidence 根。
 - 已完成：TASK-041 在 `eca847d` 独立 V/R PASS；精确放行三种 `.env` 示例、允许纯 CRLF，真实环境/私钥文件与尾随空格保持 fail closed。
 - 已完成：TASK-042 在 `eca847d` 独立 V/R PASS；缺失旧 Harness state 可自动产生 HEAD/base/status/diff/content 指纹及 collect hash，脏树和不匹配候选 fail closed。
-- 已完成：TASK-043 在 `4366ed8` 独立 V/R PASS；`bash <scripts/...sh>` 必须精确匹配经完整性校验且与当前 Run 相符的 P 契约，脚本不可越界/链接，实际运行固定 `/bin/bash` 和受控 PATH。完整 Phase 4 Heavy 尚未执行。
+- 已完成：TASK-043 在 `4366ed8` 独立 V/R PASS；`bash scripts/check.sh` 必须精确匹配经完整性校验且与当前 Run 相符的 P 契约，脚本不可越界/链接，实际运行固定 `/bin/bash` 和受控 PATH。完整 Phase 4 Heavy 尚未执行。
 
 ## 变更记录
 
