@@ -263,6 +263,23 @@ test('legacy gates retain exact duration while missing lifecycle time remains un
   assert.match(task.diagnostics.join(' '), /没有执行事件/)
 })
 
+test('legacy Gate traversal and Attempt secret canaries fail closed', async () => {
+  const gate = await projectFixture('execution-view-legacy-gate-traversal-')
+  await writeFile(path.join(gate.root, '.spec-loop', 'output', 'TASK-VIEW-gates.json'), `${JSON.stringify([{
+    id: 'build', kind: 'command', duration_ms: 1,
+    created_at: '2026-09-30T09:00:00.000Z', exit_code: 0, timed_out: false,
+    artifact: '../outside.txt', sha256: 'a'.repeat(64),
+  }])}\n`)
+  await assert.rejects(buildExecutionSnapshot(gate.root), /Gate artifact reference is unsafe/)
+
+  const attempt = await projectFixture('execution-view-legacy-secret-')
+  await writeFile(path.join(attempt.taskRoot, 'LOOP_LEDGER.jsonl'), `${JSON.stringify({
+    attempt: 1, round: 1, timestamp: '2026-09-30T09:00:00.000Z',
+    action: 'token=canaryvalue123', outcome: 'success', error_fingerprint: null,
+  })}\n`)
+  await assert.rejects(buildExecutionSnapshot(attempt.root), /possible secret is forbidden/)
+})
+
 test('target task dependencies are projected for Heavy Task DAG reconstruction', async () => {
   const { root, repository, taskRoot } = await projectFixture('execution-view-dependencies-')
   await writeFile(path.join(repository, 'TASK-VIEW.md'), '# TASK-VIEW：Measure execution\n\n- 依赖：TASK-BASE、WEB-TASK-SHELL\n')
