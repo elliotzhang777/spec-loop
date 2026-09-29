@@ -72,7 +72,36 @@ try {
     }
   }
   const eventFile = path.join(root, '.spec-loop', 'EXECUTION_EVENTS.jsonl')
-  await writeFile(eventFile, lines.join(''))
+  const archiveDir = path.join(root, '.spec-loop', 'execution-event-archive')
+  const archiveSegments = []
+  let segmentLines = [], segmentBytes = 0, firstSequence = 1
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineBytes = Buffer.byteLength(lines[index])
+    if (segmentLines.length && segmentBytes + lineBytes > 8 * 1024 * 1024) {
+      archiveSegments.push({ first: firstSequence, last: index, content: segmentLines.join('') })
+      firstSequence = index + 1
+      segmentLines = []
+      segmentBytes = 0
+    }
+    segmentLines.push(lines[index])
+    segmentBytes += lineBytes
+  }
+  await mkdir(archiveDir)
+  const archiveNames = []
+  for (const segment of archiveSegments) {
+    const digest = createHash('sha256').update(segment.content).digest('hex')
+    const name = `${String(segment.first).padStart(12, '0')}-${String(segment.last).padStart(12, '0')}-${digest}.jsonl`
+    archiveNames.push(name)
+    await writeFile(path.join(archiveDir, name), segment.content)
+  }
+  if (archiveSegments.length) {
+    const lastArchived = archiveSegments.at(-1).content.trimEnd().split('\n').at(-1)
+    await writeFile(path.join(root, '.spec-loop', 'EXECUTION_EVENT_ARCHIVE.json'), JSON.stringify({
+      schema_version: 1, segments: archiveNames, last_sequence: archiveSegments.at(-1).last,
+      last_event_hash: JSON.parse(lastArchived).event_hash,
+    }) + '\n')
+  }
+  await writeFile(eventFile, segmentLines.join(''))
   const coldStart = performance.now()
   const cold = await buildExecutionSnapshot(root)
   const coldMs = performance.now() - coldStart
@@ -115,7 +144,8 @@ try {
     throw new Error('new event was not visible in the HTTP snapshot')
   if (cold.tasks.length !== taskCount || incremental.tasks.length !== taskCount) throw new Error('benchmark lost Task rows')
   const result = {
-    task_count: taskCount, events_per_task: eventsPerTask, cold_ms: Math.round(coldMs), warm_ms: Math.round(warmMs),
+    task_count: taskCount, events_per_task: eventsPerTask, archive_segments: archiveNames.length,
+    cold_ms: Math.round(coldMs), warm_ms: Math.round(warmMs),
     cached_event_read_ms: Math.round(readMs), task_scan_ms: Math.round(scanMs), task_state_read_ms: Math.round(stateMs),
     incremental_ms: Math.round(incrementalMs), page_visible_ms: Math.round(visibleMs), cold_limit_ms: 2_000,
     incremental_limit_ms: 500,
