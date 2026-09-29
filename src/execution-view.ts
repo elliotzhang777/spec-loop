@@ -612,7 +612,7 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
   return snapshot;
 }
 
-export async function buildExecutionSnapshot(projectRoot: string, now = new Date()): Promise<ExecutionSnapshot> {
+export async function buildExecutionSnapshot(projectRoot: string, now = new Date(), options:{audit?:boolean}={}): Promise<ExecutionSnapshot> {
   const project = await readProject(projectRoot), states = await scanTaskStates(projectRoot), events = await readExecutionEvents(projectRoot,{copy:false});
   const nowMs = now.getTime(), diagnostics: string[] = [];
   const eventsByTask=new Map<string,ExecutionEvent[]>();
@@ -679,7 +679,7 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
         ? `等待前置 ${activeSnapshot.blocked_by.join('、')} 完成；当前 Task 不应继续执行`
         : nextAction(active.state, currentStep ?? undefined),
     } : null,
-    waves, tasks, diagnostics: diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS).map((item) => dashboardText(item, 1_000)),
+    waves, tasks, diagnostics: (options.audit?diagnostics:diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS)).map((item) => dashboardText(item, 1_000)),
   });
-  return compactExecutionSnapshot(snapshot);
+  return options.audit?snapshot:compactExecutionSnapshot(snapshot);
 }
