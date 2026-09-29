@@ -1030,7 +1030,7 @@ function renderTaskWorkflow() {
 
   const inlineBack = document.createElement('div'); inlineBack.className = 'workflow-inline-back';
   mountButton(inlineBack, { label: selectedWaveId ? `返回 ${selectedWaveId} 子 Task 图` : '返回全部波次总览', icon: null }, () => { if (selectedWaveId) openWave(selectedWaveId); else goPortfolio(); });
-  elements.workflow.append(inlineBack);
+  elements.workflow.append(inlineBack, renderInlineTaskDetail(activeTask));
   const hasWorkflowEvents = activeTask.steps.some((step) => step.source === 'EXECUTION_EVENTS.jsonl');
   if (!hasWorkflowEvents) {
     updateWorkflowControls({ source: activeTask.managed ? '历史状态·无原生执行事件' : '仅规格与交付状态' });
@@ -1100,11 +1100,9 @@ function renderTaskWorkflow() {
 }
 
 function renderWorkflow() {
-  if (!selectedWaveId) {
-    const wave = defaultWave();
-    if (wave) { selectedWaveId = wave.wave_id; workflowMode = 'wave'; taskWaveFilter = wave.wave_id; }
-  }
-  if (selectedWaveId) renderFocusedWaveWorkflow(); else renderPortfolioWorkflow();
+  if (selectedWaveId) renderFocusedWaveWorkflow();
+  else if (expandedTaskId) renderTaskWorkflow();
+  else renderPortfolioWorkflow();
 }
 
 function renderMetrics() {

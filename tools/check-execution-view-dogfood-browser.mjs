@@ -41,7 +41,15 @@ try {
       const screenshot = path.join(outputDir, `${project.key.replace(':', '-')}-${width}.png`)
       await page.screenshot({ path: screenshot })
       const sha256 = createHash('sha256').update(await readFile(screenshot)).digest('hex')
-      const result = { project_key: project.key, project_id: project.project_id, rendered_project_name: renderedProjectName, width, document_width: documentWidth, screenshot, sha256, page_errors: errors, status: renderedProjectName === project.name && documentWidth <= width && errors.length === 0 ? 'PASS' : 'FAIL' }
+      await page.getByRole('button', { name: '定位当前' }).click()
+      await page.locator('.task-row[aria-selected="true"]').first().click()
+      await page.locator('.inline-task-detail').waitFor()
+      const inspectedTaskId = await page.locator('.task-row[aria-selected="true"]').first().getAttribute('data-task-id')
+      const detailDocumentWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+      const detailScreenshot = path.join(outputDir, `${project.key.replace(':', '-')}-${width}-task.png`)
+      await page.screenshot({ path: detailScreenshot })
+      const detailSha256 = createHash('sha256').update(await readFile(detailScreenshot)).digest('hex')
+      const result = { project_key: project.key, project_id: project.project_id, rendered_project_name: renderedProjectName, width, document_width: documentWidth, inspected_task_id: inspectedTaskId, detail_document_width: detailDocumentWidth, screenshot, sha256, detail_screenshot: detailScreenshot, detail_sha256: detailSha256, page_errors: errors, status: renderedProjectName === project.name && documentWidth <= width && detailDocumentWidth <= width && Boolean(inspectedTaskId) && errors.length === 0 ? 'PASS' : 'FAIL' }
       results.push(result)
     } finally { await page.close() }
   }

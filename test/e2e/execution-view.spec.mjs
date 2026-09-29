@@ -44,6 +44,10 @@ test('desktop and 390px execution view show the current Task without browser err
     expect(selector.x + selector.width).toBeLessThanOrEqual(connection.x)
     expect(connection.x + connection.width).toBeLessThanOrEqual(390)
     await page.screenshot({ path: testInfo.outputPath('narrow.png'), fullPage: true })
+    await page.getByRole('button', { name: '定位当前' }).click()
+    await expect(page.locator('.task-row[aria-selected="true"]')).toHaveAttribute('data-task-id', 'TASK-VIEW-E2E')
+    await page.locator('.task-row[aria-selected="true"]').click()
+    await expect(page.locator('#inline-detail-TASK-VIEW-E2E')).toBeVisible()
     for (const width of [820, 900, 921]) {
       await page.setViewportSize({ width, height: 900 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width)
