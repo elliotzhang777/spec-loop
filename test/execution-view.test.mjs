@@ -662,7 +662,9 @@ test('background execution view lifecycle is idempotent and rejects stale proces
   const { root } = await projectFixture('execution-view-lifecycle-')
   let marker
   try {
-    marker = await startManagedExecutionView(root)
+    const started=Date.now()
+    marker = await startManagedExecutionView(root,0,{timeoutMs:4500})
+    assert.ok(Date.now()-started<5000,'interactive view starts within five seconds')
     assert.match(marker.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
     const reused = await startManagedExecutionView(root)
     assert.equal(reused.pid, marker.pid)
@@ -672,6 +674,21 @@ test('background execution view lifecycle is idempotent and rejects stale proces
     assert.equal((await executionViewStatus(root)).running, false)
   } finally {
     if ((await executionViewStatus(root).catch(() => ({ running: false }))).running) await stopManagedExecutionView(root)
+  }
+})
+
+test('occupied view port does not leave a live marker or block a later start',async()=>{
+  const {root}=await projectFixture('execution-view-port-conflict-'),occupied=createServer(()=>{})
+  await new Promise(resolve=>occupied.listen(0,'127.0.0.1',resolve))
+  try{
+    await assert.rejects(startManagedExecutionView(root,occupied.address().port,{timeoutMs:1500}),/did not become healthy/)
+    assert.equal((await executionViewStatus(root)).running,false)
+    const marker=await startManagedExecutionView(root,0,{timeoutMs:4500})
+    assert.match(marker.url,/^http:\/\/127\.0\.0\.1:\d+\/$/)
+    assert.equal((await stopManagedExecutionView(root)).stopped,true)
+  }finally{
+    await closeExecutionViewServer(occupied)
+    if((await executionViewStatus(root).catch(()=>({running:false}))).running)await stopManagedExecutionView(root)
   }
 })
 
