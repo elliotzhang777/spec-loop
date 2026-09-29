@@ -330,7 +330,8 @@ function renderCurrent() {
   let status = { kind: 'success', label: '项目空闲' }, location = '等待任务进入执行', summary = '项目中还没有可展示的活动任务事实', nextAction = '下一动作：创建或启动一个 Task';
   if (active) {
     location = `${activeWave ? waveName(activeWave) : '未归属波次'} / ${active.task_id} / Round ${active.round}`;
-    summary = active.blocked_by?.length ? `${active.title} · 等待前置 Task ${active.blocked_by.join('、')}` : `${active.title} · ${taskLifecycleName(active)} · ${active.step_label ?? '当前执行器未上报步骤事件'}`;
+    const concurrent = active.concurrent_task_ids?.length ? ` · 并行 ${active.concurrent_task_ids.join('、')}` : '';
+    summary = (active.blocked_by?.length ? `${active.title} · 等待前置 Task ${active.blocked_by.join('、')}` : `${active.title} · ${taskLifecycleName(active)} · ${active.step_label ?? '当前执行器未上报步骤事件'}`) + concurrent;
     nextAction = `下一动作：${active.next_action}`;
     status = active.blocked_by?.length ? { kind: 'waiting', label: '依赖阻塞' } : active.step_status === 'running' ? { kind: 'processing', label: '正在运行' } : { kind: 'waiting', label: active.step_status === 'waiting' ? '等待用户' : '等待事件接入' };
   }

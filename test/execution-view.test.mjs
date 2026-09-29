@@ -199,6 +199,20 @@ Independent verification failed.
   assert.equal(staleStep.precision, 'derived')
 })
 
+test('latest unclosed step wins over newer Task state and keeps concurrent work visible',async()=>{
+  const {root,repository}=await projectFixture('execution-view-concurrent-active-')
+  const secondRoot=path.join(root,'.spec-loop','tasks','task-second')
+  assert.equal(cli(['init',secondRoot,'--level','standard','--id','TASK-SECOND','--title','Second task','--repository',repository]).code,0)
+  await startExecutionStep(root,{taskId:'TASK-SECOND',round:1,stepType:'harness.execute',label:'Second task running',summary:'Older concurrent execution',occurredAt:new Date('2026-09-29T08:00:00.000Z'),detached:true})
+  const latest=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'harness.execute',label:'Current task running',summary:'Latest concurrent execution',occurredAt:new Date('2026-09-29T08:01:00.000Z'),detached:true})
+  for(let index=0;index<25;index++)await annotateExecution(root,{taskId:'TASK-VIEW',round:1,label:`Later note ${index}`,summary:'Keep the live step outside the latest twenty records',occurredAt:new Date(Date.parse('2026-09-29T08:02:00.000Z')+index)})
+  const snapshot=await buildExecutionSnapshot(root,new Date('2026-09-29T09:00:00.000Z'))
+  assert.equal(snapshot.active_task.task_id,'TASK-VIEW')
+  assert.equal(snapshot.active_task.step_id,latest.step_run_id)
+  assert.deepEqual(snapshot.active_task.concurrent_task_ids,['TASK-SECOND'])
+  assert.ok(snapshot.tasks.find(task=>task.task_id==='TASK-VIEW').steps.some(step=>step.id===latest.step_run_id))
+})
+
 test('Round work activities expose reproduce, analysis, change and command timings without double counting', async () => {
   const { root, taskRoot } = await projectFixture('execution-view-activities-')
   await fillContracts(taskRoot, { id: 'TASK-VIEW', title: 'Measure execution', level: 'standard' })

@@ -60,7 +60,7 @@ export const executionSnapshotSchema = z.object({
     blocked_by: z.array(z.string()),
     step_id: z.string().nullable(), step_label: z.string().nullable(), step_summary: z.string().nullable(),
     step_status: stepStatusSchema.nullable(), step_started_at: z.iso.datetime().nullable(), current_elapsed_ms: z.number().int().nonnegative().nullable(),
-    next_action: z.string(),
+    next_action: z.string(), concurrent_task_ids: z.array(z.string()),
   }).strict().nullable(),
   waves: z.array(executionWaveSnapshotSchema), tasks: z.array(executionTaskSnapshotSchema), diagnostics: z.array(z.string()),
 }).strict();
@@ -531,7 +531,10 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
   });
   if (steps.length > MAX_DASHBOARD_STEPS_PER_TASK) {
     diagnostics.push(`Dashboard 仅返回最近 ${MAX_DASHBOARD_STEPS_PER_TASK} 个步骤；完整事实保留在 Event Log 和 Evidence 中。`);
-    steps = steps.slice(-MAX_DASHBOARD_STEPS_PER_TASK);
+    const live=steps.filter(step=>step.status==='running'||step.status==='waiting').slice(-MAX_DASHBOARD_STEPS_PER_TASK);
+    const available=MAX_DASHBOARD_STEPS_PER_TASK-live.length;
+    const recent=available?steps.filter(step=>step.status!=='running'&&step.status!=='waiting').slice(-available):[];
+    steps=[...live,...recent].sort((left,right)=>(left.started_at??'').localeCompare(right.started_at??'')||left.order-right.order);
   }
   steps = steps.map((step) => executionStepSnapshotSchema.parse({ ...step, label: dashboardText(step.label, 120), summary: dashboardText(step.summary), refs: dashboardRefs(step.refs) }));
   if (!taskEvents.length) diagnostics.push('旧 Task 没有执行事件；仅已有 Gate 耗时为精确值，其余阶段可能未知。');
@@ -634,7 +637,12 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
   }));
   const blockedIds = new Set(tasks.filter((task) => task.blocked_by.length).map((task) => task.task_id));
   const effectiveStatus = new Map(managedTasks.map((task) => [task.task_id, task.status]));
-  const active = selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)
+  const runningTasks=tasks.flatMap(task=>['delivered','cancelled'].includes(task.status)?[]:task.steps
+    .filter(step=>(step.round??task.round)>=task.round&&(step.status==='running'||step.status==='waiting'))
+    .map(step=>({taskId:task.task_id,startedAt:step.started_at??'',order:step.order})))
+    .sort((left,right)=>right.startedAt.localeCompare(left.startedAt)||right.order-left.order);
+  const eventActiveId=runningTasks[0]?.taskId;
+  const active = states.find(({state})=>state.task_id===eventActiveId)??selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)
     && !['delivered', 'cancelled'].includes(effectiveStatus.get(state.task_id) ?? state.status)));
   tasks = tasks.map((task) => executionTaskSnapshotSchema.parse({ ...task, current: active?.state.task_id === task.task_id }));
   const waves = await projectWaves(project.repository, project.spec_root, tasks);
@@ -675,6 +683,7 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
       step_id: currentStep?.id ?? null, step_label: currentStep?.label ?? null, step_summary: currentStep?.summary ?? null,
       step_status: currentStep?.status ?? null, step_started_at: currentStep?.started_at ?? null,
       current_elapsed_ms: currentStep?.started_at ? Math.max(0, nowMs - Date.parse(currentStep.started_at)) : null,
+      concurrent_task_ids:[...new Set(runningTasks.map(item=>item.taskId))].filter(id=>id!==active.state.task_id),
       next_action: activeSnapshot.blocked_by.length
         ? `等待前置 ${activeSnapshot.blocked_by.join('、')} 完成；当前 Task 不应继续执行`
         : nextAction(active.state, currentStep ?? undefined),
