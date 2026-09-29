@@ -54,3 +54,28 @@ test('desktop and 390px execution view show the current Task without browser err
     await browser.close()
   }
 })
+
+test('untrusted project name renders as text and cannot execute browser code', async () => {
+  const xssRoot = await mkdtemp(path.join(tmpdir(), 'spec-loop-view-xss-'))
+  const repository = path.join(xssRoot, 'repo')
+  const payload = '<img src=x onerror="window.__executionViewXss=1">'
+  let xssServer, xssUrl, browser
+  try {
+    await mkdir(repository)
+    const init = spawnSync(process.execPath, [
+      'dist/cli.js', 'project', 'init', xssRoot, '--id', 'PROJ-VIEW-XSS', '--name', payload, '--repository', repository,
+    ], { cwd: process.cwd(), encoding: 'utf8' })
+    expect(init.status, init.stderr).toBe(0)
+    ;({ server: xssServer, url: xssUrl } = await startExecutionViewServer(xssRoot, { port: 0 }))
+    browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true })
+    const page = await browser.newPage()
+    await page.goto(xssUrl, { waitUntil: 'networkidle' })
+    await expect(page.locator('#project-name')).toHaveText(payload)
+    expect(await page.evaluate(() => window.__executionViewXss)).toBeUndefined()
+    expect(await page.locator('#execution-view img').count()).toBe(0)
+  } finally {
+    if (browser) await browser.close()
+    if (xssServer) await closeExecutionViewServer(xssServer)
+    await rm(xssRoot, { recursive: true, force: true })
+  }
+})

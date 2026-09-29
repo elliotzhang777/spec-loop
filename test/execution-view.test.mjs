@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { realpath } from 'node:fs/promises'
@@ -540,6 +540,7 @@ test('local execution view is loopback-only, read-only and supports stable ETags
   const childRoot = path.join(root, 'projects', 'child-project'), childRepository = path.join(childRoot, 'repo')
   await mkdir(childRepository, { recursive: true })
   assert.equal(cli(['project', 'init', childRoot, '--id', 'PROJ-CHILD', '--name', 'Child Project', '--repository', childRepository]).code, 0)
+  await symlink(childRoot, path.join(root, 'projects', 'aliased-project'))
   await startExecutionStep(root, {
     taskId: 'TASK-VIEW', round: 1, stepType: 'harness.execute', label: 'Agent 实现', summary: 'Execute the approved local step',
   })
@@ -653,6 +654,7 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     const catalog = await catalogResponse.json()
     assert.equal(catalog.default_project, 'root')
     assert.deepEqual(catalog.projects.map((project) => project.key), ['root', 'project:child-project'])
+    assert.equal((await fetch(new URL('/api/snapshot?project=project%3Aaliased-project', url))).status, 404)
     assert.deepEqual(catalog.projects.map((project) => project.project_id), ['PROJ-VIEW', 'PROJ-CHILD'])
     const childSnapshot = await (await fetch(new URL('/api/snapshot?project=project%3Achild-project', url))).json()
     assert.equal(childSnapshot.project.project_id, 'PROJ-CHILD')
@@ -748,6 +750,35 @@ test('snapshot task state cache rejects changed authority history',async()=>{
   lines[lines.length-1]=JSON.stringify(tail)
   await writeFile(file,`${lines.join('\n')}\n`)
   await assert.rejects(buildExecutionSnapshot(root),/does not match CLI state history/)
+})
+
+test('deleting a disposable UI snapshot preserves canonical facts and cold rebuild', async () => {
+  const { root, taskRoot } = await projectFixture('execution-view-cache-rebuild-')
+  await startExecutionStep(root, {
+    taskId: 'TASK-VIEW', round: 1, stepType: 'round.work', label: '缓存重建',
+    summary: '仅从权威文件重建页面', occurredAt: new Date('2026-09-30T09:00:00.000Z'),
+  })
+  const now = '2026-09-30T09:00:10.000Z'
+  const authorityFiles = [
+    path.join(root, '.spec-loop', 'PROJECT.md'),
+    path.join(root, '.spec-loop', 'EXECUTION_EVENTS.jsonl'),
+    path.join(taskRoot, 'TASK_STATE.md'),
+    path.join(taskRoot, 'STATE_HISTORY.jsonl'),
+  ]
+  const before = await Promise.all(authorityFiles.map(file => readFile(file)))
+  const expected = await buildExecutionSnapshot(root, new Date(now))
+  const cacheDir = path.join(root, '.spec-loop', 'cache')
+  await mkdir(cacheDir)
+  await writeFile(path.join(cacheDir, 'execution-snapshot.json'), '{"untrusted":"stale"}\n')
+  await rm(cacheDir, { recursive: true })
+  const cold = spawnSync(process.execPath, [
+    '--input-type=module', '-e',
+    'import {buildExecutionSnapshot} from "./dist/execution-view.js"; console.log(JSON.stringify(await buildExecutionSnapshot(process.argv[1], new Date(process.argv[2]))))',
+    root, now,
+  ], { cwd: process.cwd(), encoding: 'utf8' })
+  assert.equal(cold.status, 0, cold.stderr)
+  assert.deepEqual(JSON.parse(cold.stdout), expected)
+  assert.deepEqual(await Promise.all(authorityFiles.map(file => readFile(file))), before)
 })
 
 test('event cache does not treat an append after an unterminated line as a valid event',async()=>{
