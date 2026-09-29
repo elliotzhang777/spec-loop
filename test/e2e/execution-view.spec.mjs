@@ -1,9 +1,10 @@
 import { test, expect, chromium } from '@playwright/test'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { startExecutionViewServer, closeExecutionViewServer } from '../../dist/execution-view-server.js'
+import { startExecutionStep, finishExecutionStep } from '../../dist/execution-events.js'
 
 let root, server, url
 
@@ -18,6 +19,13 @@ test.beforeAll(async () => {
     const result = spawnSync(process.execPath, ['dist/cli.js', ...args], { cwd: process.cwd(), encoding: 'utf8' })
     expect(result.status, result.stderr).toBe(0)
   }
+  const artifact = '.spec-loop/output/gate-failure.txt'
+  await writeFile(path.join(root, artifact), 'Build Gate failed with a known fixture error\n')
+  const failedGate = await startExecutionStep(root, {
+    taskId: 'TASK-VIEW-E2E', round: 1, stepType: 'gate.command', label: 'Build Gate failure',
+    summary: 'Record a failed build for browser inspection', refs: [artifact],
+  })
+  await finishExecutionStep(root, failedGate, { outcome: 'failure', summary: 'Build Gate failed with fixture error' })
   ;({ server, url } = await startExecutionViewServer(root, { port: 0 }))
 })
 
@@ -48,6 +56,20 @@ test('desktop and 390px execution view show the current Task without browser err
     await expect(page.locator('.task-row[aria-selected="true"]')).toHaveAttribute('data-task-id', 'TASK-VIEW-E2E')
     await page.locator('.task-row[aria-selected="true"]').click()
     await expect(page.locator('#inline-detail-TASK-VIEW-E2E')).toBeVisible()
+    const failedStep = page.locator('.antd-step-item').filter({ hasText: 'Build Gate failure' })
+    await expect(failedStep).toContainText('失败')
+    await failedStep.getByText('证据与产物 1').click()
+    await expect(failedStep).toContainText('.spec-loop/output/gate-failure.txt')
+    const before = await (await page.request.get(new URL('/api/snapshot', url).href)).json()
+    const cacheDir = path.join(root, '.spec-loop', 'cache')
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(path.join(cacheDir, 'execution-snapshot.json'), '{"stale":true}\n')
+    await rm(cacheDir, { recursive: true })
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(page.locator('#project-name')).toHaveText('Execution View E2E')
+    const rebuilt = await (await page.request.get(new URL('/api/snapshot', url).href)).json()
+    expect(rebuilt.revision).toBe(before.revision)
+    expect(rebuilt.tasks.find(task => task.task_id === 'TASK-VIEW-E2E').steps).toEqual(before.tasks.find(task => task.task_id === 'TASK-VIEW-E2E').steps)
     for (const width of [820, 900, 921]) {
       await page.setViewportSize({ width, height: 900 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width)
