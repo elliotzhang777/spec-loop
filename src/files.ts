@@ -32,7 +32,7 @@ export async function exists(file: string): Promise<boolean> {
 
 const BARE_PLACEHOLDER = /^(?:unknown|未知|tbd|todo|placeholder|fill me|lorem ipsum|待填写|待补充)[\s。.!！?？:：-]*$/i;
 const PLACEHOLDER_DIRECTIVE = /^(?:tbd|todo|待填写|待补充)\s*[:：-]/i;
-const EMBEDDED_PLACEHOLDER = /(?:[:：;；]\s*(?:tbd|todo|待填写|待补充)(?:\s*[:：-]|\s*(?=[。.!！?？;；]|$))|\b(?:is|are|remains?)\s+(?:tbd|todo)\s*[。.!！?？]*$|(?:是|为)\s*(?:待填写|待补充)\s*[。.!！?？]*$)/i;
+const EMBEDDED_PLACEHOLDER = /(?:[:：;；]\s*(?:tbd|todo|待填写|待补充)(?=$|[\s:：;；。.!！?？（(])|\b(?:is|are|remains?|be)\s+(?:tbd|todo)(?=$|[\s.,;:!?])|(?:是|为)\s*(?:待填写|待补充)(?=$|[\s（(。.!！?？;；]))/i;
 const TEMPLATE_MARKER = /<[^>]+>|\{\{[^}]+\}\}/;
 const FILL_INSTRUCTION = /\b(?:complete|fill(?:\s+in)?)\s+(?:this\s+)?(?:todo|field)\b/i;
 export function assertSubstantive(value: string, label: string): void {
