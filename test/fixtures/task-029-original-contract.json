@@ -1,0 +1,375 @@
+{
+  "schema_version": 2,
+  "task_id": "TASK-029",
+  "version": 1,
+  "risk": "heavy",
+  "critical_path": true,
+  "depends_on": [
+    "TASK-027",
+    "TASK-028"
+  ],
+  "criteria": [
+    {
+      "id": "AC-1",
+      "text": "当前仓库和至少一个历史 Dogfood Project 在删除 cache 后均可重建；已知 Gate 时长精确，旧状态/Attempt 缺失时长明确显示 unknown。",
+      "risk_tags": [
+        "data_integrity"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-2",
+      "text": "200×200 fixture 冷重建不超过 2 秒，追加单事件后的增量投影和页面可见时间不超过 500 毫秒。",
+      "risk_tags": [
+        "functional"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-3",
+      "text": "事件损坏、事实冲突、非法路径、XSS 和 Secret canary 全部 fail closed 或安全降级，无误导性绿色结论。",
+      "risk_tags": [
+        "security"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-4",
+      "text": "桌面与窄屏四条核心浏览器路径全部通过，用户完成当前 revision 的视觉 Review 和 Heavy 人工确认。",
+      "risk_tags": [
+        "functional"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-5",
+      "text": "删除 UI cache/snapshot 不影响 Task、Harness、Evidence、Review 或 Delivery，重建后的 canonical snapshot 等价。",
+      "risk_tags": [
+        "data_integrity"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-6",
+      "text": "Phase 1–3 全量回归与 FEAT-009 全部 Gate 在最终候选通过；独立 V 确认可重建性和事实源边界，独立 R 复核 AC 覆盖与 Evidence 链，双 PASS 后才形成 Candidate。",
+      "risk_tags": [
+        "critical_path"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-7",
+      "text": "交互终端启动 Task/批次/Harness 时 5 秒内复用或启动唯一 Project view、打印并默认打开 URL；重复启动、僵尸 marker、端口冲突、CI、`--no-view` 和浏览器不可用路径均确定且不阻断任务。",
+      "risk_tags": [
+        "functional"
+      ],
+      "waivable": false
+    },
+    {
+      "id": "AC-8",
+      "text": "顶部当前工作优先来自最新未闭合执行步骤；多个 Task 并发时全部可见，旧 working 状态或较新的 Task State 时间不得覆盖实际运行中的 Harness/活动步骤。",
+      "risk_tags": [
+        "data_integrity"
+      ],
+      "waivable": false
+    }
+  ],
+  "use_cases": [
+    {
+      "id": "UC-1",
+      "ac": [
+        "AC-1"
+      ],
+      "scenario": "Self-hosted and historical projects rebuild after cache deletion with exact or unknown timing shown honestly"
+    },
+    {
+      "id": "UC-2",
+      "ac": [
+        "AC-2"
+      ],
+      "scenario": "A 200 Task by 200 event fixture meets the 2 second cold and 500 millisecond incremental and HTTP visibility limits"
+    },
+    {
+      "id": "UC-3",
+      "ac": [
+        "AC-3"
+      ],
+      "scenario": "Corrupt events, invalid paths, XSS and Secret canaries fail closed or degrade safely without false green results"
+    },
+    {
+      "id": "UC-4",
+      "ac": [
+        "AC-4"
+      ],
+      "scenario": "Four desktop and narrow browser paths pass and current revision visual and Heavy decisions are recorded"
+    },
+    {
+      "id": "UC-5",
+      "ac": [
+        "AC-5"
+      ],
+      "scenario": "Deleting disposable UI cache preserves Task, Harness, Evidence, Review and Delivery facts and canonical snapshot"
+    },
+    {
+      "id": "UC-6",
+      "ac": [
+        "AC-6"
+      ],
+      "scenario": "Phase 1 to 3 regression and FEAT-009 gates pass with independent V and R on the final candidate"
+    },
+    {
+      "id": "UC-7",
+      "ac": [
+        "AC-7"
+      ],
+      "scenario": "Interactive Task, wave and Harness startup opens or reuses one view within 5 seconds and failure paths never block Task"
+    },
+    {
+      "id": "UC-8",
+      "ac": [
+        "AC-8"
+      ],
+      "scenario": "The latest open execution step remains current and concurrent Tasks stay visible despite newer stale Task State"
+    }
+  ],
+  "tools": [
+    {
+      "id": "execution-view-heavy-full",
+      "kind": "command",
+      "gate_id": "execution-view-heavy-full",
+      "command": [
+        "npm",
+        "run",
+        "quality:standard"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-benchmark",
+      "kind": "unit",
+      "gate_id": "execution-view-heavy-benchmark",
+      "command": [
+        "node",
+        "tools/benchmark-execution-view.mjs"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-dogfood",
+      "kind": "command",
+      "gate_id": "execution-view-heavy-dogfood",
+      "command": [
+        "node",
+        "tools/report-execution-view-dogfood.mjs",
+        "/Users/zhangbo/personal-workspace/workspace/spec-loop",
+        "/Users/zhangbo/personal-workspace/workspace/spec-loop/projects/quant-system",
+        "/Users/zhangbo/personal-workspace/workspace/spec-loop/projects/offshore-electrical-management"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-adversarial",
+      "kind": "unit",
+      "gate_id": "execution-view-heavy-adversarial",
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=legacy Gate traversal|event tampering|verified event cache|snapshot task state cache|unterminated line",
+        "test/execution-view.test.mjs"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-lifecycle",
+      "kind": "unit",
+      "gate_id": "execution-view-heavy-lifecycle",
+      "command": [
+        "node",
+        "--test",
+        "test/view-auto-open.test.mjs"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-browser",
+      "kind": "command",
+      "gate_id": "execution-view-heavy-browser",
+      "command": [
+        "node",
+        "tools/check-execution-view-dogfood-browser.mjs",
+        "/Users/zhangbo/personal-workspace/workspace/spec-loop",
+        "project:quant-system",
+        "/Users/zhangbo/personal-workspace/workspace/spec-loop/.spec-loop/output/TASK-029-heavy-browser"
+      ],
+      "playwright": null
+    },
+    {
+      "id": "execution-view-heavy-e2e",
+      "kind": "playwright",
+      "gate_id": "execution-view-heavy-e2e",
+      "command": null,
+      "playwright": {
+        "config": null,
+        "tests": [
+          "test/e2e/execution-view.spec.mjs"
+        ],
+        "projects": [],
+        "grep": null,
+        "require_screenshots": true
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "id": "AS-1",
+      "ac": [
+        "AC-1"
+      ],
+      "tool_id": "execution-view-heavy-dogfood",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-2",
+      "ac": [
+        "AC-2"
+      ],
+      "tool_id": "execution-view-heavy-benchmark",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-3",
+      "ac": [
+        "AC-3"
+      ],
+      "tool_id": "execution-view-heavy-adversarial",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-4",
+      "ac": [
+        "AC-4"
+      ],
+      "tool_id": "execution-view-heavy-e2e",
+      "operator": "playwright_clean",
+      "expected": "2 expected browser tests, zero unexpected, flaky or skipped, valid screenshots"
+    },
+    {
+      "id": "AS-5",
+      "ac": [
+        "AC-5"
+      ],
+      "tool_id": "execution-view-heavy-adversarial",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-6",
+      "ac": [
+        "AC-6"
+      ],
+      "tool_id": "execution-view-heavy-full",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-7",
+      "ac": [
+        "AC-7"
+      ],
+      "tool_id": "execution-view-heavy-lifecycle",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    },
+    {
+      "id": "AS-8",
+      "ac": [
+        "AC-8"
+      ],
+      "tool_id": "execution-view-heavy-browser",
+      "operator": "exit_code_zero",
+      "expected": "exit code zero and independent V inspection of output values"
+    }
+  ],
+  "evidence_requirements": [
+    {
+      "id": "ER-1",
+      "ac": [
+        "AC-1"
+      ],
+      "tool_id": "execution-view-heavy-dogfood",
+      "kind": "command_log",
+      "required": true
+    },
+    {
+      "id": "ER-2",
+      "ac": [
+        "AC-2"
+      ],
+      "tool_id": "execution-view-heavy-benchmark",
+      "kind": "test_report",
+      "required": true
+    },
+    {
+      "id": "ER-3",
+      "ac": [
+        "AC-3"
+      ],
+      "tool_id": "execution-view-heavy-adversarial",
+      "kind": "test_report",
+      "required": true
+    },
+    {
+      "id": "ER-4",
+      "ac": [
+        "AC-4"
+      ],
+      "tool_id": "execution-view-heavy-e2e",
+      "kind": "screenshot",
+      "required": true
+    },
+    {
+      "id": "ER-5",
+      "ac": [
+        "AC-5"
+      ],
+      "tool_id": "execution-view-heavy-adversarial",
+      "kind": "test_report",
+      "required": true
+    },
+    {
+      "id": "ER-6",
+      "ac": [
+        "AC-6"
+      ],
+      "tool_id": "execution-view-heavy-full",
+      "kind": "test_report",
+      "required": true
+    },
+    {
+      "id": "ER-7",
+      "ac": [
+        "AC-7"
+      ],
+      "tool_id": "execution-view-heavy-lifecycle",
+      "kind": "test_report",
+      "required": true
+    },
+    {
+      "id": "ER-8",
+      "ac": [
+        "AC-8"
+      ],
+      "tool_id": "execution-view-heavy-browser",
+      "kind": "test_report",
+      "required": true
+    }
+  ],
+  "budgets": {
+    "max_semantic_reworks": 2,
+    "max_infrastructure_retries_per_stage": 2,
+    "repeated_failure_limit": 2
+  }
+}

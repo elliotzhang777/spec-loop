@@ -15,6 +15,40 @@ test('substantive checks preserve domain precision words but reject bare placeho
   }
 });
 
+test('original TASK-029 contract passes the P Proposal entry without acceptance text changes',async()=>{
+  const contract=JSON.parse(await readFile(new URL('./fixtures/task-029-original-contract.json',import.meta.url),'utf8'));
+  assert.equal(createHash('sha256').update(JSON.stringify(contract)).digest('hex'),'61004c12ac3f77fc96e1f3d47ae5cc5cb0111eb234457292fc3cdb3d4cf8459b');
+  const root=await tempRoot('project-task-029-proposal-'),repo=path.join(root,'repo');await mkdir(repo);
+  const initialized=cli(['project','init',root,'--id','PROJ-TASK-029','--name','Original contract','--repository',repo]);
+  assert.equal(initialized.code,0,initialized.stderr);
+  assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
+  const contractFile=path.join(root,'contract.json');await writeFile(contractFile,JSON.stringify(contract));
+  const result=cli(['triage','propose',root,'--source','Approved Phase 4 TASK-029 Heavy specification','--goal','Finalize execution-view compatibility, security, performance and browser Heavy validation','--risk','heavy','--reason','TASK-029 original approved contract','--contract',contractFile]);
+  assert.equal(result.code,0,result.stderr);
+  const proposal=JSON.parse(await readFile(path.join(root,'.spec-loop','proposals',`${result.stdout.trim()}.json`),'utf8'));
+  assert.deepEqual(proposal.acceptance_contract,contract);
+  assert.deepEqual(proposal.initial_acceptance,contract.criteria.map(({id,text})=>({id,text})));
+});
+
+test('Proposal entry rejects placeholder fields independently',async()=>{
+  const original=JSON.parse(await readFile(new URL('./fixtures/task-029-original-contract.json',import.meta.url),'utf8'));
+  const root=await tempRoot('project-proposal-placeholders-'),repo=path.join(root,'repo');await mkdir(repo);
+  const initialized=cli(['project','init',root,'--id','PROJ-PLACEHOLDERS','--name','Placeholders','--repository',repo]);
+  assert.equal(initialized.code,0,initialized.stderr);
+  assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
+  const contractFile=path.join(root,'contract.json');
+  for(const [field,value] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['scenario','TBD:'],['expected','待填写：']]){
+    const contract=structuredClone(original);
+    if(field==='criterion')contract.criteria[0].text=value;
+    if(field==='scenario')contract.use_cases[0].scenario=value;
+    if(field==='expected')contract.assertions[0].expected=value;
+    await writeFile(contractFile,JSON.stringify(contract));
+    const result=cli(['triage','propose',root,'--source',field==='source'?value:'Approved source','--goal',field==='goal'?value:'Create the approved task','--risk','heavy','--reason',field==='reason'?value:'Approved reason','--contract',contractFile]);
+    assert.notEqual(result.code,0,`${field}=${value} unexpectedly passed`);
+    assert.match(result.stderr,/placeholder content/,`${field}=${value} failed for an unrelated reason`);
+  }
+});
+
 test('project init, provider doctor and rebuildable task queries', async()=>{
   const root=await tempRoot('project-loop-');const repo=path.join(root,'repo');await mkdir(repo);
   assert.equal(cli(['project','init',root,'--id','PROJ-DEMO','--name','Demo','--repository',repo]).code,0);
