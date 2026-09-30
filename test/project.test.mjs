@@ -48,7 +48,7 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
     assert.notEqual(result.code,0,`${field}=${value} unexpectedly passed`);
     assert.match(result.stderr,rejection??/placeholder content/,`${field}=${value} failed for an unrelated reason`);
   }
-  for(const value of ['placeholder: acceptance steps to be completed after review','fill me with the acceptance steps after review']){
+  for(const value of ['placeholder: acceptance steps to be completed after review','fill me with the acceptance steps after review','The acceptance steps are placeholder pending review.']){
     const contract=structuredClone(original);
     contract.criteria[0].text=value;
     await writeFile(contractFile,JSON.stringify(contract));
