@@ -16,7 +16,7 @@
     "build": "npm run build:execution-view && tsc",
     "build:execution-view": "node tools/build-execution-view.mjs",
     "check:feishu-contracts": "node tools/check-feishu-connector-contracts.mjs",
-    "quality:standard": "npm run build && npm run check:feishu-contracts && node --test --test-concurrency=1 test/*.test.mjs",
+    "quality:standard": "npm run build && npm run check:feishu-contracts && node --test --test-concurrency=2 test/*.test.mjs",
     "test": "npm run quality:standard",
     "check": "npm run build && node dist/cli.js --help"
   },
