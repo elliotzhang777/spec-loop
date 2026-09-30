@@ -7,12 +7,13 @@
 | 工单 | 标题 | 状态 | 本轮下一动作 | 阻塞或待决 |
 |---|---|---|---|---|
 | [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书正式机器人 Dogfood 与最终 Heavy | 已批准 | 本机禁用配置模板与实测准备已完成，待真实配置后执行 | 真实飞书配置、外部副作用和 Heavy 决定 |
-| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 执行可视化兼容重建、Dogfood 与加固验收 | 进行中 | TASK-028 已交付；组合候选技术全量通过，待受管 Heavy/V/R | 精确 Contract hash、独立角色链和 Heavy/视觉决定 |
+| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 执行可视化兼容重建、Dogfood 与加固验收 | 进行中 | TASK-028 已交付；`e5ddd81` 技术全量通过 | TASK-045 P 入口缺陷、独立角色链和 Heavy/视觉决定 |
 | [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | P/M/V/R 执行事件与观察面 | 待验证 | 当前 HEAD 技术 V/R 与浏览器复核已通过，等待视觉决定 | 当前 revision 视觉决定 |
-| [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 P/M/V/R 自动闭环最终 Heavy | 已批准 | 准备组合验收清单 | TASK-026/029 等依赖与最终 Heavy/阶段决定 |
-| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | Report-only v1 Ready 误报缺陷 | 进行中 | `c0f01dd` 隔离组合候选受管 targeted Harness Gate 4/4 PASS | v2 M/V/R 独立角色链和最终 Evidence Gate 待办 |
+| [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 P/M/V/R 自动闭环最终 Heavy | 已批准 | AC-3 report-only 门槛已量化；准备组合验收 | TASK-026/029 等依赖与最终 Heavy/阶段决定 |
+| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | Report-only v1 Ready 误报缺陷 | 进行中 | `e5ddd81` 隔离组合候选受管 targeted Harness Gate 4/4 PASS | v2 M/V/R 独立角色链和最终 Evidence Gate 待办 |
+| [TASK-045](04-task/TASK-045-proposal-unknown-domain-term.md) | Proposal 误判耗时精度术语 | 进行中 | 第二轮续执行复现已建缺陷；下一轮定向修复并全矩阵复测 | TASK-029 Contract P 入口受阻，正式 V/R 待办 |
 
-第二轮起始盘点有 6 项未完成；TASK-028 已在 `6eef0ca` 完成委托视觉决定、定向 Gate 环境变化后的 3/3 重跑及 v1 Delivery，当前剩余 5 项。TASK-033 在 `6eef0ca` 的技术 V/R 与浏览器证据仍待当前最终候选视觉收口；TASK-029 隔离 HEAD `91f6d25` 完成第一轮 332 个逐用例/场景技术测试。以上证据绑定各自所列 HEAD，集成改变 HEAD 后须重新绑定正式 Gate、截图和 Evidence 才能进入集中裁决。
+第二轮起始盘点有 6 项未完成；TASK-028 已在 `6eef0ca` 完成委托视觉决定、定向 Gate 环境变化后的 3/3 重跑及 v1 Delivery；第二轮续执行再发现 TASK-045，当前仍有 6 项未完成。TASK-033 在 `6eef0ca` 的技术 V/R 与浏览器证据仍待当前最终候选视觉收口；TASK-029 隔离实现已在 `e5ddd81` 完成组合技术复测，但 Contract P 入口受 TASK-045 缺陷阻塞。以上证据绑定各自所列 HEAD，集成改变 HEAD 后须重新绑定正式 Gate、截图和 Evidence 才能进入集中裁决。
 
 本轮逐项证据、当前候选和剩余条件见 [Phase 4 轮次待决清单](05-delivery/2026-09-30-Phase4-轮次待决清单.md)。TASK-029 的 8 AC/7 Gate 草案已通过 schema 和工具对照检查，尚未执行为正式 Heavy；TASK-044 的 v2 Contract 已按用户委托绑定 `PROP-13`，其 targeted Harness Gate 4/4 PASS，独立 V/R 未完成。
 
