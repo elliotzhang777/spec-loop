@@ -124,6 +124,7 @@ R: independent evidence review → Candidate | M | V | human
 | [TASK-041](../04-task/TASK-041-candidate-quality-portable-files.md) | 公开示例配置与 CRLF 候选质量兼容 | TASK-032、040 | 已完成 |
 | [TASK-042](../04-task/TASK-042-v2-controlled-v-harness-freeze.md) | v2 Controlled V 自动冻结干净候选与 collect 证据 | TASK-030、032 | 已完成 |
 | [TASK-043](../04-task/TASK-043-approved-repository-bash-gates.md) | P 契约与 Run 精确绑定的仓库 Bash Gate | TASK-030、042 | 已完成 |
+| [TASK-045](../04-task/TASK-045-proposal-unknown-domain-term.md) | Proposal 占位检查保留领域术语 | TASK-032 | 进行中 |
 | [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 唯一全量 P/M/V/R Heavy Dogfood | TASK-026、029、031～036 | 已批准 |
 
 ## 实际实现

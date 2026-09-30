@@ -4,6 +4,15 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { cli, tempRoot } from './helpers.mjs';
+import { assertSubstantive } from '../dist/files.js';
+
+test('substantive checks preserve domain precision words but reject bare placeholders',()=>{
+  assert.doesNotThrow(()=>assertSubstantive('Historical task timing has unknown precision after import.','criterion'));
+  assert.doesNotThrow(()=>assertSubstantive('旧数据中的未知耗时要明确标识。','criterion'));
+  for(const value of ['unknown','未知','TODO','TBD','待填写','Complete this TODO field']){
+    assert.throws(()=>assertSubstantive(value,'criterion'),/placeholder content/);
+  }
+});
 
 test('project init, provider doctor and rebuildable task queries', async()=>{
   const root=await tempRoot('project-loop-');const repo=path.join(root,'repo');await mkdir(repo);
@@ -44,8 +53,8 @@ test('project default protocol requires complete v2 contracts without migrating 
   const contractFile=path.join(root,'contract.json');
   await writeFile(contractFile,JSON.stringify({
     schema_version:2,task_id:'TASK-V2-1',version:1,risk:'standard',critical_path:false,depends_on:[],
-    criteria:[{id:'AC-1',text:'v2 contract is enforced',risk_tags:['functional'],waivable:true}],
-    use_cases:[{id:'UC-1',ac:['AC-1'],scenario:'create a task under the v2 project default'}],
+    criteria:[{id:'AC-1',text:'v2 contract is enforced while old timing may have unknown precision',risk_tags:['functional'],waivable:true}],
+    use_cases:[{id:'UC-1',ac:['AC-1'],scenario:'create a task under the v2 project default with unknown timing'}],
     tools:[{id:'contract-test',kind:'unit',gate_id:'project-protocol-test',command:['node','--test','test/project.test.mjs'],playwright:null}],
     assertions:[{id:'AS-1',ac:['AC-1'],tool_id:'contract-test',operator:'exit_code_zero',expected:'exit code 0'}],
     evidence_requirements:[{id:'ER-1',ac:['AC-1'],tool_id:'contract-test',kind:'test_report',required:true}],

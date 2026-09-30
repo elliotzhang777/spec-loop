@@ -30,10 +30,11 @@ export async function exists(file: string): Promise<boolean> {
   try { await stat(file); return true; } catch { return false; }
 }
 
-const PLACEHOLDER = /(?:\b(?:tbd|todo|unknown|placeholder|fill me|lorem ipsum|待填写|待补充|未知)\b|<[^>]+>|\{\{[^}]+\}\})/i;
+const PLACEHOLDER = /(?:\b(?:tbd|todo|placeholder|fill me|lorem ipsum)\b|待填写|待补充|<[^>]+>|\{\{[^}]+\}\})/i;
+const BARE_UNKNOWN = /^(?:unknown|未知)[\s。.!！?？]*$/i;
 export function assertSubstantive(value: string, label: string): void {
   const normalized = value.trim();
-  if (normalized.length < 3 || PLACEHOLDER.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
+  if (normalized.length < 3 || PLACEHOLDER.test(normalized) || BARE_UNKNOWN.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
 }
 
 export function assertNoSecrets(value: string, label: string): void {

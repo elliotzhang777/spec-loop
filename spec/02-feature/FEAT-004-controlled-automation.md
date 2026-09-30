@@ -52,6 +52,7 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 | Task | [TASK-041 候选质量兼容示例配置与 CRLF](../04-task/TASK-041-candidate-quality-portable-files.md) | 已完成 |
 | Task | [TASK-042 v2 Controlled V 自动冻结候选](../04-task/TASK-042-v2-controlled-v-harness-freeze.md) | 已完成 |
 | Task | [TASK-043 仓库 Bash Gate 精确授权](../04-task/TASK-043-approved-repository-bash-gates.md) | 已完成 |
+| Task | [TASK-045 Proposal 领域术语误判缺陷](../04-task/TASK-045-proposal-unknown-domain-term.md) | 进行中 |
 | Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
 
 ## 实际交付

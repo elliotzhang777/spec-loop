@@ -152,6 +152,7 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 - 最终实现：report-only 的 TASK-034 AC-1～5 与 Lease、fencing、resource claim、Pause/Kill/reconcile、denylist、整波两轮流程的 TASK-035 AC-1～17，均在候选 `cbc1a5d` 上独立 V/R PASS。用户已完成绑定截图哈希的人工视觉 Review，两个工单均关闭；Phase 4 最终 Heavy 仍单独验收。报告与 Wave Review hold 共用受 Review 决定约束的读取边界，伪造终态不能绕过待审状态。
 - 第一轮新证据：当前 Project 的 report-only 把 TASK-026/028 两项 v1 `resumable` 标为 Ready，而受控派发预览为空；`TASK-026` 只是不得启动的历史壳。TASK-044 在第二轮使 report-only Ready 与受控可派发语义一致，保持 v1 工单可见且明确人工流程，不修改已完成 TASK-034 的历史结论。
 - 第二轮隔离组合候选 `49612eb`：TASK-026/028 保持可见但 `ready=false`，连续扫描 canonical 等价；海工 v2 `WEB-TASK-013` 仍 Ready 且与受控只读预览一致。正式 V/R 与阶段指标门槛仍待完成。
+- 续执行候选 `e5ddd81`：TASK-044 targeted Harness Gate 4/4 及完整技术复测通过；TASK-026 v1 planned、已交付的 TASK-028 v1 均非 Ready，当前 v2 TASK-044 与海工 `WEB-TASK-013` 的 Ready 和受控预览相符。TASK-037 report-only 门槛已按用户委托量化；独立 V/R 与最终 Heavy 尚未完成。
 
 ## 变更记录
 

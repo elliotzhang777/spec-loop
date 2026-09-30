@@ -58,6 +58,7 @@
 - 2026-09-30 用户将后续推进节奏改为完整规格库轮次：全部未完成 Task 同轮盘点、可执行项按依赖推进、冻结候选后集中验证和裁决。TASK-035 的既有 Wave 实现与历史验收事实保持不变，用户级清单跨 Wave 汇总，原生跨规格库自动编排尚未实现。
 - 2026-09-30 第一轮真实 report-only 扫描发现 TASK-026 v1 历史壳和 TASK-028 在途 v1 被标为 Ready，受控执行预览却无 Ready Task。该误报不改写 TASK-034 的历史 PASS，已建 TASK-044 在第二轮修复并完整复测；TASK-037 AC-3 暂记 FAIL。
 - 2026-09-30 第二轮隔离组合候选 `49612eb`：报告调度器 4/4 与完整质量套件 320/320 技术通过；当前 Project TASK-026/028 非 Ready、海工合法 v2 Ready 保留。正式 Contract/Gate/V/R 和 TASK-037 指标门槛尚未完成，不把技术自测写成最终 Feature PASS。
+- 2026-09-30 续执行：`e5ddd81` 全套质量 320/320、TASK-044 受管 targeted Harness Gate 4/4 通过；TASK-037 的 report-only 门槛已按用户委托量化，当前 Project/海工的 Ready 与受控预览一致、`missing_data=0`、重复扫描 canonical 等价。无反馈样本的采纳率为 N/A；独立 V/R 与 Phase 4 Heavy 仍待办。
 
 ## 变更记录
 
