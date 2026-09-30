@@ -145,10 +145,12 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 | [TASK-035](../04-task/TASK-035-scheduler-leases-controls.md) | Lease、fencing、resource claim、Pause/Kill 和受控 Ready 调度 | TASK-034 稳定 | 已完成 |
 | [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书真实连接器专项 Heavy | 真实配置、TASK-021～025 | 已批准 |
 | [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 自动闭环最终 Heavy | 全部 Phase 4 子 Task | 已批准 |
+| [TASK-044](../04-task/TASK-044-report-only-v1-false-ready.md) | Report-only v1 Ready 误报修复 | TASK-034 已完成 | 已批准，第二轮修复 |
 
 ## 实际实现
 
 - 最终实现：report-only 的 TASK-034 AC-1～5 与 Lease、fencing、resource claim、Pause/Kill/reconcile、denylist、整波两轮流程的 TASK-035 AC-1～17，均在候选 `cbc1a5d` 上独立 V/R PASS。用户已完成绑定截图哈希的人工视觉 Review，两个工单均关闭；Phase 4 最终 Heavy 仍单独验收。报告与 Wave Review hold 共用受 Review 决定约束的读取边界，伪造终态不能绕过待审状态。
+- 第一轮新证据：当前 Project 的 report-only 把 TASK-026/028 两项 v1 `resumable` 标为 Ready，而受控派发预览为空；`TASK-026` 只是不得启动的历史壳。TASK-044 在第二轮使 report-only Ready 与受控可派发语义一致，保持 v1 工单可见且明确人工流程，不修改已完成 TASK-034 的历史结论。
 
 ## 变更记录
 

@@ -43,6 +43,7 @@
 | Task | [TASK-034 Report-only Scheduler](../04-task/TASK-034-report-only-scheduler.md) | 已完成 |
 | Task | [TASK-035 Lease、资源协调与 Pause/Kill](../04-task/TASK-035-scheduler-leases-controls.md) | 已完成 |
 | Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
+| Task | [TASK-044 Report-only v1 Ready 误报缺陷](../04-task/TASK-044-report-only-v1-false-ready.md) | 已批准，第二轮修复 |
 
 ## 实际交付
 
@@ -55,6 +56,7 @@
 - 同一候选的 TASK-035 独立 V/R 对 17 条 AC 全部 PASS，Chromium 功能与截图哈希已绑定；人工视觉 Review 仍待用户决定，Phase 4 Heavy 与真实业务角色未运行，Feature 继续保持当前状态。
 - 用户于 2026-09-29 批准 TASK-035 当前候选的人工视觉效果，决定记录绑定 HEAD 和 7 张截图哈希；TASK-035 已关闭。FEAT-005 仍需最终 Heavy/阶段验收，不因子工单完成自动关闭。
 - 2026-09-30 用户将后续推进节奏改为完整规格库轮次：全部未完成 Task 同轮盘点、可执行项按依赖推进、冻结候选后集中验证和裁决。TASK-035 的既有 Wave 实现与历史验收事实保持不变，用户级清单跨 Wave 汇总，原生跨规格库自动编排尚未实现。
+- 2026-09-30 第一轮真实 report-only 扫描发现 TASK-026 v1 历史壳和 TASK-028 在途 v1 被标为 Ready，受控执行预览却无 Ready Task。该误报不改写 TASK-034 的历史 PASS，已建 TASK-044 在第二轮修复并完整复测；TASK-037 AC-3 暂记 FAIL。
 
 ## 变更记录
 
