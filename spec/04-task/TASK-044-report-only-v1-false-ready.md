@@ -65,8 +65,8 @@ Report-only 的 `ready` 只表示当前受控 Scheduler 可派发；在途 v1 �
 
 ## 交付记录
 
-- 完成日期：待第二轮修复、验证与裁决
-- 变更文件/交付物：待填写
+- 完成日期：尚未正式验收；第二轮定向修复与隔离技术复测已进行
+- 变更文件/交付物：`src/report-scheduler.ts`、`test/report-scheduler.test.mjs`；隔离修复提交 `5cdcebc`，组合技术候选 `2426a9e`
 - 与原设计的差异：无
 
 ## 变更记录
