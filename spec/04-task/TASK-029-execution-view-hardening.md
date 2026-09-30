@@ -114,6 +114,7 @@
 | 2026-09-30 | Codex/M（浏览器/对抗） | 本仓库与 Quant，Chrome 154，候选 `e4d8670` | 桌面 1440px 与窄屏 390px 四条页面加载、定位当前及展开详情路径通过，无页面错误或横向溢出；失败步骤与 Evidence、浏览器缓存删除重建、恶意工程名、符号链接、旧 Gate 路径越界和旧 Attempt 密钥样本通过；非正式视觉/Heavy Evidence | [浏览器报告](../../.spec-loop/output/TASK-029-browser-e4d8670.json) 含八张截图及 SHA256；[Playwright 回归](../../.spec-loop/output/TASK-029-browser-regression-e4d8670.log) 2/2 |
 | 2026-09-30 | Codex/P（正式计划准备） | 隔离候选 `e4d8670` | 8 项 AC、7 个 full Gate 的草案通过 v2 Contract 与 Gate schema 解析；未批准，非正式 Evidence | [Contract 草案](../../.spec-loop/output/TASK-029-contract-draft.json) 输入哈希 `c59bd30bbbb9df52be6c258b5c2eba797be23e2f5e0b45ba633e039880788c65`；[Gate 草案](../../.spec-loop/output/TASK-029-GATES-draft.md) |
 | 2026-09-30 | Codex/M（定向修复） | 隔离候选 `91f6d25`，Node 23 | 大快照压缩保留当前和并行 Task 的 running/waiting 步骤；`node --test test/execution-view.test.mjs` 29/29、等待态补充用例 1/1 与 `npm run build` 通过；完整套件和正式 Gate 尚未重绑 | `2a9e57a` 修复压缩，`91f6d25` 补充等待态覆盖；未产生正式 Evidence |
+| 2026-09-30 | Codex/M（第一轮完整技术测试） | 隔离候选 `91f6d25`，Node 23、Chrome 154 | 七类 Gate 草案均完成技术运行：构建/契约/Node 319/319、Playwright 2/2、对抗 5/5×2、生命周期 3/3、200×200 基准、三项目重建和四条浏览器路径均通过；不代替受管 Heavy/V/R | [第一轮测试记录](../05-delivery/2026-09-30-Phase4-第一轮技术测试记录.md)与[321 个逐用例结果](../05-delivery/2026-09-30-Phase4-第一轮逐用例结果.json) |
 
 ## 关闭检查
 
