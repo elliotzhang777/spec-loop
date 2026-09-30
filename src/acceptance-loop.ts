@@ -525,8 +525,12 @@ async function readPlan(root: string, taskId: string, run: AcceptanceRun): Promi
   return plan;
 }
 
-function failureFingerprint(stage: 'V' | 'R', classification: string, failedAc: string[], message: string, _evidenceSetHash: string): string {
-  const normalized = message.trim().toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ');
+export function failureFingerprint(stage: 'V' | 'R', classification: string, failedAc: string[], message: string, _evidenceSetHash: string): string {
+  const controlledGateFailure = stage === 'V' && message.startsWith('one or more controlled Gates failed:');
+  const providerBoundary = controlledGateFailure ? message.indexOf('; Provider V: ') : -1;
+  const stableIdentity = controlledGateFailure ? message.slice(0, providerBoundary < 0 ? undefined : providerBoundary) : '';
+  const volatileMessage = controlledGateFailure ? (providerBoundary < 0 ? '' : message.slice(providerBoundary)) : message;
+  const normalized = `${stableIdentity}${volatileMessage.replace(/\d+/g, '#')}`.trim().toLowerCase().replace(/\s+/g, ' ');
   return sha256(JSON.stringify({ stage, classification, failed_ac: [...failedAc].sort(), message: normalized }));
 }
 
@@ -536,7 +540,7 @@ export async function describeControlledGateFailures(root: string, gates: GateRe
     const output = await readFile(path.resolve(root, gate.artifact), 'utf8').catch(() => '');
     const testNames = [...output.matchAll(/^not ok\s+(?:\d+\s+-\s+)?(.+)$/gm)]
       .map((match) => match[1].trim().replace(/\s+/g, ' ')).filter(Boolean);
-    const identity = testNames.length ? `tests ${[...new Set(testNames)].slice(0, 8).join(' | ')}`
+    const identity = testNames.length ? `tests ${[...new Set(testNames)].sort().join(' | ')}`
       : `exit ${gate.exit_code}${gate.timed_out ? ' timeout' : ''}`;
     return `${gate.id}: ${identity}`;
   }));

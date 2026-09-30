@@ -13,6 +13,7 @@ import {
   cancelAcceptanceRun,
   compileAcceptancePlan,
   describeControlledGateFailures,
+  failureFingerprint,
   readAcceptanceRun,
   reconcileCandidateBaseline,
   recordRResult,
@@ -36,6 +37,24 @@ test('controlled Gate failures distinguish test names while ignoring TAP order a
   assert.notEqual(fastExit, viewStartup)
   await writeFile(artifact, 'not ok 312 - fast exit identity probe\n  duration_ms: 900.7\n')
   assert.equal(await describeControlledGateFailures(root, [gate]), fastExit)
+  await writeFile(artifact, 'not ok 1 - parameterized path 1 rejects invalid token\n')
+  const numericOne = await describeControlledGateFailures(root, [gate])
+  await writeFile(artifact, 'not ok 1 - parameterized path 2 rejects invalid token\n')
+  const numericTwo = await describeControlledGateFailures(root, [gate])
+  assert.notEqual(numericOne, numericTwo)
+  await writeFile(artifact, 'not ok 1 - fast exit identity probe\nnot ok 2 - background execution view lifecycle\n')
+  const both = await describeControlledGateFailures(root, [gate])
+  await writeFile(artifact, 'not ok 9 - background execution view lifecycle\nnot ok 8 - fast exit identity probe\n')
+  assert.equal(await describeControlledGateFailures(root, [gate]), both)
+  const fingerprintFor = (message) => failureFingerprint('V', 'implementation_problem', ['AC-1'], message, 'evidence-hash')
+  assert.notEqual(fingerprintFor(numericOne), fingerprintFor(numericTwo))
+  assert.equal(fingerprintFor(both), fingerprintFor(await describeControlledGateFailures(root, [gate])))
+  assert.equal(fingerprintFor(`${both}; Provider V: attempt 503`), fingerprintFor(`${both}; Provider V: attempt 504`))
+  const firstEight = Array.from({ length: 8 }, (_, index) => `not ok ${index + 1} - failing case ${index + 1}`).join('\n')
+  await writeFile(artifact, `${firstEight}\nnot ok 9 - ninth failure alpha\n`)
+  const ninthAlpha = await describeControlledGateFailures(root, [gate])
+  await writeFile(artifact, `${firstEight}\nnot ok 9 - ninth failure beta\n`)
+  assert.notEqual(fingerprintFor(ninthAlpha), fingerprintFor(await describeControlledGateFailures(root, [gate])))
   await writeFile(artifact, 'command failed without TAP output\n')
   assert.match(await describeControlledGateFailures(root, [gate]), /quality-full: exit 1/)
 })
