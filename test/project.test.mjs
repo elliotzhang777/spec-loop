@@ -10,7 +10,7 @@ test('substantive checks preserve domain precision words but reject bare placeho
   assert.doesNotThrow(()=>assertSubstantive('Historical task timing has unknown precision after import.','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('旧数据中的未知耗时要明确标识。','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('仅含 unknown 的字段以及显式 TODO/TBD/待填写占位内容仍被拒绝。','criterion'));
-  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.']){
+  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.','待填写（负责人确认后补充）。','TBD pending review.','TODO implement criterion']){
     assert.throws(()=>assertSubstantive(value,'criterion'),/placeholder content/);
   }
 });
@@ -37,7 +37,7 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
   assert.equal(initialized.code,0,initialized.stderr);
   assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
   const contractFile=path.join(root,'contract.json');
-  for(const [field,value,rejection] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['criterion','未知',/Too small/],['criterion','验收步骤：待填写。'],['criterion','验收步骤：待填写（负责人确认后补充）。'],['scenario','TBD:'],['expected','待填写：'],['expected','The validation strategy is TBD.'],['expected','The validation strategy is TBD pending review.']]){
+  for(const [field,value,rejection] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['criterion','未知',/Too small/],['criterion','验收步骤：待填写。'],['criterion','验收步骤：待填写（负责人确认后补充）。'],['criterion','待填写（负责人确认后补充）。'],['scenario','TBD:'],['scenario','TBD pending review.'],['expected','待填写：'],['expected','The validation strategy is TBD.'],['expected','The validation strategy is TBD pending review.'],['expected','TODO implement criterion']]){
     const contract=structuredClone(original);
     if(field==='criterion')contract.criteria[0].text=value;
     if(field==='scenario')contract.use_cases[0].scenario=value;
@@ -47,6 +47,11 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
     assert.notEqual(result.code,0,`${field}=${value} unexpectedly passed`);
     assert.match(result.stderr,rejection??/placeholder content/,`${field}=${value} failed for an unrelated reason`);
   }
+  const explanation=structuredClone(original);
+  explanation.criteria[0].text='TODO is a placeholder term; complete acceptance criteria must explain this rule.';
+  await writeFile(contractFile,JSON.stringify(explanation));
+  const accepted=cli(['triage','propose',root,'--source','Approved source','--goal','Explain placeholder validation','--risk','heavy','--reason','Complete explanatory acceptance text','--contract',contractFile]);
+  assert.equal(accepted.code,0,accepted.stderr);
 });
 
 test('project init, provider doctor and rebuildable task queries', async()=>{
