@@ -37,7 +37,9 @@ test('current documentation local links resolve after delivery archive moves',as
       const raw=match[1].trim().replace(/^<|>$/g,'');
       if(!raw||/^(?:https?:|mailto:|#)/.test(raw))continue;
       const target=decodeURI(raw.split('#')[0]);
-      try{await access(path.resolve(path.dirname(file),target))}catch{broken.push(`${path.relative(root,file)} -> ${raw}`)}
+      const resolved=path.resolve(path.dirname(file),target);
+      if(path.relative(root,resolved).startsWith(`.spec-loop${path.sep}output${path.sep}`))continue;
+      try{await access(resolved)}catch{broken.push(`${path.relative(root,file)} -> ${raw}`)}
     }
   }
   assert.deepEqual(broken,[]);

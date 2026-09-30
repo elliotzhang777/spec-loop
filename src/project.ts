@@ -201,13 +201,24 @@ export interface TaskIndex {
   task_id:string;path:string;project_id:string;status:string;level:string;round:number;state_version:number;resumable:boolean;
   protocol:TaskProtocol;protocol_stage:string|null;blocking_reason:string|null;
 }
+const taskIndexCache=new Map<string,Map<string,{fingerprint:string;item:TaskIndex;state:TaskState}>>();
 export async function scanTasks(root:string):Promise<TaskIndex[]>{
-  const project=await readProject(root),dir=path.resolve(root,project.tasks_root),out:TaskIndex[]=[];
-  for(const entry of (await readdir(dir,{withFileTypes:true}))){
-    if(!entry.isDirectory())continue;
+  const project=await readProject(root),dir=path.resolve(root,project.tasks_root);
+  const entries=(await readdir(dir,{withFileTypes:true})).filter(entry=>entry.isDirectory());
+  const cacheKey=path.resolve(root),previous=taskIndexCache.get(cacheKey),current=new Map<string,{fingerprint:string;item:TaskIndex;state:TaskState}>();
+  const scanned=await Promise.all(entries.map(async(entry):Promise<TaskIndex|null>=>{
     const taskRoot=path.join(dir,entry.name);
-    if(!(await exists(path.join(taskRoot,'TASK_STATE.md'))))continue;
-    const s=await readState(taskRoot),contractExists=await exists(path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md')),runPath=path.join(taskRoot,'ACCEPTANCE_RUN.json'),runExists=await exists(runPath);
+    const statePath=path.join(taskRoot,'TASK_STATE.md'),contractPath=path.join(taskRoot,'ACCEPTANCE_CONTRACT_V2.md'),runPath=path.join(taskRoot,'ACCEPTANCE_RUN.json');
+    const files=[statePath,path.join(taskRoot,'STATE_HISTORY.jsonl'),contractPath,runPath,path.join(taskRoot,'.spec-loop-tx')];
+    const statFiles=()=>Promise.all(files.map(file=>lstat(file,{bigint:true}).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error})));
+    const info=await statFiles();
+    if(!info[0])return null;
+    if(info.slice(0,4).some(item=>item&&(item.isSymbolicLink()||!item.isFile()))||info[4]&&(info[4].isSymbolicLink()||!info[4].isDirectory()))throw new Error('invalid Task control file');
+    const describe=(items:typeof info)=>`${project.project_id}:${items.map(item=>item?`${item.dev}:${item.ino}:${item.size}:${item.mtimeNs}:${item.ctimeNs}`:'-').join('|')}`;
+    const fingerprint=describe(info);
+    const hit=previous?.get(taskRoot);
+    if(hit?.fingerprint===fingerprint){current.set(taskRoot,hit);return {...hit.item};}
+    const s=await readState(taskRoot),contractExists=Boolean(info[2]),runExists=Boolean(info[3]);
     if(!taskIdPattern.test(s.task_id)||entry.name!==s.task_id.toLowerCase())throw new Error('invalid Task identity in project');
     let protocol:TaskProtocol=contractExists||runExists?'v2':'v1',protocolStage:string|null=null,blockingReason:string|null=null;
     if(runExists){
@@ -221,27 +232,37 @@ export async function scanTasks(root:string):Promise<TaskIndex[]>{
         else if(run.stage==='cancelled')blockingReason='v2 run is cancelled';
       }catch{blockingReason='invalid v2 run'}
     }else if(protocol==='v2')protocolStage='contract_approved';
-    out.push({task_id:s.task_id,path:taskRoot,project_id:project.project_id,status:s.status,level:s.level,round:s.current_round,state_version:s.state_version,resumable:['planned','working','verifying','iterating'].includes(s.status),protocol,protocol_stage:protocolStage,blocking_reason:blockingReason});
-  }
+    const item={task_id:s.task_id,path:taskRoot,project_id:project.project_id,status:s.status,level:s.level,round:s.current_round,state_version:s.state_version,resumable:['planned','working','verifying','iterating'].includes(s.status),protocol,protocol_stage:protocolStage,blocking_reason:blockingReason};
+    current.set(taskRoot,{fingerprint:describe(await statFiles()),item,state:s});return {...item};
+  }));
+  taskIndexCache.set(cacheKey,current);
+  while(taskIndexCache.size>4)taskIndexCache.delete(taskIndexCache.keys().next().value!);
+  const out=scanned.filter((item):item is TaskIndex=>item!==null);
   const ids=out.map(x=>x.task_id);if(new Set(ids).size!==ids.length)throw new Error('duplicate task ID in project');
   const byId=new Map(out.map(item=>[item.task_id,item]));
   for(const item of out){
     if(item.protocol!=='v2'||item.blocking_reason)continue;
     try{
+      const declared=(await readMarkdown(path.join(item.path,'ACCEPTANCE_CONTRACT_V2.md'))).data as {depends_on?:unknown};
+      const dependencies=z.array(z.string().regex(taskIdPattern)).safeParse(declared.depends_on);
+      if(!dependencies.success){item.blocking_reason='invalid v2 contract dependencies';continue}
+      if(dependencies.data.some(id=>!byId.has(id))){item.blocking_reason='unknown v2 contract dependency';continue}
       const contract=await (await import('./acceptance-loop.js')).readApprovedAcceptanceContract(item.path);
       const runPath=path.join(item.path,'ACCEPTANCE_RUN.json');
       if(await exists(runPath)){
         const run=JSON.parse(await readFile(runPath,'utf8')) as {contract_hash?:string};
         if(run.contract_hash!==contract.contract_hash)throw new Error('v2 Run and Contract hash differ');
       }
-      const dependencies=z.array(z.string().regex(taskIdPattern)).safeParse(contract.depends_on);
-      if(!dependencies.success){item.blocking_reason='invalid v2 contract dependencies';continue}
-      if(dependencies.data.some(id=>!byId.has(id))){item.blocking_reason='unknown v2 contract dependency';continue}
       const unfinished=dependencies.data.filter(id=>{const dependency=byId.get(id)!;return dependency.protocol==='v2'?dependency.protocol_stage!=='candidate':dependency.status!=='delivered'});
       if(unfinished.length)item.blocking_reason=`unfinished dependencies: ${unfinished.join(', ')}`;
     }catch{item.blocking_reason='invalid v2 contract'}
   }
   return out.sort((a,b)=>a.task_id.localeCompare(b.task_id));
+}
+
+export async function scanTaskStates(root:string):Promise<Array<{task:TaskIndex;state:TaskState}>>{
+  const tasks=await scanTasks(root),cache=taskIndexCache.get(path.resolve(root));
+  return Promise.all(tasks.map(async task=>({task,state:structuredClone(cache?.get(task.path)?.state??await readState(task.path))})));
 }
 
 export function selectActiveTask<T extends { state: TaskState }>(states: T[]): T | null {

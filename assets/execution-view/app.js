@@ -330,7 +330,8 @@ function renderCurrent() {
   let status = { kind: 'success', label: '项目空闲' }, location = '等待任务进入执行', summary = '项目中还没有可展示的活动任务事实', nextAction = '下一动作：创建或启动一个 Task';
   if (active) {
     location = `${activeWave ? waveName(activeWave) : '未归属波次'} / ${active.task_id} / Round ${active.round}`;
-    summary = active.blocked_by?.length ? `${active.title} · 等待前置 Task ${active.blocked_by.join('、')}` : `${active.title} · ${taskLifecycleName(active)} · ${active.step_label ?? '当前执行器未上报步骤事件'}`;
+    const concurrent = active.concurrent_task_ids?.length ? ` · 并行 ${active.concurrent_task_ids.join('、')}` : '';
+    summary = (active.blocked_by?.length ? `${active.title} · 等待前置 Task ${active.blocked_by.join('、')}` : `${active.title} · ${taskLifecycleName(active)} · ${active.step_label ?? '当前执行器未上报步骤事件'}`) + concurrent;
     nextAction = `下一动作：${active.next_action}`;
     status = active.blocked_by?.length ? { kind: 'waiting', label: '依赖阻塞' } : active.step_status === 'running' ? { kind: 'processing', label: '正在运行' } : { kind: 'waiting', label: active.step_status === 'waiting' ? '等待用户' : '等待事件接入' };
   }
@@ -1029,7 +1030,7 @@ function renderTaskWorkflow() {
 
   const inlineBack = document.createElement('div'); inlineBack.className = 'workflow-inline-back';
   mountButton(inlineBack, { label: selectedWaveId ? `返回 ${selectedWaveId} 子 Task 图` : '返回全部波次总览', icon: null }, () => { if (selectedWaveId) openWave(selectedWaveId); else goPortfolio(); });
-  elements.workflow.append(inlineBack);
+  elements.workflow.append(inlineBack, renderInlineTaskDetail(activeTask));
   const hasWorkflowEvents = activeTask.steps.some((step) => step.source === 'EXECUTION_EVENTS.jsonl');
   if (!hasWorkflowEvents) {
     updateWorkflowControls({ source: activeTask.managed ? '历史状态·无原生执行事件' : '仅规格与交付状态' });
@@ -1099,11 +1100,9 @@ function renderTaskWorkflow() {
 }
 
 function renderWorkflow() {
-  if (!selectedWaveId) {
-    const wave = defaultWave();
-    if (wave) { selectedWaveId = wave.wave_id; workflowMode = 'wave'; taskWaveFilter = wave.wave_id; }
-  }
-  if (selectedWaveId) renderFocusedWaveWorkflow(); else renderPortfolioWorkflow();
+  if (selectedWaveId) renderFocusedWaveWorkflow();
+  else if (expandedTaskId) renderTaskWorkflow();
+  else renderPortfolioWorkflow();
 }
 
 function renderMetrics() {

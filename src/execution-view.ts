@@ -5,8 +5,7 @@ import { z } from 'zod';
 import { assertNoSecrets, exists, readMarkdown, sha256 } from './files.js';
 import type { TaskState } from './model.js';
 import { readExecutionEvents, type ExecutionEvent, type ExecutionStepType } from './execution-events.js';
-import { readProject, scanTasks, selectActiveTask } from './project.js';
-import { readState } from './task.js';
+import { readProject, scanTaskStates, selectActiveTask } from './project.js';
 
 const precisionSchema = z.enum(['exact', 'derived', 'unknown']);
 const stepStatusSchema = z.enum(['running', 'waiting', 'succeeded', 'failed', 'cancelled', 'interrupted', 'noted', 'unknown']);
@@ -61,7 +60,7 @@ export const executionSnapshotSchema = z.object({
     blocked_by: z.array(z.string()),
     step_id: z.string().nullable(), step_label: z.string().nullable(), step_summary: z.string().nullable(),
     step_status: stepStatusSchema.nullable(), step_started_at: z.iso.datetime().nullable(), current_elapsed_ms: z.number().int().nonnegative().nullable(),
-    next_action: z.string(),
+    next_action: z.string(), concurrent_task_ids: z.array(z.string()),
   }).strict().nullable(),
   waves: z.array(executionWaveSnapshotSchema), tasks: z.array(executionTaskSnapshotSchema), diagnostics: z.array(z.string()),
 }).strict();
@@ -532,7 +531,10 @@ async function taskSnapshot(projectRoot: string, repositoryRoot: string, taskRoo
   });
   if (steps.length > MAX_DASHBOARD_STEPS_PER_TASK) {
     diagnostics.push(`Dashboard 仅返回最近 ${MAX_DASHBOARD_STEPS_PER_TASK} 个步骤；完整事实保留在 Event Log 和 Evidence 中。`);
-    steps = steps.slice(-MAX_DASHBOARD_STEPS_PER_TASK);
+    const live=steps.filter(step=>step.status==='running'||step.status==='waiting').slice(-MAX_DASHBOARD_STEPS_PER_TASK);
+    const available=MAX_DASHBOARD_STEPS_PER_TASK-live.length;
+    const recent=available?steps.filter(step=>step.status!=='running'&&step.status!=='waiting').slice(-available):[];
+    steps=[...live,...recent].sort((left,right)=>(left.started_at??'').localeCompare(right.started_at??'')||left.order-right.order);
   }
   steps = steps.map((step) => executionStepSnapshotSchema.parse({ ...step, label: dashboardText(step.label, 120), summary: dashboardText(step.summary), refs: dashboardRefs(step.refs) }));
   if (!taskEvents.length) diagnostics.push('旧 Task 没有执行事件；仅已有 Gate 耗时为精确值，其余阶段可能未知。');
@@ -585,10 +587,20 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
   if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)return snapshot;
   const discardOldest=(items:unknown[])=>{const removed=items.shift();if(removed!==undefined)bytes-=Buffer.byteLength(JSON.stringify(removed))+(items.length?1:0)};
   const compactSteps=(minimum:number,historicalOnly:boolean)=>{
-    const compactable=()=>snapshot.tasks
-      .filter(task=>(!historicalOnly||!task.current)&&task.steps.length>minimum)
-      .sort((left,right)=>Number(left.current)-Number(right.current)||right.steps.length-left.steps.length);
-    while(bytes>MAX_EXECUTION_SNAPSHOT_BYTES){const task=compactable()[0];if(!task)break;discardOldest(task.steps)}
+    const candidates=snapshot.tasks.flatMap((task,taskIndex)=>
+      historicalOnly&&task.current?[]:task.steps
+        .map((step,index)=>({taskIndex,index,step,startedAt:step.started_at??'\uffff',size:Buffer.byteLength(JSON.stringify(step))}))
+        .filter(candidate=>candidate.step.status!=='running'&&candidate.step.status!=='waiting')
+        .slice(0,Math.max(0,task.steps.length-minimum)));
+    candidates.sort((left,right)=>left.startedAt.localeCompare(right.startedAt)||left.taskIndex-right.taskIndex||left.index-right.index);
+    for(const candidate of candidates){
+      if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)break;
+      const steps=snapshot.tasks[candidate.taskIndex].steps;
+      const index=steps.indexOf(candidate.step);
+      if(index<0)continue;
+      steps.splice(index,1);
+      bytes-=candidate.size+(steps.length?1:0);
+    }
   };
   // Keep the existing five-step context when possible. Historical rows can
   // shrink to one step as the Project grows; the active Task keeps five.
@@ -607,12 +619,18 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
   return snapshot;
 }
 
-export async function buildExecutionSnapshot(projectRoot: string, now = new Date()): Promise<ExecutionSnapshot> {
-  const project = await readProject(projectRoot), indexed = await scanTasks(projectRoot), events = await readExecutionEvents(projectRoot);
-  const states = await Promise.all(indexed.map(async (task) => ({ task, state: await readState(task.path) })));
+export async function buildExecutionSnapshot(projectRoot: string, now = new Date(), options:{audit?:boolean}={}): Promise<ExecutionSnapshot> {
+  const project = await readProject(projectRoot), states = await scanTaskStates(projectRoot), events = await readExecutionEvents(projectRoot,{copy:false});
   const nowMs = now.getTime(), diagnostics: string[] = [];
+  const eventsByTask=new Map<string,ExecutionEvent[]>();
+  for(const event of events){
+    if(!event.task_id)continue;
+    const taskEvents=eventsByTask.get(event.task_id);
+    if(taskEvents)taskEvents.push(event);
+    else eventsByTask.set(event.task_id,[event]);
+  }
   const managedTasks = await Promise.all(states.map(({ task, state }) => taskSnapshot(
-    projectRoot, project.repository, task.path, state, events.filter((event) => event.task_id === state.task_id), false, nowMs,
+    projectRoot, project.repository, task.path, state, eventsByTask.get(state.task_id)??[], false, nowMs,
   )));
   const managedIds = new Set(managedTasks.map((task) => task.task_id));
   const targetOnly = (await targetSpecTasks(project.repository, project.spec_root)).filter((task) => !managedIds.has(task.task_id));
@@ -623,7 +641,12 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
   }));
   const blockedIds = new Set(tasks.filter((task) => task.blocked_by.length).map((task) => task.task_id));
   const effectiveStatus = new Map(managedTasks.map((task) => [task.task_id, task.status]));
-  const active = selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)
+  const runningTasks=tasks.flatMap(task=>['delivered','cancelled'].includes(task.status)?[]:task.steps
+    .filter(step=>(step.round??task.round)>=task.round&&(step.status==='running'||step.status==='waiting'))
+    .map(step=>({taskId:task.task_id,startedAt:step.started_at??'',order:step.order})))
+    .sort((left,right)=>right.startedAt.localeCompare(left.startedAt)||right.order-left.order);
+  const eventActiveId=runningTasks[0]?.taskId;
+  const active = states.find(({state})=>state.task_id===eventActiveId)??selectActiveTask(states.filter(({ state }) => !blockedIds.has(state.task_id)
     && !['delivered', 'cancelled'].includes(effectiveStatus.get(state.task_id) ?? state.status)));
   tasks = tasks.map((task) => executionTaskSnapshotSchema.parse({ ...task, current: active?.state.task_id === task.task_id }));
   const waves = await projectWaves(project.repository, project.spec_root, tasks);
@@ -664,11 +687,12 @@ export async function buildExecutionSnapshot(projectRoot: string, now = new Date
       step_id: currentStep?.id ?? null, step_label: currentStep?.label ?? null, step_summary: currentStep?.summary ?? null,
       step_status: currentStep?.status ?? null, step_started_at: currentStep?.started_at ?? null,
       current_elapsed_ms: currentStep?.started_at ? Math.max(0, nowMs - Date.parse(currentStep.started_at)) : null,
+      concurrent_task_ids:[...new Set(runningTasks.map(item=>item.taskId))].filter(id=>id!==active.state.task_id),
       next_action: activeSnapshot.blocked_by.length
         ? `等待前置 ${activeSnapshot.blocked_by.join('、')} 完成；当前 Task 不应继续执行`
         : nextAction(active.state, currentStep ?? undefined),
     } : null,
-    waves, tasks, diagnostics: diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS).map((item) => dashboardText(item, 1_000)),
+    waves, tasks, diagnostics: (options.audit?diagnostics:diagnostics.slice(-MAX_DASHBOARD_DIAGNOSTICS)).map((item) => dashboardText(item, 1_000)),
   });
-  return compactExecutionSnapshot(snapshot);
+  return options.audit?snapshot:compactExecutionSnapshot(snapshot);
 }

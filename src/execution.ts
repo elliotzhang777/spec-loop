@@ -667,11 +667,11 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
   }
   for(const g of gates){
     if(g.task_id!==taskId||g.cwd!==m.worktree||g.base_commit!==m.base_commit||g.head!==head)throw new Error(`${g.id}: stale or mismatched gate evidence`);
-    if(g.environment_hash&&g.environment_hash!==gateRuntimeEnvironmentHash(config,taskId))throw new Error(`${g.id}: Gate environment changed after execution`);
     const definition=definitions.find((item)=>item.id===g.id);
     if(!definition)throw new Error(`${g.id}: Gate definition is missing`);
     if(g.scope_kind!==config.scope_kind||g.wave_id!==config.wave_id||g.coverage!==config.coverage||g.database_lifecycle!==config.database.lifecycle||!sameStrings(g.ac??[],definition.ac??[])||g.plan_sha256!==gatePlanHash(config))
       throw new Error(`${g.id}: Gate Plan, scope or AC coverage changed after execution`);
+    if(g.environment_hash&&g.environment_hash!==gateRuntimeEnvironmentHash(config,taskId))throw new Error(`${g.id}: Gate environment changed after execution`);
     const artifactPath=path.resolve(root,g.artifact);
     if(!artifactPath.startsWith(path.resolve(root)+path.sep))throw new Error(`${g.id}: gate artifact escapes project root`);
     const artifactInfo=await lstat(artifactPath).catch(()=>null);if(!artifactInfo?.isFile()||artifactInfo.isSymbolicLink())throw new Error(`${g.id}: gate artifact must be a regular non-symbolic file`);

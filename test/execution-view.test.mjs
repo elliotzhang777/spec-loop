@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { realpath } from 'node:fs/promises'
@@ -90,10 +90,17 @@ test('a growing Project retains every Task and active detail inside the snapshot
     ...structuredClone(baseline.tasks[0]), task_id: `TASK-BUDGET-${index + 1}`, current: index === 0,
     steps: Array.from({ length: 20 }, (_, number) => ({ ...step, id: `STEP-${index}-${number}`, summary: '历史上下文'.repeat(45), order: number })),
   }))
+  for (const [index, task] of expanded.tasks.slice(0, 2).entries()) {
+    task.steps[0].status = index === 0 ? 'running' : 'waiting'
+    task.steps[0].started_at = '2026-08-01T00:00:00.000Z'
+    task.steps[0].ended_at = null
+  }
   assert.ok(Buffer.byteLength(JSON.stringify(expanded)) > MAX_EXECUTION_SNAPSHOT_BYTES)
   const bounded = compactExecutionSnapshot(expanded)
   assert.equal(bounded.tasks.length, 74)
   assert.equal(bounded.tasks[0].steps.length, 5, 'current Task keeps recent detail')
+  assert.ok(bounded.tasks[0].steps.some(item => item.id === 'STEP-0-0'), 'current running step stays inspectable')
+  assert.ok(bounded.tasks[1].steps.some(item => item.id === 'STEP-1-0'), 'concurrent waiting step stays inspectable')
   assert.ok(bounded.tasks.slice(1).every(task => task.steps.length >= 1))
   assert.ok(bounded.tasks.some(task => task.steps.length < 5), 'older detail is compacted as the Project grows')
   assert.equal(bounded.revision, baseline.revision)
@@ -199,6 +206,20 @@ Independent verification failed.
   assert.equal(staleStep.precision, 'derived')
 })
 
+test('latest unclosed step wins over newer Task state and keeps concurrent work visible',async()=>{
+  const {root,repository}=await projectFixture('execution-view-concurrent-active-')
+  const secondRoot=path.join(root,'.spec-loop','tasks','task-second')
+  assert.equal(cli(['init',secondRoot,'--level','standard','--id','TASK-SECOND','--title','Second task','--repository',repository]).code,0)
+  await startExecutionStep(root,{taskId:'TASK-SECOND',round:1,stepType:'harness.execute',label:'Second task running',summary:'Older concurrent execution',occurredAt:new Date('2026-09-29T08:00:00.000Z'),detached:true})
+  const latest=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'harness.execute',label:'Current task running',summary:'Latest concurrent execution',occurredAt:new Date('2026-09-29T08:01:00.000Z'),detached:true})
+  for(let index=0;index<25;index++)await annotateExecution(root,{taskId:'TASK-VIEW',round:1,label:`Later note ${index}`,summary:'Keep the live step outside the latest twenty records',occurredAt:new Date(Date.parse('2026-09-29T08:02:00.000Z')+index)})
+  const snapshot=await buildExecutionSnapshot(root,new Date('2026-09-29T09:00:00.000Z'))
+  assert.equal(snapshot.active_task.task_id,'TASK-VIEW')
+  assert.equal(snapshot.active_task.step_id,latest.step_run_id)
+  assert.deepEqual(snapshot.active_task.concurrent_task_ids,['TASK-SECOND'])
+  assert.ok(snapshot.tasks.find(task=>task.task_id==='TASK-VIEW').steps.some(step=>step.id===latest.step_run_id))
+})
+
 test('Round work activities expose reproduce, analysis, change and command timings without double counting', async () => {
   const { root, taskRoot } = await projectFixture('execution-view-activities-')
   await fillContracts(taskRoot, { id: 'TASK-VIEW', title: 'Measure execution', level: 'standard' })
@@ -247,6 +268,23 @@ test('legacy gates retain exact duration while missing lifecycle time remains un
   assert.equal(task.wall_clock_ms, null)
   assert.equal(task.timing_precision, 'unknown')
   assert.match(task.diagnostics.join(' '), /没有执行事件/)
+})
+
+test('legacy Gate traversal and Attempt secret canaries fail closed', async () => {
+  const gate = await projectFixture('execution-view-legacy-gate-traversal-')
+  await writeFile(path.join(gate.root, '.spec-loop', 'output', 'TASK-VIEW-gates.json'), `${JSON.stringify([{
+    id: 'build', kind: 'command', duration_ms: 1,
+    created_at: '2026-09-30T09:00:00.000Z', exit_code: 0, timed_out: false,
+    artifact: '../outside.txt', sha256: 'a'.repeat(64),
+  }])}\n`)
+  await assert.rejects(buildExecutionSnapshot(gate.root), /Gate artifact reference is unsafe/)
+
+  const attempt = await projectFixture('execution-view-legacy-secret-')
+  await writeFile(path.join(attempt.taskRoot, 'LOOP_LEDGER.jsonl'), `${JSON.stringify({
+    attempt: 1, round: 1, timestamp: '2026-09-30T09:00:00.000Z',
+    action: 'token=canaryvalue123', outcome: 'success', error_fingerprint: null,
+  })}\n`)
+  await assert.rejects(buildExecutionSnapshot(attempt.root), /possible secret is forbidden/)
 })
 
 test('target task dependencies are projected for Heavy Task DAG reconstruction', async () => {
@@ -526,6 +564,7 @@ test('local execution view is loopback-only, read-only and supports stable ETags
   const childRoot = path.join(root, 'projects', 'child-project'), childRepository = path.join(childRoot, 'repo')
   await mkdir(childRepository, { recursive: true })
   assert.equal(cli(['project', 'init', childRoot, '--id', 'PROJ-CHILD', '--name', 'Child Project', '--repository', childRepository]).code, 0)
+  await symlink(childRoot, path.join(root, 'projects', 'aliased-project'))
   await startExecutionStep(root, {
     taskId: 'TASK-VIEW', round: 1, stepType: 'harness.execute', label: 'Agent 实现', summary: 'Execute the approved local step',
   })
@@ -639,6 +678,7 @@ test('local execution view is loopback-only, read-only and supports stable ETags
     const catalog = await catalogResponse.json()
     assert.equal(catalog.default_project, 'root')
     assert.deepEqual(catalog.projects.map((project) => project.key), ['root', 'project:child-project'])
+    assert.equal((await fetch(new URL('/api/snapshot?project=project%3Aaliased-project', url))).status, 404)
     assert.deepEqual(catalog.projects.map((project) => project.project_id), ['PROJ-VIEW', 'PROJ-CHILD'])
     const childSnapshot = await (await fetch(new URL('/api/snapshot?project=project%3Achild-project', url))).json()
     assert.equal(childSnapshot.project.project_id, 'PROJ-CHILD')
@@ -662,7 +702,9 @@ test('background execution view lifecycle is idempotent and rejects stale proces
   const { root } = await projectFixture('execution-view-lifecycle-')
   let marker
   try {
-    marker = await startManagedExecutionView(root)
+    const started=Date.now()
+    marker = await startManagedExecutionView(root,0,{timeoutMs:4500})
+    assert.ok(Date.now()-started<5000,'interactive view starts within five seconds')
     assert.match(marker.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
     const reused = await startManagedExecutionView(root)
     assert.equal(reused.pid, marker.pid)
@@ -672,6 +714,21 @@ test('background execution view lifecycle is idempotent and rejects stale proces
     assert.equal((await executionViewStatus(root)).running, false)
   } finally {
     if ((await executionViewStatus(root).catch(() => ({ running: false }))).running) await stopManagedExecutionView(root)
+  }
+})
+
+test('occupied view port does not leave a live marker or block a later start',async()=>{
+  const {root}=await projectFixture('execution-view-port-conflict-'),occupied=createServer(()=>{})
+  await new Promise(resolve=>occupied.listen(0,'127.0.0.1',resolve))
+  try{
+    await assert.rejects(startManagedExecutionView(root,occupied.address().port,{timeoutMs:1500}),/did not become healthy/)
+    assert.equal((await executionViewStatus(root)).running,false)
+    const marker=await startManagedExecutionView(root,0,{timeoutMs:4500})
+    assert.match(marker.url,/^http:\/\/127\.0\.0\.1:\d+\/$/)
+    assert.equal((await stopManagedExecutionView(root)).stopped,true)
+  }finally{
+    await closeExecutionViewServer(occupied)
+    if((await executionViewStatus(root).catch(()=>({running:false}))).running)await stopManagedExecutionView(root)
   }
 })
 
@@ -705,4 +762,58 @@ test('verified event cache isolates callers, handles appended history and still 
   const file=path.join(root,'.spec-loop','EXECUTION_EVENTS.jsonl'),raw=await readFile(file,'utf8'),tampered=JSON.parse(raw.split('\n')[0]);tampered.summary='modified cached prefix'
   await writeFile(file,JSON.stringify(tampered)+'\n'+raw.split('\n').slice(1).join('\n'))
   await assert.rejects(readExecutionEvents(root),/hash mismatch/)
+})
+
+test('snapshot task state cache rejects changed authority history',async()=>{
+  const {root,taskRoot}=await projectFixture('execution-view-state-cache-')
+  await buildExecutionSnapshot(root)
+  await buildExecutionSnapshot(root)
+  const file=path.join(taskRoot,'STATE_HISTORY.jsonl'),raw=await readFile(file,'utf8')
+  const lines=raw.trim().split('\n'),tail=JSON.parse(lines.at(-1))
+  tail.state_hash='0'.repeat(64)
+  lines[lines.length-1]=JSON.stringify(tail)
+  await writeFile(file,`${lines.join('\n')}\n`)
+  await assert.rejects(buildExecutionSnapshot(root),/does not match CLI state history/)
+})
+
+test('deleting a disposable UI snapshot preserves canonical facts and cold rebuild', async () => {
+  const { root, taskRoot } = await projectFixture('execution-view-cache-rebuild-')
+  await startExecutionStep(root, {
+    taskId: 'TASK-VIEW', round: 1, stepType: 'round.work', label: '缓存重建',
+    summary: '仅从权威文件重建页面', occurredAt: new Date('2026-09-30T09:00:00.000Z'),
+  })
+  const now = '2026-09-30T09:00:10.000Z'
+  const authorityFiles = [
+    path.join(root, '.spec-loop', 'PROJECT.md'),
+    path.join(root, '.spec-loop', 'EXECUTION_EVENTS.jsonl'),
+    path.join(taskRoot, 'TASK_STATE.md'),
+    path.join(taskRoot, 'STATE_HISTORY.jsonl'),
+  ]
+  const before = await Promise.all(authorityFiles.map(file => readFile(file)))
+  const expected = await buildExecutionSnapshot(root, new Date(now))
+  const cacheDir = path.join(root, '.spec-loop', 'cache')
+  await mkdir(cacheDir)
+  await writeFile(path.join(cacheDir, 'execution-snapshot.json'), '{"untrusted":"stale"}\n')
+  await rm(cacheDir, { recursive: true })
+  const cold = spawnSync(process.execPath, [
+    '--input-type=module', '-e',
+    'import {buildExecutionSnapshot} from "./dist/execution-view.js"; console.log(JSON.stringify(await buildExecutionSnapshot(process.argv[1], new Date(process.argv[2]))))',
+    root, now,
+  ], { cwd: process.cwd(), encoding: 'utf8' })
+  assert.equal(cold.status, 0, cold.stderr)
+  assert.deepEqual(JSON.parse(cold.stdout), expected)
+  assert.deepEqual(await Promise.all(authorityFiles.map(file => readFile(file))), before)
+})
+
+test('event cache does not treat an append after an unterminated line as a valid event',async()=>{
+  const {root}=await projectFixture('execution-events-boundary-')
+  const start=await startExecutionStep(root,{taskId:'TASK-VIEW',round:1,stepType:'task.attempt',label:'边界校验开始',summary:'检测缺少换行的追加'})
+  const file=path.join(root,'.spec-loop','EXECUTION_EVENTS.jsonl')
+  const unterminated=(await readFile(file,'utf8')).trimEnd()
+  await writeFile(file,unterminated)
+  await readExecutionEvents(root)
+  await finishExecutionStep(root,start,{outcome:'success',summary:'生成合法终态作为追加样本'})
+  const terminal=(await readFile(file,'utf8')).trimEnd().split('\n').at(-1)
+  await writeFile(file,`${unterminated}${terminal}\n`)
+  await assert.rejects(readExecutionEvents(root),/malformed JSON/)
 })
