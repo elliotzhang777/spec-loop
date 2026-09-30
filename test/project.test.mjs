@@ -37,7 +37,7 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
   assert.equal(initialized.code,0,initialized.stderr);
   assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
   const contractFile=path.join(root,'contract.json');
-  for(const [field,value] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['scenario','TBD:'],['expected','待填写：']]){
+  for(const [field,value,rejection] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['criterion','未知',/Too small/],['scenario','TBD:'],['expected','待填写：']]){
     const contract=structuredClone(original);
     if(field==='criterion')contract.criteria[0].text=value;
     if(field==='scenario')contract.use_cases[0].scenario=value;
@@ -45,7 +45,7 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
     await writeFile(contractFile,JSON.stringify(contract));
     const result=cli(['triage','propose',root,'--source',field==='source'?value:'Approved source','--goal',field==='goal'?value:'Create the approved task','--risk','heavy','--reason',field==='reason'?value:'Approved reason','--contract',contractFile]);
     assert.notEqual(result.code,0,`${field}=${value} unexpectedly passed`);
-    assert.match(result.stderr,/placeholder content/,`${field}=${value} failed for an unrelated reason`);
+    assert.match(result.stderr,rejection??/placeholder content/,`${field}=${value} failed for an unrelated reason`);
   }
 });
 
