@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 import {
   approveAcceptanceContract, buildAcceptanceSchedule, compileAcceptancePlan, readAcceptanceRun,
   recordRResult, recordVResult, resolveAcceptanceConflict, runControlledV, startAcceptanceRun,
-  submitMakerCandidate, reconcileCandidateBaseline,
+  submitMakerCandidate, reconcileCandidateBaseline, reviseUnstartedAcceptanceDependencies,
 } from './acceptance-loop.js';
 import { cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, recoverBudgetStoppedMakerCandidate, runRoleInvocation, summarizeRoleUsage } from './role-orchestrator.js';
 import { initReportScheduler, readReportSchedulerStatus, runReportScheduler, setReportSchedulerPaused } from './report-scheduler.js';
@@ -331,6 +331,9 @@ acceptance.command('r-record').argument('<project-dir>').argument('<task-id>')
 acceptance.command('resolve').argument('<project-dir>').argument('<task-id>')
   .requiredOption('--file <json>').option('--json')
   .action((dir,id,o)=>action(async()=>print(await resolveAcceptanceConflict(root(dir),id,JSON.parse(await readFile(root(o.file),'utf8'))),o.json)));
+acceptance.command('revise-unstarted-dependencies').description('P-approved dependency correction before an M candidate exists').argument('<project-dir>').argument('<task-id>')
+  .requiredOption('--file <json>').requiredOption('--expected-hash <sha256>').requiredOption('--approved-by <actor>').requiredOption('--reason <text>').option('--json')
+  .action((dir,id,o)=>action(async()=>print(await reviseUnstartedAcceptanceDependencies(root(dir),id,root(o.file),o.expectedHash,o.approvedBy,o.reason),o.json)));
 acceptance.command('status').argument('<project-dir>').argument('<task-id>').option('--json')
   .action((dir,id,o)=>action(async()=>print(await readAcceptanceRun(root(dir),id),o.json)));
 acceptance.command('schedule').argument('<project-dir>').option('--json')

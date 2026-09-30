@@ -324,6 +324,44 @@ export async function approveAcceptanceContract(root: string, taskId: string, so
   return approved;
 }
 
+export async function reviseUnstartedAcceptanceDependencies(root: string, taskId: string, sourceFile: string, expectedHash: string, approvedBy: string, reason: string): Promise<{ contract: AcceptanceContractV2; run: AcceptanceRun; audit_file: string }> {
+  hashSchema.parse(expectedHash);
+  if (approvedBy.trim().length < 2 || reason.trim().length < 3) throw new Error('contract revision requires an approving actor and reason');
+  const task = await findTask(root, taskId), run = await readRun(task.path), current = await readContract(task.path);
+  if (run.stage !== 'm_working' || run.active_conflict_id || run.current_head || run.last_m_head || run.last_m_invocation || run.plan_hash || run.last_v_invocation || run.last_r_invocation || run.candidate_id) throw new Error('dependency correction is legal only before M submission and without an active Conflict');
+  if (run.contract_hash !== current.contract_hash || expectedHash !== current.contract_hash) throw new Error('dependency correction expected Contract hash differs from the approved Run');
+  const invocationDir = path.join(outputDir(root, taskId), 'invocations');
+  if (await exists(invocationDir)) {
+    const info = await lstat(invocationDir);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('role invocation directory is invalid');
+    const { readRoleInvocation } = await import('./role-orchestrator.js');
+    for (const entry of await readdir(invocationDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('role invocation entry is invalid');
+      const invocation = await readRoleInvocation(root, taskId, entry.name);
+      if (!['failed', 'timed_out', 'cancelled'].includes(invocation.status)) throw new Error('dependency correction requires every role invocation to be terminal');
+    }
+  }
+  const nextInput = acceptanceContractInputSchema.parse(JSON.parse(await readFile(path.resolve(sourceFile), 'utf8')));
+  if (nextInput.task_id !== taskId || nextInput.risk !== current.risk || nextInput.version !== current.version + 1) throw new Error('dependency correction must preserve Task/risk and increment Contract version by one');
+  const { contract_hash: _currentHash, approval: _currentApproval, ...currentInput } = current;
+  const { version: _oldVersion, depends_on: oldDependencies, ...oldScope } = acceptanceContractInputSchema.parse(currentInput);
+  const { version: _newVersion, depends_on: nextDependencies, ...nextScope } = nextInput;
+  if (JSON.stringify(oldScope) !== JSON.stringify(nextScope)) throw new Error('dependency correction may not change AC, tools, Evidence or budgets');
+  if (!nextDependencies.every((id) => oldDependencies.includes(id)) || nextDependencies.length >= oldDependencies.length) throw new Error('dependency correction may only remove an existing dependency');
+  const now = new Date().toISOString(), approved = approvedAcceptanceContractValue(nextInput, approvedBy.trim(), now);
+  const archive = path.join(outputDir(root, taskId), `CONTRACT-v${current.version}-${current.contract_hash}.md`);
+  const audit = path.join(outputDir(root, taskId), `CONTRACT-REVISION-v${approved.version}-${approved.contract_hash}.json`);
+  if (await exists(archive) || await exists(audit)) throw new Error('dependency correction archive already exists');
+  const record = { schema_version: 1, task_id: taskId, run_id: run.run_id, prior_version: current.version, prior_hash: current.contract_hash, new_version: approved.version, new_hash: approved.contract_hash, removed_dependencies: oldDependencies.filter((id) => !nextDependencies.includes(id)), approved_by: approvedBy.trim(), approved_at: now, reason: reason.trim(), archived_contract: path.relative(root, archive) };
+  const updated = history({ ...run, contract_version: approved.version, contract_hash: approved.contract_hash }, 'm_working', `P approved dependency correction v${approved.version}: ${reason.trim()}`, 'human', path.relative(root, audit));
+  await writeRun(root, task.path, updated, [
+    { file: archive, content: await readFile(contractFile(task.path), 'utf8') },
+    { file: contractFile(task.path), content: stringifyMarkdown(approved, '# Acceptance Contract v2\n\nP-approved dependency correction before M submission.') },
+    { file: audit, content: `${JSON.stringify(record, null, 2)}\n` },
+  ]);
+  return { contract: approved, run: updated, audit_file: path.relative(root, audit) };
+}
+
 export async function startAcceptanceRun(root: string, taskId: string): Promise<AcceptanceRun> {
   const task = await findTask(root, taskId);
   if (await exists(runFile(task.path))) throw new Error('v2 Acceptance Run already exists');

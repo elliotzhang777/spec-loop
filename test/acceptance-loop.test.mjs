@@ -18,6 +18,7 @@ import {
   recordRResult,
   recordVResult,
   resolveAcceptanceConflict,
+  reviseUnstartedAcceptanceDependencies,
   returnAcceptanceToMaker,
   runControlledV,
   startAcceptanceRun,
@@ -94,6 +95,64 @@ test('initial contract IDs are continuous, while revised contracts keep stable o
   assert.equal(acceptanceContractInputSchema.safeParse({ ...initial, version: 2, criteria: [initial.criteria[0], initial.criteria[0]] }).success, false)
 })
 
+test('P can audit a dependency-only Contract correction before M submits a HEAD', async () => {
+  const f = await fixture('acceptance-unstarted-revision-', 'TASK-REVISION-PRE-M', { depends_on: ['TASK-LEGACY'] }, false, false)
+  const previousFile = path.join(f.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md')
+  const previousText = await readFile(previousFile, 'utf8')
+  const previous = (await readMd(previousFile)).data
+  await startAcceptanceRun(f.root, f.taskId)
+  const runFile = path.join(f.taskRoot, 'ACCEPTANCE_RUN.json')
+  const previousRun = await readFile(runFile, 'utf8')
+  const revisedFile = path.join(f.root, 'revised.json')
+  const revision = contract(f.taskId, { version: 2, depends_on: [] })
+  for (const invalid of [
+    { ...revision, critical_path: true },
+    { ...revision, criteria: [{ ...revision.criteria[0], text: 'changed acceptance criterion' }, revision.criteria[1]] },
+    { ...revision, tools: [{ ...revision.tools[0], command: ['node', 'other.mjs'] }] },
+    { ...revision, budgets: { ...revision.budgets, repeated_failure_limit: 3 } },
+  ]) {
+    await writeFile(revisedFile, `${JSON.stringify(invalid)}\n`)
+    await assert.rejects(reviseUnstartedAcceptanceDependencies(f.root, f.taskId, revisedFile, previous.contract_hash, 'human-owner', 'Remove obsolete legacy dependency'), /may not change AC, tools, Evidence or budgets/)
+    assert.equal(await readFile(previousFile, 'utf8'), previousText)
+    assert.equal(await readFile(runFile, 'utf8'), previousRun)
+  }
+  await writeFile(revisedFile, `${JSON.stringify(revision)}\n`)
+  await assert.rejects(reviseUnstartedAcceptanceDependencies(f.root, f.taskId, revisedFile, 'a'.repeat(64), 'human-owner', 'Remove obsolete legacy dependency'), /expected Contract hash differs/)
+  assert.equal(await readFile(runFile, 'utf8'), previousRun)
+  const result = await reviseUnstartedAcceptanceDependencies(f.root, f.taskId, revisedFile, previous.contract_hash, 'human-owner', 'Remove obsolete legacy dependency')
+  assert.equal(result.contract.version, 2)
+  assert.deepEqual(result.contract.depends_on, [])
+  assert.equal(result.run.contract_hash, result.contract.contract_hash)
+  assert.equal(result.run.stage, 'm_working')
+  assert.equal(result.run.history.at(-1).actor, 'human')
+  const audit = JSON.parse(await readFile(path.join(f.root, result.audit_file), 'utf8'))
+  assert.equal(audit.prior_hash, previous.contract_hash)
+  assert.equal(audit.new_hash, result.contract.contract_hash)
+  assert.equal(audit.prior_version, previous.version)
+  assert.equal(audit.new_version, result.contract.version)
+  assert.equal(audit.run_id, result.run.run_id)
+  assert.equal(result.run.history.at(-1).artifact, result.audit_file)
+  assert.deepEqual(await readAcceptanceRun(f.root, f.taskId), result.run)
+  assert.deepEqual(audit.removed_dependencies, ['TASK-LEGACY'])
+  assert.equal(await readFile(path.join(f.root, audit.archived_contract), 'utf8'), previousText)
+  await assert.rejects(reviseUnstartedAcceptanceDependencies(f.root, f.taskId, revisedFile, previous.contract_hash, 'human-owner', 'Replay old approval'), /expected Contract hash differs/)
+})
+
+test('unstarted Contract correction rejects an active M invocation and an already submitted M candidate', async () => {
+  const active = await fixture('acceptance-active-m-revision-', 'TASK-REVISION-ACTIVE', {}, true, false)
+  await startAcceptanceRun(active.root, active.taskId)
+  assert.equal(cli(['workspace', 'create', active.root, active.taskId]).code, 0)
+  const invocation = await prepareRoleInvocation(active.root, active.taskId, 'M')
+  assert.equal(invocation.status, 'prepared')
+  const current = (await readMd(path.join(active.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'))).data
+  const replacement = path.join(active.root, 'replacement.json')
+  await writeFile(replacement, `${JSON.stringify(contract(active.taskId, { version: 2 }))}\n`)
+  await assert.rejects(reviseUnstartedAcceptanceDependencies(active.root, active.taskId, replacement, current.contract_hash, 'human-owner', 'Correct dependency before M'), /every role invocation to be terminal/)
+  const submitted = await fixture('acceptance-submitted-m-revision-', 'TASK-REVISION-SUBMITTED')
+  const approved = (await readMd(path.join(submitted.taskRoot, 'ACCEPTANCE_CONTRACT_V2.md'))).data
+  await assert.rejects(reviseUnstartedAcceptanceDependencies(submitted.root, submitted.taskId, replacement, approved.contract_hash, 'human-owner', 'Correct dependency after M'), /only before M submission/)
+})
+
 async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contractOverrides = {}, requireOrchestration = false, startRun = true, extraGates = [], environmentPassthrough = []) {
   const root = await tempRoot(name), repository = path.join(root, 'repo')
   const level = contractOverrides.risk ?? 'standard'
@@ -107,7 +166,8 @@ async function fixture(name = 'acceptance-v2-', taskId = 'TASK-PMVR-1', contract
   await chmod(path.join(repository, 'scripts', 'gates', 'check.sh'), 0o755)
   git(repository, ['add', '.'])
   git(repository, ['commit', '-m', 'initial'])
-  assert.equal(cli(['project', 'init', root, '--id', 'PROJ-PMVR', '--name', 'PMVR fixture', '--repository', repository]).code, 0)
+  const initialized = cli(['project', 'init', root, '--id', 'PROJ-PMVR', '--name', 'PMVR fixture', '--repository', repository])
+  assert.equal(initialized.code, 0, initialized.stderr)
   if (requireOrchestration) assert.equal(cli(['project', 'protocol', root, '--set', 'v2']).code, 0)
   const contractFile = path.join(root, `${taskId}-contract.json`)
   const contractValue = contract(taskId, contractOverrides)
