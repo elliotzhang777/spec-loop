@@ -32,11 +32,12 @@ export async function exists(file: string): Promise<boolean> {
 
 const BARE_PLACEHOLDER = /^(?:unknown|未知|tbd|todo|placeholder|fill me|lorem ipsum|待填写|待补充)[\s。.!！?？:：-]*$/i;
 const PLACEHOLDER_DIRECTIVE = /^(?:tbd|todo|待填写|待补充)\s*[:：-]/i;
+const EMBEDDED_PLACEHOLDER = /(?:[:：;；]\s*(?:tbd|todo|待填写|待补充)(?:\s*[:：-]|\s*(?=[。.!！?？;；]|$))|\b(?:is|are|remains?)\s+(?:tbd|todo)\s*[。.!！?？]*$|(?:是|为)\s*(?:待填写|待补充)\s*[。.!！?？]*$)/i;
 const TEMPLATE_MARKER = /<[^>]+>|\{\{[^}]+\}\}/;
 const FILL_INSTRUCTION = /\b(?:complete|fill(?:\s+in)?)\s+(?:this\s+)?(?:todo|field)\b/i;
 export function assertSubstantive(value: string, label: string): void {
   const normalized = value.trim();
-  if (normalized.length < 3 || BARE_PLACEHOLDER.test(normalized) || PLACEHOLDER_DIRECTIVE.test(normalized) || TEMPLATE_MARKER.test(normalized) || FILL_INSTRUCTION.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
+  if (normalized.length < 3 || BARE_PLACEHOLDER.test(normalized) || PLACEHOLDER_DIRECTIVE.test(normalized) || EMBEDDED_PLACEHOLDER.test(normalized) || TEMPLATE_MARKER.test(normalized) || FILL_INSTRUCTION.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
 }
 
 export function assertNoSecrets(value: string, label: string): void {
