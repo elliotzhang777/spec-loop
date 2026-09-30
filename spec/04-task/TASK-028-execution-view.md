@@ -4,7 +4,7 @@
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-08-12
-- 最后更新：2026-09-29
+- 最后更新：2026-09-30
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -105,7 +105,7 @@
 
 ## 交付记录
 
-- 完成日期：核心实现与独立技术 V/R 在 `4366ed8` 重新绑定通过；待当前 revision 人工视觉 Review 后关闭
+- 完成日期：核心实现及当前候选 `6eef0ca` 的正式定向 Gate 3/3、当前 HEAD 技术 V/R 复核已通过；仍待人工视觉 Review 与 v1 Delivery 后关闭
 - 变更文件/交付物：`src/execution-view.ts`、`src/execution-view-server.ts`、`assets/execution-view/*`、`snapshot`/`view` CLI 与定向测试
 - 关键实现与决策：每次读取 `.spec-loop` 事实重建，无 snapshot 数据库；并集计算主动/等待时间；历史缺口显式为 unknown；页面使用稳定 revision 和结构签名区分事实变化，当前 elapsed 本地递增并原位更新数字/进度；页面骨架采用 AntD Layout，全局/波次总览采用 Card/Statistic/Progress，波次导航采用 Menu/Progress，步骤检查器采用 Timeline/Descriptions，工程切换采用保留上一帧的 Spin 遮罩，DAG 继续由 ELK + SVG 表达领域语义。
 - 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；本轮已运行真实 Chrome，人工截图 Review 仍待用户决定。
@@ -124,6 +124,10 @@
 | 2026-09-29 | 独立 V | 干净候选 `eca847d`，定向功能与真实 Chrome | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-V-eca847d.json`；AC-1～15 含 3a 功能通过，Review 路由边界复核通过；AC-6 人工视觉未代签 |
 | 2026-09-29 | 独立 R | 同一干净候选 `eca847d` | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-R-eca847d.json`；复核动态刷新、键盘、390px 与当前候选四张截图 SHA-256 |
 | 2026-09-29 | 独立 V/R | 干净候选 `4366ed8`，Chrome 154 | 技术 PASS；视觉待用户 | `.spec-loop/output/TASK-028-V-4366ed8.json`、`TASK-028-R-4366ed8.json`、`TASK-028-browser-4366ed8.json` 与同 revision 四张 PNG；23/23 定向测试、HTTP/桌面/390px、截图哈希通过，AC-6 人工决定未代签 |
+| 2026-09-29 | 正式 Gate、独立 V/R | 干净候选 `a53bbba`，Node 22、Chrome 154 | 构建、23/23 单测、Playwright 1/1、技术 V/R PASS；视觉待用户 | `.spec-loop/output/TASK-028-harness-report.md`、`TASK-028-V-a53bbba.json`、`TASK-028-R-a53bbba.json`、`TASK-028-browser-a53bbba.json`；受管 v1 原始 6 AC 与后扩目标规格 AC-1～15/3a 分层核验，同号 AC 不直接等同 |
+| 2026-09-29 | 正式 Gate、Chrome | 干净候选 `03cb2aa`，Node 22、Chrome 154 | 构建、23/23 单测、Playwright 1/1 PASS；390px 页眉无遮挡、无横向溢出；独立 V/R 与视觉待办 | `.spec-loop/output/TASK-028-harness-report.md`、`TASK-028-browser-03cb2aa.json`；REVIEW-1 已用新截图重新请求 |
+| 2026-09-30 | 正式 Gate、Chrome | 干净候选 `6eef0ca`，Node 22、Chrome 154 | 构建、23/23 单测、Playwright 1/1 PASS；390px 页眉及 820/900/921px 页面无横向溢出；此时技术 V/R 尚待复核 | `.spec-loop/output/TASK-028-harness-report.md`、`TASK-028-browser-6eef0ca.json`；REVIEW-1 已重绑新 HEAD |
+| 2026-09-30 | 技术 V/R 复核 | 干净候选 `6eef0ca` | 对旧 V/R 后仅有的 CSS/浏览器断言差异复核；当前 Gate 3/3、Web Manifest 5/5、Chrome 桌面/390px 截图和哈希、关键回归 4/4 均通过；人工视觉及 v1 Delivery 待办 | `.spec-loop/output/TASK-028-V-6eef0ca.json`、`TASK-028-R-6eef0ca.json`、`TASK-028-033-direct-regression-6eef0ca.log` |
 
 ## 关闭检查
 
@@ -164,3 +168,7 @@
 | 2026-09-29 | 明确共享服务路由边界 | TASK-028 观察能力只读；已批准 TASK-035 的波次 Review 另设受控 POST，修正旧文档对整个服务 GET/HEAD 的过宽表述 |
 | 2026-09-29 | 完成独立技术 V/R，等待视觉决定 | `eca847d` AC 功能与浏览器证据 PASS；当前候选人工视觉 Review 尚未签署，工单保持待验证 |
 | 2026-09-29 | 在新集成候选重绑技术证据 | `4366ed8` 的独立 V/R 与 Chrome 截图重新通过，人工视觉仍待该 revision 决定 |
+| 2026-09-29 | 正式定向 Gate 绑定集成候选 | `a53bbba` 的构建、23 项单测、本地 Playwright 和独立技术 V/R 通过；当前 HEAD 视觉 Review 请求已归档，等待用户决定 |
+| 2026-09-29 | 修正 390px 页眉遮挡并重绑正式 Gate | `03cb2aa` 的工程选择框和连接状态分行展示，受管 Gate 3/3 通过；旧视觉请求已由当前 HEAD 截图更新，仍待独立复核与用户视觉决定 |
+| 2026-09-30 | 修正平板宽度溢出并更新视觉证据 | `6eef0ca` 将 920px 以内侧栏改为横向导航，820px 页眉不再挤压标题；受管 Gate 3/3 通过，REVIEW-1 绑定新截图 |
+| 2026-09-30 | 当前 HEAD 技术 V/R 复核 | Gate/Web Manifest/截图哈希及关键回归通过；视觉决定与 v1 Delivery 保持待办 |

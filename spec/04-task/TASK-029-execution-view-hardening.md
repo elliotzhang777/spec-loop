@@ -4,7 +4,7 @@
 - 优先级：P1
 - 负责人：待定
 - 创建日期：2026-08-12
-- 最后更新：2026-09-04
+- 最后更新：2026-09-30
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -96,11 +96,12 @@
 
 ## 交付记录
 
-- 完成日期：非 Heavy 前置实现已完成，待正式 Heavy 验收
-- 变更文件/交付物：后台 `view-control start/status/open/stop` 生命周期；兼容 Adapter、性能/安全 Gate、Dogfood 与 Heavy 报告仍待正式执行
+- 完成日期：非 Heavy 前置实现、性能/真实项目/浏览器定向检查、交互启动和并行当前工作投影已完成，待其余 AC 与正式 Heavy 验收
+- 变更文件/交付物：后台 `view-control start/status/open/stop` 生命周期；隔离工作树 `spec-loop/task-029` 的 `e4d8670` 增加归档事件增量校验、投影/Task 状态缓存、200×200 性能与真实项目审计脚本，以及四条真实项目浏览器检查；交互终端启动 Round/Harness/受管波次时自动复用本地 view；顶部当前工作优先选择最新未闭合步骤，并列出其他并行 Task；未归属波次的当前 Task 现在可定位并展开详情；首次全量回归 11 个失败已修复并重新全量通过；正式受管 Heavy 报告仍待执行
 - 关键实现与决策：marker 绑定 Project realpath、PID 启动身份、loopback URL 与健康状态；重复 start 复用，陈旧 marker fail closed
 - 与原设计的差异：无
-- 遗留风险：真实 Playwright、桌面/窄屏视觉 Review、200×200 性能 Gate、旧项目重建和最终 Heavy 尚未执行。
+- 遗留风险：全量质量套件、200×200 定向基准、三个真实 Project 重建、四条页面加载及当前 Task 详情路径、失败步骤/Evidence 定位、浏览器缓存删除重建、启动/端口冲突、并行当前工作、XSS、符号链接、旧 Gate 路径越界和旧 Attempt 密钥样本检查已通过；正式受管 `WEXEC-VIEW` full Gate、独立 V/R 与人工 Heavy/视觉决定尚未完成。用户已要求不再逐张确认截图；不得把该要求记作 `REVIEW-1` 已批准。
+- 正式验收准备：已生成 [v2 Contract 草案](../../.spec-loop/output/TASK-029-contract-draft.json) 与 [WEXEC-VIEW full Gate 草案](../../.spec-loop/output/TASK-029-GATES-draft.md)，覆盖 AC-1～8、7 个 Gate、`persistent/fixtures`，含重复两次的对抗 mutation Gate 与真实 Chrome 截图 Gate。Contract 输入的 SHA-256 为 `c59bd30bbbb9df52be6c258b5c2eba797be23e2f5e0b45ba633e039880788c65`；草案已通过当前 schema 解析，尚未获得精确 hash 人工批准，也未作为正式 Gate Plan 生效。TASK-028 未交付前不得启动本 Task 的受管执行。
 
 ## 验证证据
 
@@ -108,6 +109,11 @@
 |---|---|---|---|---|
 | 尚未实施 | 未指定 | WEXEC-VIEW Heavy Gate | 待验证 | 尚无 Evidence |
 | 2026-09-04 | Codex/M（快速反馈） | Node 22，本地定向测试 | 部分实现通过，非 Heavy Evidence | 新增 `view-control start/status/open/stop`；后台 marker 绑定 Project realpath、PID 启动身份、loopback URL 与健康状态；重复 start 复用，stop 安全校验；execution-view 15/15 通过 |
+| 2026-09-30 | Codex/M（全量技术回归） | 隔离候选 `e4d8670`，Node 23 | 构建、连接器契约与 319/319 单测通过；首次全量 308/319，修复 11 项后第二轮全通过；非正式受管 Heavy Evidence | [首次全量记录](../../.spec-loop/output/TASK-029-full-regression-4464a5a.log)、[11 项定向复验](../../.spec-loop/output/TASK-029-repair-fast.tap)、[波次定向复验](../../.spec-loop/output/TASK-029-repair-wave.tap)、[最终全量记录](../../.spec-loop/output/TASK-029-full-regression-e4d8670.log) |
+| 2026-09-30 | Codex/M（性能与真实数据） | 本仓库、Quant、海工 Project，候选 `e4d8670` | 200×200 性能门槛及三项目受管 Task 100% 重建通过，未知耗时和全部诊断列出；非正式受管 Heavy Evidence | [性能记录](../../.spec-loop/output/TASK-029-perf-e4d8670.json)：归档 2 段、冷重建 1310ms、增量投影 280ms、HTTP 可见 306ms；[Dogfood 报告](../../.spec-loop/output/TASK-029-dogfood-e4d8670.json)：13/13、17/17、68/68；海工诊断 51 条，固定时刻重复重建一致 |
+| 2026-09-30 | Codex/M（浏览器/对抗） | 本仓库与 Quant，Chrome 154，候选 `e4d8670` | 桌面 1440px 与窄屏 390px 四条页面加载、定位当前及展开详情路径通过，无页面错误或横向溢出；失败步骤与 Evidence、浏览器缓存删除重建、恶意工程名、符号链接、旧 Gate 路径越界和旧 Attempt 密钥样本通过；非正式视觉/Heavy Evidence | [浏览器报告](../../.spec-loop/output/TASK-029-browser-e4d8670.json) 含八张截图及 SHA256；[Playwright 回归](../../.spec-loop/output/TASK-029-browser-regression-e4d8670.log) 2/2 |
+| 2026-09-30 | Codex/P（正式计划准备） | 隔离候选 `e4d8670` | 8 项 AC、7 个 full Gate 的草案通过 v2 Contract 与 Gate schema 解析；未批准，非正式 Evidence | [Contract 草案](../../.spec-loop/output/TASK-029-contract-draft.json) 输入哈希 `c59bd30bbbb9df52be6c258b5c2eba797be23e2f5e0b45ba633e039880788c65`；[Gate 草案](../../.spec-loop/output/TASK-029-GATES-draft.md) |
+| 2026-09-30 | Codex/M（定向修复） | 隔离候选 `2a9e57a`，Node 23 | 大快照压缩保留并行 Task 正在运行的步骤；`node --test test/execution-view.test.mjs` 29/29 与 `npm run build` 通过；完整套件和正式 Gate 尚未重绑 | 提交 `2a9e57a`，未产生正式 Evidence |
 
 ## 关闭检查
 
@@ -126,3 +132,8 @@
 | 2026-08-20 | 加入未闭合步骤优先的当前工作选择 | Quant TASK-005 Harness 运行时顶部误显示 TASK-007，暴露 lifecycle 时间排序缺陷 |
 | 2026-09-04 | 批准并对齐 P/M/V/R v2 Heavy | 作为 TASK-027/028 v1 兼容收口后的组合验收，使用独立 V/R 与 Candidate Gate |
 | 2026-09-04 | 开始非 Heavy 前置实现 | 补后台 view 生命周期与故障恢复；未运行 full Gate、性能 Gate、Playwright 或 Heavy 验收 |
+| 2026-09-30 | 定向性能修复与真实项目重建 | 将事件按 Task 分组、减少投影压缩重复排序、校验归档追加前缀并缓存状态；200×200 门槛及三个 Project 的审计报告均通过，保持最终 Heavy 待办 |
+| 2026-09-30 | 接入交互式启动即看 | Round、Harness、Acceptance 角色与受管波次启动复用唯一 Project view；CI/非 TTY/`--no-view` 跳过，浏览器失败只报警；启动 5 秒上界、端口占用恢复定向通过 |
+| 2026-09-30 | 当前工作改以活动步骤为准 | 多 Task 并行时最新未闭合步骤优先于 Task State 时间；旧活动步骤即使被 20 条较新注释挤出普通列表仍保留，顶部列出其他并行 Task |
+| 2026-09-30 | 修复未归属波次 Task 的定位与展开 | 真实工程浏览器检查发现“定位当前”被默认 H15 回退覆盖，且从任务行无法展开详情；改由未归属 Task 的独立详情路径渲染 |
+| 2026-09-30 | 修复完整技术回归的 11 个失败 | 保持 Provider 沙箱写边界；修正旧夹具写入目标、只读报告的依赖诊断、Gate 计划错误优先级和可删除 Evidence 链接检查；第二轮 319/319 通过 |

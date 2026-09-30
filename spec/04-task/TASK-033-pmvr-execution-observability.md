@@ -4,7 +4,7 @@
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-09-04
-- 最后更新：2026-09-29
+- 最后更新：2026-09-30
 - 所属设计：[DES-009](../03-design/DES-009-execution-visualization.md)
 - 所属特性：[FEAT-009](../02-feature/FEAT-009-execution-visualization.md)
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
@@ -61,6 +61,9 @@
 - Dashboard 每 Task 最多返回最近 100 个步骤，每步摘要 500 字、引用 10 个，项目诊断 200 条；完整 Event Log 仍保留原始事实。
 - 2026-09-04 快速反馈：`npm run build` 通过；受管角色投影用例通过；`test/execution-view.test.mjs` 15/15 通过。
 - `4366ed8` 独立 V 发现 Candidate 后旧角色仍显示“等待摄入”、v1 State 时间早于 v2 Candidate 使 wall=0；均已在 `ed8d0fa` 修复。独立 [V](../../.spec-loop/output/TASK-033-V-ed8d0fa.json) 与 [R](../../.spec-loop/output/TASK-033-R-ed8d0fa.json) 对 AC-1～7 技术项 PASS；真实 Chrome 桌面/390px、事件链、并发和证据哈希通过。
+- 当前集成候选 `a53bbba` 上，独立 [V](../../.spec-loop/output/TASK-033-V-a53bbba.json) 与 [R](../../.spec-loop/output/TASK-033-R-a53bbba.json) 重新核验 AC-1～7 技术项 PASS；相关实现与 `ed8d0fa` 逐字节一致，当前构建、关键回归和 Chrome 1440/390px 浏览器路径通过。截图及哈希见 `.spec-loop/output/TASK-033-browser-a53bbba.json`。
+- 共用页眉修复后的 `03cb2aa` 已在 v2 Candidate fixture 的桌面/390px Chrome 路径通过，工程选择框与连接状态无重叠，截图及哈希见 `.spec-loop/output/TASK-033-browser-03cb2aa.json`；该 HEAD 的独立技术复核仍待完成。
+- 共用平板布局修复后的 `6eef0ca` 已重新通过 v2 Candidate fixture 的桌面/390px Chrome 路径；截图及哈希见 `.spec-loop/output/TASK-033-browser-6eef0ca.json`。当前 HEAD 的技术 V/R 复核分别见 `.spec-loop/output/TASK-033-V-6eef0ca.json`、`TASK-033-R-6eef0ca.json`；旧 V/R 后仅有 CSS 布局和浏览器断言变化，关键回归 4/4，当前截图哈希和状态边界均通过。
 - 人工视觉 Review 尚未对 TASK-033 当前 revision 作出独立决定；因此工单保持待验证，不能沿用 TASK-028 的视觉结论。
 
 ## 变更记录
@@ -71,3 +74,7 @@
 | 2026-09-04 | 开始实现 | 角色事件、v2 Snapshot 投影和 UI 协议标识已接入；等待真实浏览器反馈 |
 | 2026-09-06 | 故障加固 | 修复 cancelled/历史 Task 投影并加入 Snapshot 大小边界与 EPIPE 处理 |
 | 2026-09-29 | 修复 Candidate 终态角色与耗时投影并完成独立技术 V/R | 旧角色不再冒充实时进度，生命周期终点取 Candidate 事件；人工视觉仍待当前 revision 决定 |
+| 2026-09-29 | 在集成候选重绑技术 V/R 与浏览器证据 | `a53bbba` 上 AC-1～7 技术 PASS；桌面/390px 截图已绑定当前 HEAD，人工视觉仍待独立决定 |
+| 2026-09-29 | 重绑窄屏页眉浏览器截图 | `03cb2aa` 桌面/390px Chrome 路径通过；旧 HEAD 独立 V/R 保留为历史证据，新 HEAD 独立复核和人工视觉待办 |
+| 2026-09-30 | 重绑平板布局后的浏览器截图 | `6eef0ca` 的桌面/390px Chrome 路径通过；独立复核与人工视觉仍待完成 |
+| 2026-09-30 | 当前 HEAD 技术 V/R 复核 | 当前截图、源码差异、关键回归和 Evidence 哈希通过；人工视觉仍待决定 |

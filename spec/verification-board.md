@@ -1,19 +1,19 @@
 # 验证看板
 
-> 临时验证队列。验证方案、Evidence 和结论必须写回对应工单。
+> 规格库轮次中的待验证子集。验证方案、Evidence 和结论必须写回对应工单；所有未完成工单始终在[待完成看板](pending-board.md)完整盘点。
 
 ## 待验证概览
 
 | 工单 | 验证范围 | 验证方式 | 验证人 | 状态 | 环境/入口 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-028](04-task/TASK-028-execution-view.md) | 当前候选的受管 Playwright Gate 与 v1 Delivery | `4366ed8` 独立技术 V/R 和 REVIEW-1 视觉已 PASS；锁定 Playwright 已真实跑通，待最终工作树 Gate 记录 | Codex | 待验证 | `.spec-loop/output/TASK-028-browser-4366ed8.json`、`reviews/REVIEW-1.md` | 2026-09-29 |
-| [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | v2 Candidate 观察面的当前 revision 人工视觉 | `ed8d0fa` 独立技术 V/R 与桌面/390px Chrome 已 PASS；人工视觉单独决定 | 用户 | 待验证 | `.spec-loop/output/TASK-033-browser-ed8d0fa.json` 与两张 PNG | 2026-09-29 |
+| [TASK-028](04-task/TASK-028-execution-view.md) | v1 Delivery 与人工视觉 | `6eef0ca` 正式定向 Gate 3/3、23/23 单测、Chrome 桌面/390px 与 820/900/921px 宽度回归 PASS；技术 V/R 复核、Web Manifest 五文件与截图哈希通过；视觉决定仍待 | Codex、用户 | 待验证 | `.spec-loop/output/TASK-028-V-6eef0ca.json`、`TASK-028-R-6eef0ca.json`、`reviews/REVIEW-1.md` | 2026-09-30 |
+| [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | v2 Candidate 观察面的人工视觉 | `6eef0ca` 桌面/390px Chrome、页眉边界、截图哈希与技术 V/R 复核通过；视觉决定仍待 | Codex、用户 | 待验证 | `.spec-loop/output/TASK-033-V-6eef0ca.json`、`TASK-033-R-6eef0ca.json` | 2026-09-30 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。
 
 ## 使用规则
 
-- 已批准 Task/波次内正式 V/R 随执行授权连续推进；新 HEAD 作废旧证据，不要求重复授权。待验证表示证据或验收尚未齐备，不表示每个候选都需要重新授权；按根目录 [执行与交付授权约定](../AGENT.md) 核对范围、Gate、预算和依赖。
-- 只有实现完成且具备验证条件的工单才能进入。
-- 验证失败时写回工单，恢复为进行中并移回待完成看板。
-- 验证通过时同步 Task、Design、Feature、Product，然后删除看板条目。
+- 本轮具备验证条件的工单进入此表；集中测试和裁决前冻结候选，HEAD 变化作废旧证据但不要求重复批准原范围内的执行。
+- 待验证表示证据或验收尚未齐备，不等于 PASS；V 未通过不得进入 R，视觉与 Heavy 决定不能由自动测试代签。
+- 验证依照[完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)逐用例记录 PASS/FAIL/BLOCKED/NOT_APPLICABLE、HEAD 和 Evidence；自动测试报告保留全部测试 ID 与结果，不能只记录计数。
+- 验证失败时先完成本轮可执行用例，按根因建立缺陷工单并写回[完整盘点](pending-board.md)；下一轮统一修复并重测完整矩阵。验证通过并完成必要人工决定后同步 Task、Design、Feature、Product，再从两表移除。

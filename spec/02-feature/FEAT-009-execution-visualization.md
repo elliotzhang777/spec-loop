@@ -71,13 +71,13 @@
 | Task | [TASK-027 执行事件协议与埋点](../04-task/TASK-027-execution-events.md) | 已完成 |
 | Task | [TASK-028 可重建投影与本地 Web UI](../04-task/TASK-028-execution-view.md) | 待验证 |
 | Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 已批准 |
-| Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 已批准 |
+| Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 待验证 |
 
 ## 实际交付
 
 - 已实现行为：已提供项目级 hash-chained 执行事件、Task/Harness/Gate/Review 埋点、可重建 snapshot、loopback-only 本地 Web 页面、实时当前步骤计时、Task 四类耗时与最长步骤提示。
 - 未实现/调整项：旧数据只投影可证明的 Gate 精确耗时，未伪造历史生命周期时间；200×200 性能 Gate、真实 Playwright 路径和 revision-bound 人工视觉 Review 留在 TASK-029/正式验收。
-- 验证结论：TASK-027 独立 V/R 已完成；TASK-028 在 `4366ed8` 独立技术 V/R 与 Chrome 功能重新绑定通过，人工视觉 Review 待用户。完整 Heavy Gate 仍由 TASK-029 执行，特性保持“进行中”。
+- 验证结论：TASK-027 独立 V/R 已完成；TASK-028/033 在 `a53bbba` 的独立技术 V/R 作为历史证据保留。修复窄屏页眉和平板溢出后，`6eef0ca` 的 TASK-028 正式定向 Gate 3/3、两项页面的桌面/390px Chrome 截图及 820/900/921px 宽度回归通过；新 HEAD 的独立复核与两项人工视觉决定仍待完成。完整 Heavy Gate 仍由 TASK-029 执行，特性保持“进行中”。
 - 关联完成工单：TASK-027（`e399565` 独立 V/R PASS；事件协议、入口埋点和故障恢复已定向验收）。
 
 ## 变更记录
