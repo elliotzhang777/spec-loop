@@ -6,7 +6,6 @@
 
 | 工单 | 验证范围 | 验证方式 | 验证人 | 状态 | 环境/入口 | 更新时间 |
 |---|---|---|---|---|---|---|
-| [TASK-028](04-task/TASK-028-execution-view.md) | v1 Delivery 与人工视觉 | `6eef0ca` 正式定向 Gate 3/3、23/23 单测、Chrome 桌面/390px 与 820/900/921px 宽度回归 PASS；技术 V/R 复核、Web Manifest 五文件与截图哈希通过；视觉决定仍待 | Codex、用户 | 待验证 | `.spec-loop/output/TASK-028-V-6eef0ca.json`、`TASK-028-R-6eef0ca.json`、`reviews/REVIEW-1.md` | 2026-09-30 |
 | [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | v2 Candidate 观察面的人工视觉 | `6eef0ca` 桌面/390px Chrome、页眉边界、截图哈希与技术 V/R 复核通过；视觉决定仍待 | Codex、用户 | 待验证 | `.spec-loop/output/TASK-033-V-6eef0ca.json`、`TASK-033-R-6eef0ca.json` | 2026-09-30 |
 
 Phase 1–3 的验证已写入已完成工单和阶段交付归档。

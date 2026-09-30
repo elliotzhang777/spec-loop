@@ -1,6 +1,6 @@
 # TASK-028：可重建投影与本地执行 Web UI
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-08-12
@@ -56,22 +56,22 @@
 
 ## 验收标准
 
-- [ ] AC-1：snapshot 对同一事实输入产生 canonical 等价输出，删除任何 cache 后可以完整重建。
-- [ ] AC-2：页面首屏准确显示当前 Task、Round、生命周期、当前步骤、目的、elapsed、下一动作和 freshness。
-- [ ] AC-3：Task 泳道与明细准确展示 wall/active/waiting/untracked，以及每个步骤的状态、耗时、结果和 refs。
+- [x] AC-1：snapshot 对同一事实输入产生 canonical 等价输出，删除任何 cache 后可以完整重建。
+- [x] AC-2：页面首屏准确显示当前 Task、Round、生命周期、当前步骤、目的、elapsed、下一动作和 freshness。
+- [x] AC-3：Task 泳道与明细准确展示 wall/active/waiting/untracked，以及每个步骤的状态、耗时、结果和 refs。
 - [x] AC-3a：Round 详情展示复现、分析、修改、编译/测试等子步骤，并单独标明子步骤覆盖率与未拆分耗时。
-- [ ] AC-4：新增事件后页面无需整页刷新即可在 500 毫秒目标之外的下一轮条件刷新内更新；无变化时服务返回 304；时钟推进只修改数字、进度条和节点耗时，不重建页面结构或造成控件闪烁。
-- [ ] AC-5：服务只绑定 loopback；本工单的执行观察、静态资源及工程枚举路由只接受 GET/HEAD，非法方法、路径遍历、symlink、XSS payload 和 Secret 字段不会造成写入或泄漏。TASK-035 后加的波次 Review 专属路由是明确隔离的例外，必须保持其独立的 capability、Origin、请求大小和权威校验。
-- [ ] AC-6：桌面与窄屏 Playwright 路径全部通过，并完成绑定当前 revision 截图的人工视觉 Review。
+- [x] AC-4：新增事件后页面无需整页刷新即可在 500 毫秒目标之外的下一轮条件刷新内更新；无变化时服务返回 304；时钟推进只修改数字、进度条和节点耗时，不重建页面结构或造成控件闪烁。
+- [x] AC-5：服务只绑定 loopback；本工单的执行观察、静态资源及工程枚举路由只接受 GET/HEAD，非法方法、路径遍历、symlink、XSS payload 和 Secret 字段不会造成写入或泄漏。TASK-035 后加的波次 Review 专属路由是明确隔离的例外，必须保持其独立的 capability、Origin、请求大小和权威校验。
+- [x] AC-6：桌面与窄屏 Playwright 路径全部通过，并完成绑定当前 revision 截图的人工视觉 Review。
 - [x] AC-7：H1～H15 可从规格重建；点击 H 查看全部子 Task，点击 Task 查看步骤，并可通过面包屑、图内按钮或工具栏逐级返回。
 - [x] AC-8：默认定位最新未完成 H；H 完成状态受全部子 Task 约束，状态冲突显式告警；子 Task 使用从左到右的真实依赖分层 DAG。
 - [x] AC-9：默认展示尺寸一致的 H 主链；每次原位展开一个 H，并行 Task 严格同列，冗余祖先依赖边不绘制，Task 详情可原位展开和收起。
 - [x] AC-10：Task 详情提供结论、互斥耗时构成、Round 分层时间线、覆盖率、失败/中断次数、优化提示和折叠数据来源。
 - [x] AC-11：Task 节点支持固定尺寸双行标题与完整悬停文本；完成态中性化；筛选不破坏 DAG 拓扑，并支持总耗时排序与当前任务定位。
 - [x] AC-12：页面 Layout、通用操作控件、全局/波次统计卡、波次导航和步骤检查器统一使用本地打包的 Ant Design 6 组件，静态页面不保留原生 `select`、手写 Segmented、手写波次按钮或手写步骤 Timeline，CSP 支持组件动态样式且不依赖 CDN。
-- [ ] AC-13：桌面端左侧按 H 顺序固定展示全部波次名称、状态、Task 完成度和耗时；选中波次后右侧只更新该波次概览、Task DAG/列表及当前 Task 检查器，当前运行波次与浏览波次均清晰可辨。
-- [ ] AC-14：右侧上方固定展示全局 Airflow 总览，包括 Task 总数、各生命周期状态数量/占比、波次完成情况和当前执行位置；下方始终展示一个具体波次，首次打开默认选择当前运行波次，切换波次不重绘或替换全局总览结构。
-- [ ] AC-15：页面使用 Ant Design Select 枚举宿主 Project 与 `projects/` 下全部合法直接子工程；切换时只允许服务端工程清单中的 opaque key，保留上一帧直至新 Snapshot 到达，并在切换后重置波次/Task 浏览状态与 ETag。
+- [x] AC-13：桌面端左侧按 H 顺序固定展示全部波次名称、状态、Task 完成度和耗时；选中波次后右侧只更新该波次概览、Task DAG/列表及当前 Task 检查器，当前运行波次与浏览波次均清晰可辨。
+- [x] AC-14：右侧上方固定展示全局 Airflow 总览，包括 Task 总数、各生命周期状态数量/占比、波次完成情况和当前执行位置；下方始终展示一个具体波次，首次打开默认选择当前运行波次，切换波次不重绘或替换全局总览结构。
+- [x] AC-15：页面使用 Ant Design Select 枚举宿主 Project 与 `projects/` 下全部合法直接子工程；切换时只允许服务端工程清单中的 opaque key，保留上一帧直至新 Snapshot 到达，并在切换后重置波次/Task 浏览状态与 ETag。
 
 ## 验证计划
 
@@ -105,11 +105,11 @@
 
 ## 交付记录
 
-- 完成日期：核心实现及当前候选 `6eef0ca` 的正式定向 Gate 3/3、当前 HEAD 技术 V/R 复核已通过；仍待人工视觉 Review 与 v1 Delivery 后关闭
+- 完成日期：2026-09-30；`6eef0ca` 的正式定向 Gate 在运行环境变化后重跑 3/3 PASS，技术 V/R 与委托视觉决定已绑定，v1 Round 1 已生成 EV-1 并正式 Delivery
 - 变更文件/交付物：`src/execution-view.ts`、`src/execution-view-server.ts`、`assets/execution-view/*`、`snapshot`/`view` CLI 与定向测试
 - 关键实现与决策：每次读取 `.spec-loop` 事实重建，无 snapshot 数据库；并集计算主动/等待时间；历史缺口显式为 unknown；页面使用稳定 revision 和结构签名区分事实变化，当前 elapsed 本地递增并原位更新数字/进度；页面骨架采用 AntD Layout，全局/波次总览采用 Card/Statistic/Progress，波次导航采用 Menu/Progress，步骤检查器采用 Timeline/Descriptions，工程切换采用保留上一帧的 Spin 遮罩，DAG 继续由 ELK + SVG 表达领域语义。
-- 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；本轮已运行真实 Chrome，人工截图 Review 仍待用户决定。
-- 遗留风险：桌面/390px Chrome 功能和键盘路径已通过；人工视觉决定尚未签署。大规模性能 Gate 由 TASK-029 Heavy 执行，工单暂不关闭。
+- 与原设计的差异：首版只显示 Evidence/Artifact metadata，不开放内容读取接口；本轮已运行真实 Chrome。视觉决定由 Codex 按用户“不再找我确认”的指示代办，Review 记录不声称用户亲自审图。
+- 遗留风险：大规模兼容、安全和性能组合 Gate 仍归 TASK-029 Heavy；TASK-028 自身 v1 验收已完成。
 
 ## 验证证据
 
@@ -129,13 +129,15 @@
 | 2026-09-30 | 正式 Gate、Chrome | 干净候选 `6eef0ca`，Node 22、Chrome 154 | 构建、23/23 单测、Playwright 1/1 PASS；390px 页眉及 820/900/921px 页面无横向溢出；此时技术 V/R 尚待复核 | `.spec-loop/output/TASK-028-harness-report.md`、`TASK-028-browser-6eef0ca.json`；REVIEW-1 已重绑新 HEAD |
 | 2026-09-30 | 技术 V/R 复核 | 干净候选 `6eef0ca` | 对旧 V/R 后仅有的 CSS/浏览器断言差异复核；当前 Gate 3/3、Web Manifest 5/5、Chrome 桌面/390px 截图和哈希、关键回归 4/4 均通过；人工视觉及 v1 Delivery 待办 | `.spec-loop/output/TASK-028-V-6eef0ca.json`、`TASK-028-R-6eef0ca.json`、`TASK-028-033-direct-regression-6eef0ca.log` |
 
+| 2026-09-30 | 受管 v1 交付 | 干净候选 `6eef0ca` | 运行环境指纹变化后重跑定向 Gate 3/3；REVIEW-1 记录委托视觉接受，EV-1 绑定 Gate/截图；`verify` PASS、`deliver` 完成 Round 1 | `.spec-loop/output/TASK-028-harness-report.md`、`.spec-loop/tasks/task-028/reviews/REVIEW-1.md`、`evidence/EV-1.json`、`DELIVERY.md` |
+
 ## 关闭检查
 
-- [ ] 验收标准全部通过
-- [ ] 测试/检查结果已记录
-- [ ] 设计差异已记录
-- [ ] 上游实际结果已更新
-- [ ] 已从两个看板移除
+- [x] 验收标准全部通过
+- [x] 测试/检查结果已记录
+- [x] 设计差异已记录
+- [x] 上游实际结果已更新
+- [x] 已从两个看板移除
 
 ## 变更记录
 

@@ -90,20 +90,19 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ### 当前规格库轮次：2026-09-30 第二轮
 
-第二轮扫描整个 `spec/04-task/`，共有 6 个未完成工单：原 5 个加第一轮 report-only Ready 误报缺陷 TASK-044。状态以各工单和[待完成看板](pending-board.md)为准，不按原 P4-B1～B4 分批向用户请求启动或验收。
+第二轮起始扫描整个 `spec/04-task/`，共有 6 个未完成工单：原 5 个加第一轮 report-only Ready 误报缺陷 TASK-044。TASK-028 已在本轮完成 v1 Delivery，当前剩余 5 项。状态以各工单和[待完成看板](pending-board.md)为准。
 
 | 工单 | 当前状态 | 本轮可推进项 | 仍需的条件或决定 |
 |---|---|---|---|
-| [TASK-028](04-task/TASK-028-execution-view.md) | 待验证 | 集成当前页面候选，重绑 targeted Gate 与独立 V/R | 当前 revision 人工视觉和 v1 Delivery |
 | [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | 待验证 | 与 TASK-028 共用稳定候选重绑技术与浏览器 Evidence | 独立视觉决定 |
-| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 进行中 | 完成剩余浏览器、安全、兼容与性能实现及定向反馈 | TASK-028 前置事实、正式 Heavy Gate/V/R 和人工决定 |
+| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 进行中 | TASK-028 前置已交付，隔离组合候选技术测试通过 | 正式 Heavy Gate/V/R 和最终视觉、Heavy 决定 |
 | [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 已批准 | 核对真实配置前置和不依赖外部连接的准备项 | 真实飞书配置、外部副作用与 Heavy 决定 |
 | [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 | 准备最终组合验收清单及可验证前置 | TASK-026/029 等依赖与最终 Heavy/阶段决定 |
-| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 已批准 | 第二轮修复 v1 Ready 误报并定向验证 | 全矩阵正式复测仍依赖集成候选和各人工决定 |
+| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 进行中 | `c0f01dd` 受管 targeted Harness Gate 4/4 PASS | v2 独立 M/V/R 角色链和最终 Evidence Gate |
 
-实施按依赖顺序进行，独立可执行项不等待阻塞项；集成冻结候选后集中执行适用的 targeted Gate、各批准 Heavy Gate、独立 V/R 与人工裁决。TASK-028 保持在途 v1，不中途迁移；原 P4-B1～B4 仅作为历史和内部资源分组。现有 Scheduler Wave 不是跨规格库轮次的一键执行器。
+实施按依赖顺序进行，独立可执行项不等待阻塞项；集成冻结候选后集中执行适用的 targeted Gate、各批准 Heavy Gate、独立 V/R 与人工裁决。TASK-028 已按 v1 原协议交付，未迁移；原 P4-B1～B4 仅作为历史和内部资源分组。现有 Scheduler Wave 不是跨规格库轮次的一键执行器。
 
-第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC 及批准 Gate、浏览器路径、回归和人工决定；可执行技术用例完成后，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮将新工单 AC 纳入同一完整适用矩阵，修复后重测；尚未冻结跨 Task 候选，旧候选自测不能视作正式本轮 PASS。
+第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮[完整矩阵](05-delivery/2026-09-30-Phase4-第二轮完整测试矩阵.md)覆盖 6 个工单、51 条 AC；隔离组合候选 `49612eb` 的 336 个技术用例/场景全部通过。[续执行记录](05-delivery/2026-09-30-Phase4-第二轮续执行记录.md)记载 TASK-028 Delivery 和 TASK-044 targeted Gate，正式其余 V/R 与人工裁决仍按前置条件推进。
 
 ### 目标
 

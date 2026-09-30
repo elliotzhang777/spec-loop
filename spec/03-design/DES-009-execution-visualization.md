@@ -239,7 +239,7 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | 工单 | 交付物 | 依赖 | 状态 |
 |---|---|---|---|
 | [TASK-027](../04-task/TASK-027-execution-events.md) | 项目级事件协议、writer、全入口埋点、恢复与协议测试 | Phase 3 现有 Task/Harness | 已完成 |
-| [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 待验证 |
+| [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 已完成 |
 | [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | v2 Heavy：旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood、独立 V/R | TASK-027、TASK-028 | 已批准 |
 | [TASK-033](../04-task/TASK-033-pmvr-execution-observability.md) | v2 P/M/V/R、Conflict、Inbox、Candidate 事件与观察面 | TASK-027、TASK-028、TASK-032 | 待验证 |
 
@@ -274,3 +274,4 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | 2026-09-29 | 当前集成候选完成定向技术验收 | `a53bbba` 的 TASK-028 正式 Gate 与独立技术 V/R、TASK-033 独立技术 V/R、两组当前 HEAD Chrome 桌面/390px 路径通过；视觉 Review 仍分别待用户决定 | TASK-028、TASK-033 |
 | 2026-09-29 | 修复窄屏页眉并更新候选 | `03cb2aa` 将 390px 页眉分为两行，工程选择框与连接状态不再遮挡；TASK-028 正式 Gate 3/3 及 TASK-028/033 新截图通过，独立复核与人工视觉决定待办 | TASK-028、TASK-033 |
 | 2026-09-30 | 修复平板宽度溢出 | `6eef0ca` 在 920px 以内将波次导航置于内容上方，并精简页眉；820/900/921px 浏览器回归无页面横向溢出，正式 Gate 3/3 通过 | TASK-028、TASK-033 |
+| 2026-09-30 | 完成 TASK-028 v1 交付 | `6eef0ca` 在当前环境重新执行受管定向 Gate 3/3，技术 V/R 与两张截图哈希重绑；Codex 按用户委托作视觉决定，EV-1 与 v1 Delivery 完成。TASK-029 Heavy 仍单独验证兼容、安全和性能 | TASK-028 |

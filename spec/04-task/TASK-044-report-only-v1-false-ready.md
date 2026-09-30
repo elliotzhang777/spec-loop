@@ -1,6 +1,9 @@
 # TASK-044：Report-only 不得把 v1 壳标为可派发 Ready
 
-- 状态：已批准
+- 状态：进行中
+- 风险等级：light
+- Spec-Loop Task：.spec-loop/tasks/task-044
+- Proposal：PROP-13
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-09-30
@@ -65,9 +68,15 @@ Report-only 的 `ready` 只表示当前受控 Scheduler 可派发；在途 v1 �
 
 ## 交付记录
 
-- 完成日期：待第二轮修复、验证与裁决
-- 变更文件/交付物：待填写
+- 完成日期：尚未正式验收；第二轮隔离技术复测与受管 targeted Harness Gate 已完成
+- 变更文件/交付物：`src/report-scheduler.ts`、`test/report-scheduler.test.mjs`；隔离修复提交 `5cdcebc`，组合技术候选 `49612eb`
 - 与原设计的差异：无
+
+## 第二轮技术证据
+
+组合候选 `49612eb` 的报告调度器定向测试 4/4、完整质量套件 320/320 均通过。当前 Project 两次扫描 canonical hash 为 `58c412c4bb7ac2666dc7e667d5302f45a8673b967c044cec7a737df939f363c2`，TASK-026/028 均 `ready=false`，第二次 `equivalent_to_previous=true`；海工 v2 `WEB-TASK-013` 保持 Ready 且与受控预览一致。逐用例 ID 和报告哈希见[第二轮台账](../05-delivery/2026-09-30-Phase4-第二轮逐用例结果.json)。这些是 Maker 技术自测，正式 Contract/Gate、独立 V/R 与最终工单关闭仍待完成。
+
+v2 Contract 已随 `PROP-13`/`APR-15` 由 Codex 按用户“继续完成、不要找我确认”指示作委托批准并绑定受管 Task，输入 hash `fc6e8427e79e76b135fba197e08d0055676a43ba6a1fa4fc06fd020353c2a2c7`。[targeted Gate Plan](../../.spec-loop/output/TASK-044-GATES-draft.md) 解析 hash `b5f816268ab8afb8576f1e90cca447864481c6636d03d3b7178a7229dbf7a1ad`，4 个 Gate、`persistent/fixtures`。隔离组合候选 `c0f01dd` 的[受管 Harness Report](../../.spec-loop/output/TASK-044-harness-report.md)为 4/4 PASS；真实 Project 中 TASK-026 v1 planned 与 TASK-028 v1 delivered 均非 Ready，受控预览仅列 TASK-044。TASK-028 在途状态的非 Ready 结果仍由交付前同代码候选的第二轮扫描与 planned/working fixture 证明。v2 Run 尚在 M 阶段，未生成独立 V/R 或 Candidate，不把 Harness PASS 冒充最终 AC PASS。
 
 ## 变更记录
 
