@@ -39,9 +39,13 @@ test('an unidentifiable live managed child is killed and cannot report success',
 })
 
 test('a child that exits before its identity probe completes remains a valid fast result', async () => {
-  const result = await runManagedProcess({ bin: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5_000, identifyProcess: async () => {
-    await new Promise(resolve => setTimeout(resolve, 300)); return null
+  let resolveExit
+  const exited = new Promise(resolve => { resolveExit = resolve })
+  const managed = startManagedProcess({ bin: process.execPath, args: ['-e', 'process.exit(0)'], timeoutMs: 5_000, identifyProcess: async () => {
+    await exited; return null
   } })
+  managed.child.once('exit', resolveExit)
+  const result = await managed.completion
   assert.equal(result.code, 0)
   assert.equal(result.identity_error, null)
 })
