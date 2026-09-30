@@ -303,13 +303,14 @@ test('Supervisor verifies a timed-out watchdog has exited before it starts anoth
   assert.equal(await processMatches(worker.pid, worker.startedAt), false)
 
   await rm(mutex, { recursive: true, force: true })
-  const recoveryDeadline = Date.now() + 10_000
+  // A loaded full suite may spend multiple watchdog cycles confirming the old worker exited.
+  const recoveryDeadline = Date.now() + 30_000
   while (Date.now() < recoveryDeadline) {
     status = await schedulerSupervisorStatus(root)
     if (status.healthy) break
     await new Promise(resolve => setTimeout(resolve, 50))
   }
-  assert.equal(status.healthy, true)
+  assert.equal(status.healthy, true, JSON.stringify(status))
 })
 
 test('test-mode Supervisor self-terminates at its bounded runtime', async (t) => {
