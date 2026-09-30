@@ -9,7 +9,8 @@ import { assertSubstantive } from '../dist/files.js';
 test('substantive checks preserve domain precision words but reject bare placeholders',()=>{
   assert.doesNotThrow(()=>assertSubstantive('Historical task timing has unknown precision after import.','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('旧数据中的未知耗时要明确标识。','criterion'));
-  for(const value of ['unknown','未知','TODO','TBD','待填写','Complete this TODO field']){
+  assert.doesNotThrow(()=>assertSubstantive('仅含 unknown 的字段以及显式 TODO/TBD/待填写占位内容仍被拒绝。','criterion'));
+  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO: implement criterion','Complete this TODO field']){
     assert.throws(()=>assertSubstantive(value,'criterion'),/placeholder content/);
   }
 });
