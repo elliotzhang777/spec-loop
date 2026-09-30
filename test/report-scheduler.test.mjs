@@ -111,6 +111,10 @@ test('report-only keeps nonterminal v1 tasks visible without calling them dispat
   assert.equal(started.code, 0, started.stderr)
   await assertNotReady('working')
 
+  await writeMd(path.join(f.taskRoot, 'ROUNDS', 'ROUND-0001.md'), {
+    schema_version: 1, task_id: 'TASK-V1-REPORT', round: 1, status: 'open',
+  }, '# Round 1\n\n## Work\n\nExercise v1 report visibility.\n\n## Changes\n\nRecord the lifecycle transition.\n\n## Outcome\n\nThe task remains visible and cannot be dispatched automatically.')
+
   const evidence = path.join(f.root, 'verification-evidence.txt')
   await writeFile(evidence, 'Fixture verification evidence.\n')
   const verified = cli(['verify', f.taskRoot, '--result', 'pass', '--evidence', evidence, '--verifier', 'fixture-verifier', '--revision', 'fixture-revision'])
