@@ -179,7 +179,7 @@ export async function executionViewStatus(projectRoot:string,timeoutMs=6000){
 }
 
 export async function serveManagedExecutionView(projectRoot:string,port=0):Promise<void>{
-  const root=await realpath(projectRoot),{server,url}=await startExecutionViewServer(root,{port}),processStart=await processStartedAt(process.pid),marker=markerSchema.parse({schema_version:1,project_root:root,pid:process.pid,process_started_at:processStart,url,started_at:new Date().toISOString()});await atomicWriteMany(root,[{file:markerFile(root),content:`${JSON.stringify(marker,null,2)}\n`}]);
+  const root=await realpath(projectRoot),identity=processStartedAt(process.pid),{server,url}=await startExecutionViewServer(root,{port}),processStart=await identity,marker=markerSchema.parse({schema_version:1,project_root:root,pid:process.pid,process_started_at:processStart,url,started_at:new Date().toISOString()});await atomicWriteMany(root,[{file:markerFile(root),content:`${JSON.stringify(marker,null,2)}\n`}]);
   await new Promise<void>(resolve=>{let closing=false;const stop=()=>{if(closing)return;closing=true;closeExecutionViewServer(server).finally(resolve)};process.once('SIGINT',stop);process.once('SIGTERM',stop);server.once('close',resolve)});const current=await readViewMarker(root).catch(()=>null);if(current?.pid===process.pid&&current.process_started_at===processStart)await rm(markerFile(root),{force:true});
 }
 
@@ -191,9 +191,9 @@ export async function startManagedExecutionView(projectRoot:string,port=0,option
     if(current.reason==='identity_unknown'||current.reason.startsWith('invalid_marker')||current.reason==='project_root_mismatch')throw new Error(`execution view requires reconcile: ${current.reason}`);
     if(current.marker)await rm(markerFile(root),{force:true});if(performance.now()>=deadline)throw new Error('execution view startup deadline reached');
     const child=spawn(process.execPath,[fileURLToPath(new URL('./cli.js',import.meta.url)),'_view-serve',root,'--port',String(port)],{cwd:root,detached:true,stdio:'ignore'});child.unref();let ready=false;
-    const start=child.pid?await identifyProcess(child.pid,remaining()):null;
+    const startProbe=child.pid?identifyProcess(child.pid,remaining()):Promise.resolve(null);
     try{while(performance.now()<deadline){const status=await executionViewStatus(root,remaining());if(status.running&&status.reason==='healthy'&&status.marker?.pid===child.pid){ready=true;return status.marker;}if(child.exitCode!==null||child.signalCode!==null)break;try{process.kill(child.pid!,0)}catch{break}await new Promise(resolve=>setTimeout(resolve,Math.min(50,remaining())));}throw new Error(`execution view did not become healthy within ${timeoutMs}ms`);}
-    finally{if(!ready){const stopped=await terminateProcessTree(child.pid,start,100,{timeoutMs:1000});if(!stopped.stopped)child.kill('SIGKILL');const marker=await readViewMarker(root).catch(()=>null);if(marker&&marker.pid===child.pid&&marker.process_started_at===start)await rm(markerFile(root),{force:true});}}
+    finally{if(!ready){const start=await startProbe;const stopped=await terminateProcessTree(child.pid,start,100,{timeoutMs:1000});if(!stopped.stopped)child.kill('SIGKILL');const marker=await readViewMarker(root).catch(()=>null);if(marker&&marker.pid===child.pid&&marker.process_started_at===start)await rm(markerFile(root),{force:true});}}
   });
 }
 

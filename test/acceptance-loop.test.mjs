@@ -12,6 +12,7 @@ import {
   buildAcceptanceSchedule,
   cancelAcceptanceRun,
   compileAcceptancePlan,
+  describeControlledGateFailures,
   readAcceptanceRun,
   reconcileCandidateBaseline,
   recordRResult,
@@ -22,6 +23,21 @@ import {
   startAcceptanceRun,
   submitMakerCandidate,
 } from '../dist/acceptance-loop.js'
+
+test('controlled Gate failures distinguish test names while ignoring TAP order and duration', async () => {
+  const root = await tempRoot('controlled-gate-failure-')
+  const artifact = path.join(root, 'quality.tap')
+  const gate = { id: 'quality-full', artifact: 'quality.tap', exit_code: 1, timed_out: false }
+  await writeFile(artifact, 'not ok 216 - fast exit identity probe\n  duration_ms: 300.1\n')
+  const fastExit = await describeControlledGateFailures(root, [gate])
+  await writeFile(artifact, 'not ok 84 - background execution view lifecycle\n  duration_ms: 8216.3\n')
+  const viewStartup = await describeControlledGateFailures(root, [gate])
+  assert.notEqual(fastExit, viewStartup)
+  await writeFile(artifact, 'not ok 312 - fast exit identity probe\n  duration_ms: 900.7\n')
+  assert.equal(await describeControlledGateFailures(root, [gate]), fastExit)
+  await writeFile(artifact, 'command failed without TAP output\n')
+  assert.match(await describeControlledGateFailures(root, [gate]), /quality-full: exit 1/)
+})
 import { addWritableRoots, buildProviderArgs, cancelRoleInvocation, ingestSucceededRoleResult, prepareRoleInvocation, readRoleInvocation, reconcileRoleInvocation, runRoleInvocation, summarizeRoleUsage } from '../dist/role-orchestrator.js'
 import { inspectSchedulerLiveness, stopTaskExecution } from '../dist/scheduler-control.js'
 import { readExecutionEvents } from '../dist/execution-events.js'

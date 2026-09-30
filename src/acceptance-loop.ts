@@ -492,6 +492,19 @@ function failureFingerprint(stage: 'V' | 'R', classification: string, failedAc: 
   return sha256(JSON.stringify({ stage, classification, failed_ac: [...failedAc].sort(), message: normalized }));
 }
 
+export async function describeControlledGateFailures(root: string, gates: GateResult[]): Promise<string> {
+  const failed = gates.filter((gate) => gate.exit_code !== 0 || gate.timed_out);
+  const details = await Promise.all(failed.map(async (gate) => {
+    const output = await readFile(path.resolve(root, gate.artifact), 'utf8').catch(() => '');
+    const testNames = [...output.matchAll(/^not ok\s+(?:\d+\s+-\s+)?(.+)$/gm)]
+      .map((match) => match[1].trim().replace(/\s+/g, ' ')).filter(Boolean);
+    const identity = testNames.length ? `tests ${[...new Set(testNames)].slice(0, 8).join(' | ')}`
+      : `exit ${gate.exit_code}${gate.timed_out ? ' timeout' : ''}`;
+    return `${gate.id}: ${identity}`;
+  }));
+  return `one or more controlled Gates failed: ${details.join('; ')}`;
+}
+
 function applyFailure(run: AcceptanceRun, fingerprint: string): AcceptanceRun {
   return { ...run, last_failure_fingerprint: fingerprint, repeated_failure_count: run.last_failure_fingerprint === fingerprint ? run.repeated_failure_count + 1 : 1 };
 }
@@ -572,14 +585,16 @@ export async function runControlledV(root: string, taskId: string, invocationId:
   const providerResult = providerResultFile ? vInputSchema.parse(JSON.parse(await readFile(providerResultFile, 'utf8'))) : null;
   if (providerResult && (providerResult.task_id !== taskId || providerResult.invocation_id !== invocationId || providerResult.head !== plan.head || providerResult.plan_hash !== plan.plan_hash || providerResult.contract_hash !== contract.contract_hash)) throw new Error('Provider V result is not bound to the controlled candidate');
   const gates = await runGates(root, taskId);
+  const passed = gates.every((item) => item.exit_code === 0 && !item.timed_out);
+  const failureMessage = passed ? 'all controlled Gates passed' : await describeControlledGateFailures(root, gates);
   const gateFile = path.resolve(control(root), 'output', `${taskId}-gates.json`);
   const input = vInputSchema.parse({
     task_id: taskId, contract_hash: contract.contract_hash, plan_hash: plan.plan_hash, head: plan.head,
     invocation_id: invocationId,
-    verdict: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'pass' : 'fail',
-    classification: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? null : 'implementation_problem',
+    verdict: passed ? 'pass' : 'fail',
+    classification: passed ? null : 'implementation_problem',
     failed_ac: [...new Set(gates.filter((item) => item.exit_code !== 0 || item.timed_out).flatMap((item) => item.ac ?? []))],
-    message: gates.every((item) => item.exit_code === 0 && !item.timed_out) ? 'all controlled Gates passed' : 'one or more controlled Gates failed',
+    message: failureMessage,
     evidence: contract.evidence_requirements.map((item) => ({ file: gateFile, ac: item.ac, requirement_ids: [item.id] })),
   });
   if (providerResult) {
