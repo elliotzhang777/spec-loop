@@ -90,24 +90,36 @@ test('report-only scheduler is canonical, measurable, read-only to Tasks, and fa
   assert.equal(await taskFingerprint(f.taskRoot), before)
 })
 
-test('report-only keeps planned and working v1 tasks visible without calling them dispatch ready', async () => {
+test('report-only keeps nonterminal v1 tasks visible without calling them dispatch ready', async () => {
   const f = await fixture('PROJ-V1-REPORT', 'TASK-V1-REPORT')
   await writeMd(path.join(f.taskRoot, 'PLAN.md'), {
     schema_version: 1, task_id: 'TASK-V1-REPORT', version: 1, ac_coverage: ['AC-1'],
-  }, '# Plan\n\nExercise report-only readiness for planned and working v1 tasks.')
+  }, '# Plan\n\nExercise report-only readiness throughout the v1 lifecycle.')
+  async function assertNotReady(stage) {
+    const report = await runReportScheduler(f.root)
+    assert.equal(report.suggestions.length, 1)
+    assert.equal(report.suggestions[0].protocol, 'v1')
+    assert.equal(report.suggestions[0].stage, stage)
+    assert.equal(report.suggestions[0].ready, false)
+    assert.equal(report.suggestions[0].reason, 'v1 task requires manual compatibility workflow')
+  }
   const planned = cli(['plan', f.taskRoot])
   assert.equal(planned.code, 0, planned.stderr)
-  const initial = await runReportScheduler(f.root)
-  assert.equal(initial.suggestions[0].stage, 'planned')
-  assert.equal(initial.suggestions[0].ready, false)
-  assert.equal(initial.suggestions[0].reason, 'v1 task requires manual compatibility workflow')
+  await assertNotReady('planned')
 
   const started = cli(['round', f.taskRoot])
   assert.equal(started.code, 0, started.stderr)
-  const working = await runReportScheduler(f.root)
-  assert.equal(working.suggestions[0].stage, 'working')
-  assert.equal(working.suggestions[0].ready, false)
-  assert.equal(working.suggestions[0].reason, 'v1 task requires manual compatibility workflow')
+  await assertNotReady('working')
+
+  const evidence = path.join(f.root, 'verification-evidence.txt')
+  await writeFile(evidence, 'Fixture verification evidence.\n')
+  const verified = cli(['verify', f.taskRoot, '--result', 'pass', '--evidence', evidence, '--verifier', 'fixture-verifier', '--revision', 'fixture-revision'])
+  assert.equal(verified.code, 0, verified.stderr)
+  await assertNotReady('verifying')
+
+  const iterated = cli(['verify', f.taskRoot, '--result', 'fail', '--evidence', evidence, '--verifier', 'fixture-verifier', '--revision', 'fixture-revision'])
+  assert.equal(iterated.code, 0, iterated.stderr)
+  await assertNotReady('iterating')
 })
 
 test('report-only rejects private source text and duplicate feedback without publishing false metrics', async () => {
