@@ -52,6 +52,12 @@
     "dogfood_browser": {
       "pass": 4,
       "fail": 0
+    },
+    "wave_review_browser": {
+      "pass": 1,
+      "fail": 0,
+      "facts": 9,
+      "screenshots": 7
     }
   },
   "reports": {
@@ -86,6 +92,10 @@
     "dogfood_browser": {
       "path": ".spec-loop/output/ROUND-2026-09-30-task029-dogfood-browser-91f6d25.json",
       "sha256": "2a8f8d1c493e725b9fb3f3d1db7bd00e6295b12991e3605bb97464638197e5ed"
+    },
+    "wave_review_browser": {
+      "path": ".spec-loop/output/ROUND-2026-09-30-wave-review-browser-91f6d25/report.json",
+      "sha256": "25a2969dd1ec59b06f9316665e798aa51589f466b2e45df2195f67e5e541daae"
     }
   },
   "cases": [
@@ -1693,6 +1703,93 @@
       "id": "playwright:4e559be01db6064b",
       "title": "untrusted project name renders as text and cannot execute browser code",
       "result": "PASS"
+    },
+    {
+      "id": "benchmark:cold_ms",
+      "title": "200×200 冷重建",
+      "result": "PASS",
+      "actual_ms": 1343,
+      "limit_ms": 2000
+    },
+    {
+      "id": "benchmark:incremental_ms",
+      "title": "单事件增量投影",
+      "result": "PASS",
+      "actual_ms": 288,
+      "limit_ms": 500
+    },
+    {
+      "id": "benchmark:page_visible_ms",
+      "title": "单事件页面可见",
+      "result": "PASS",
+      "actual_ms": 317,
+      "limit_ms": 500
+    },
+    {
+      "id": "dogfood:PROJ-SPEC-LOOP",
+      "title": "PROJ-SPEC-LOOP 删除缓存后重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 13,
+      "expected": 13
+    },
+    {
+      "id": "dogfood:PROJ-QUANT-SYSTEM",
+      "title": "PROJ-QUANT-SYSTEM 删除缓存后重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 17,
+      "expected": 17
+    },
+    {
+      "id": "dogfood:PROJ-OFFSHORE-ELECTRICAL-MANAGEMENT",
+      "title": "PROJ-OFFSHORE-ELECTRICAL-MANAGEMENT 删除缓存后重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 68,
+      "expected": 68
+    },
+    {
+      "id": "dogfood-browser:root:1440",
+      "title": "PROJ-SPEC-LOOP 1440px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "c2271d4a631b01ba0729fbe614f2e5b385f305e70bfdf299c057c9868629b413",
+      "detail_sha256": "d82c81de8681823aa0efb5bc89423167eaa461da3adedee27952251e946a4a9d"
+    },
+    {
+      "id": "dogfood-browser:root:390",
+      "title": "PROJ-SPEC-LOOP 390px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "03af07850fcea8d76fb46d48e2e8f5c9ed4f4fb7a99caf26f96a933088c36d79",
+      "detail_sha256": "98bd45594c834a103cb0991d41e7bdcf9a0c594f47bd3f92ad5dbd02d45aab70"
+    },
+    {
+      "id": "dogfood-browser:project:quant-system:1440",
+      "title": "PROJ-QUANT-SYSTEM 1440px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "a1ef6f81c394b934496129d83da9c6e0341a8744b2812f0d93ab3aeb7a1a82df",
+      "detail_sha256": "5d1502305c52aba59991ed73a5083fbb204293e4523e3d86e23809cba89ba9b6"
+    },
+    {
+      "id": "dogfood-browser:project:quant-system:390",
+      "title": "PROJ-QUANT-SYSTEM 390px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "5cb2ec6895a56f904249cb4b52741bf8b988939a90c2b2bf36651b812fd28398",
+      "detail_sha256": "269731245e32768b56b167b3db88f27459bc8257e7bcba067e4978ce3c4a7dce"
+    },
+    {
+      "id": "wave-review-browser",
+      "title": "波次 Review GUI、受控下一轮、窄屏与证据绑定",
+      "result": "PASS",
+      "facts": [
+        "a damaged historical review is reported without blocking valid wave decisions",
+        "batch review shows its verification round and unresolved state",
+        "needs_user Task releases resources while an independent Task reaches R",
+        "one GUI decision accepts a subset and starts exactly the authorized next Task",
+        "next wave automatically advances M → controlled V → independent R at a new HEAD",
+        "saved decisions update both the wave selector and the candidate row",
+        "registered screenshots are readable and approval binds the current request hash",
+        "mobile review keeps task rows horizontally scrollable",
+        "no browser console errors, merge, push or deployment"
+      ],
+      "screenshot_count": 7
     }
   ]
 }
