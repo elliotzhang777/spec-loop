@@ -54,7 +54,7 @@ export async function runReportScheduler(root:string):Promise<SchedulerReport>{
     if(await exists(cursorFile(root))){try{previous=cursorSchema.parse(JSON.parse(await readFile(cursorFile(root),'utf8')))}catch(error){throw new Error(`scheduler cursor is invalid: ${(error as Error).message}`)}if(previous.project_id!==project.project_id)throw new Error('scheduler cursor belongs to a different Project');fullScan=Date.now()-Date.parse(previous.scanned_at)>config.cursor_max_age_hours*3600_000}
     const raw=(await Promise.all(tasks.map(async task=>{
       const projected=snapshotById.get(task.task_id),reworks=projected?.acceptance?.semantic_reworks_used??0,deps=dependencies(task.blocking_reason),stage=task.protocol_stage??task.status;
-      const protocolReady=task.protocol==='v2'?['m_working','plan_compiled','v_passed'].includes(stage)&&!task.blocking_reason:task.resumable&&!task.blocking_reason;
+      const protocolReady=task.protocol==='v2'&&['m_working','plan_compiled','v_passed'].includes(stage)&&!task.blocking_reason;
       let executionHold:string|null=null;
       if(protocolReady){
         const review=await taskWaveReviewHold(root,task.task_id);
@@ -65,7 +65,7 @@ export async function runReportScheduler(root:string):Promise<SchedulerReport>{
         }
       }
       const ready=protocolReady&&!executionHold;
-      const reason=task.blocking_reason??executionHold??(ready?'ready under current protocol, dependency, and invocation facts':stage==='candidate'||task.status==='delivered'?'terminal candidate or delivered task':`not runnable from ${stage}`);
+      const reason=task.blocking_reason??executionHold??(ready?'ready under current protocol, dependency, and invocation facts':stage==='candidate'||task.status==='delivered'?'terminal candidate or delivered task':task.status==='cancelled'?'cancelled task cannot be dispatched':task.protocol==='v1'?'v1 task requires manual compatibility workflow':`not runnable from ${stage}`);
       const fact={project_id:project.project_id,task_id:task.task_id,protocol:task.protocol,stage,dependencies:deps,risk:task.level,reason};
       return suggestionSchema.parse({source:`project-task:${task.task_id}`,dedupe_key:sha256(JSON.stringify(fact)),task_id:task.task_id,protocol:task.protocol,stage,dependencies:deps,risk:task.level,estimated_cost:estimatedCost(task.level,reworks),ready,reason});
     }))).sort((left,right)=>left.task_id.localeCompare(right.task_id));
