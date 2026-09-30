@@ -588,13 +588,17 @@ export function compactExecutionSnapshot(snapshot:z.infer<typeof executionSnapsh
   const discardOldest=(items:unknown[])=>{const removed=items.shift();if(removed!==undefined)bytes-=Buffer.byteLength(JSON.stringify(removed))+(items.length?1:0)};
   const compactSteps=(minimum:number,historicalOnly:boolean)=>{
     const candidates=snapshot.tasks.flatMap((task,taskIndex)=>
-      historicalOnly&&task.current?[]:task.steps.slice(0,Math.max(0,task.steps.length-minimum))
-        .map((step,index)=>({taskIndex,index,startedAt:step.started_at??'\uffff',size:Buffer.byteLength(JSON.stringify(step))})));
+      historicalOnly&&task.current?[]:task.steps
+        .map((step,index)=>({taskIndex,index,step,startedAt:step.started_at??'\uffff',size:Buffer.byteLength(JSON.stringify(step))}))
+        .filter(candidate=>candidate.step.status!=='running'&&candidate.step.status!=='waiting')
+        .slice(0,Math.max(0,task.steps.length-minimum)));
     candidates.sort((left,right)=>left.startedAt.localeCompare(right.startedAt)||left.taskIndex-right.taskIndex||left.index-right.index);
     for(const candidate of candidates){
       if(bytes<=MAX_EXECUTION_SNAPSHOT_BYTES)break;
       const steps=snapshot.tasks[candidate.taskIndex].steps;
-      steps.shift();
+      const index=steps.indexOf(candidate.step);
+      if(index<0)continue;
+      steps.splice(index,1);
       bytes-=candidate.size+(steps.length?1:0);
     }
   };

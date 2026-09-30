@@ -90,10 +90,17 @@ test('a growing Project retains every Task and active detail inside the snapshot
     ...structuredClone(baseline.tasks[0]), task_id: `TASK-BUDGET-${index + 1}`, current: index === 0,
     steps: Array.from({ length: 20 }, (_, number) => ({ ...step, id: `STEP-${index}-${number}`, summary: '历史上下文'.repeat(45), order: number })),
   }))
+  for (const task of expanded.tasks.slice(0, 2)) {
+    task.steps[0].status = 'running'
+    task.steps[0].started_at = '2026-08-01T00:00:00.000Z'
+    task.steps[0].ended_at = null
+  }
   assert.ok(Buffer.byteLength(JSON.stringify(expanded)) > MAX_EXECUTION_SNAPSHOT_BYTES)
   const bounded = compactExecutionSnapshot(expanded)
   assert.equal(bounded.tasks.length, 74)
   assert.equal(bounded.tasks[0].steps.length, 5, 'current Task keeps recent detail')
+  assert.ok(bounded.tasks[0].steps.some(item => item.id === 'STEP-0-0'), 'current running step stays inspectable')
+  assert.ok(bounded.tasks[1].steps.some(item => item.id === 'STEP-1-0'), 'concurrent running step stays inspectable')
   assert.ok(bounded.tasks.slice(1).every(task => task.steps.length >= 1))
   assert.ok(bounded.tasks.some(task => task.steps.length < 5), 'older detail is compacted as the Project grows')
   assert.equal(bounded.revision, baseline.revision)
