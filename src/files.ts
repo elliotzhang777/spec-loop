@@ -35,6 +35,7 @@ const EXPLICIT_PLACEHOLDER_MARKER = /\b(?:todo|tbd)\b|待填写|待补充/gi;
 const EXPLANATORY_MARKER_GROUP = /(?:仅含|单独|显式)\s*(?:todo|tbd|待填写|待补充)(?:\s*[/、和或]\s*(?:todo|tbd|待填写|待补充))*\s*(?:等)?\s*(?:占位内容|占位词)(?:仍|应|必须)?(?:被)?(?:拒绝|不允许)|\breject\s+(?:standalone|bare|explicit)\s+(?:todo|tbd)(?:\s*[/,]\s*(?:todo|tbd))*\s+placeholders?\b/gi;
 const EXPLANATORY_ENGLISH_MENTION = /^(?:todo|tbd)\s+(?:(?:is|means|denotes|refers to)\s+(?:an?\s+)?(?:placeholder|marker|term)|(?:must|should)\s+(?:be\s+)?(?:rejected|avoided|not\s+used))\b/i;
 const EXPLANATORY_CHINESE_MENTION = /^(?:待填写|待补充)(?:等)?(?:占位内容|占位词|应被拒绝|必须拒绝)/;
+const EXPLICIT_FILL_DIRECTIVE = /(?:^|[:：;；]\s*)placeholder\b(?!\s+(?:term|word|rule|marker)\b)|\b(?:is|stays|remains)\s+placeholder\b|\bfill\s+me\b|\blorem\s+ipsum\b/i;
 const TEMPLATE_MARKER = /<[^>]+>|\{\{[^}]+\}\}/;
 const FILL_INSTRUCTION = /\b(?:complete|fill(?:\s+in)?)\s+(?:this\s+)?(?:todo|field)\b/i;
 export function assertSubstantive(value: string, label: string): void {
@@ -49,7 +50,7 @@ export function assertSubstantive(value: string, label: string): void {
       return !EXPLANATORY_ENGLISH_MENTION.test(mention) && !EXPLANATORY_CHINESE_MENTION.test(mention);
     });
   });
-  if (normalized.length < 3 || BARE_PLACEHOLDER.test(normalized) || unresolvedPlaceholder || TEMPLATE_MARKER.test(normalized) || FILL_INSTRUCTION.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
+  if (normalized.length < 3 || BARE_PLACEHOLDER.test(normalized) || unresolvedPlaceholder || EXPLICIT_FILL_DIRECTIVE.test(normalized) || TEMPLATE_MARKER.test(normalized) || FILL_INSTRUCTION.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
 }
 
 export function assertNoSecrets(value: string, label: string): void {

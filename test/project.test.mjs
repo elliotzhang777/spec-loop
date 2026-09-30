@@ -11,7 +11,7 @@ test('substantive checks preserve domain precision words but reject bare placeho
   assert.doesNotThrow(()=>assertSubstantive('旧数据中的未知耗时要明确标识。','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('仅含 unknown 的字段以及显式 TODO/TBD/待填写占位内容仍被拒绝。','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('TODO must be rejected when used as an unfinished field.','criterion'));
-  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.','待填写（负责人确认后补充）。','TBD pending review.','TODO implement criterion','TODO is pending review.','TBD is pending review.','TODO must be implemented before acceptance.','TODO（负责人确认后补充）。','TBD(implement criterion)','The validation strategy is TBD(implement criterion).','The validation strategy is TBD（负责人确认后补充）。','验收步骤待填写','The validation strategy stays TBD.','TODO is pending review; TODO is a placeholder term.','TODO is a placeholder term and the validation strategy is TBD.','显式 TODO/TBD/待填写占位内容仍被拒绝且验收步骤待填写。']){
+  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.','待填写（负责人确认后补充）。','TBD pending review.','TODO implement criterion','TODO is pending review.','TBD is pending review.','TODO must be implemented before acceptance.','TODO（负责人确认后补充）。','TBD(implement criterion)','The validation strategy is TBD(implement criterion).','The validation strategy is TBD（负责人确认后补充）。','验收步骤待填写','The validation strategy stays TBD.','TODO is pending review; TODO is a placeholder term.','TODO is a placeholder term and the validation strategy is TBD.','显式 TODO/TBD/待填写占位内容仍被拒绝且验收步骤待填写。','placeholder: acceptance steps to be completed after review','fill me with the acceptance steps after review']){
     assert.throws(()=>assertSubstantive(value,'criterion'),/placeholder content/);
   }
 });
@@ -47,6 +47,14 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
     const result=cli(['triage','propose',root,'--source',field==='source'?value:'Approved source','--goal',field==='goal'?value:'Create the approved task','--risk','heavy','--reason',field==='reason'?value:'Approved reason','--contract',contractFile]);
     assert.notEqual(result.code,0,`${field}=${value} unexpectedly passed`);
     assert.match(result.stderr,rejection??/placeholder content/,`${field}=${value} failed for an unrelated reason`);
+  }
+  for(const value of ['placeholder: acceptance steps to be completed after review','fill me with the acceptance steps after review']){
+    const contract=structuredClone(original);
+    contract.criteria[0].text=value;
+    await writeFile(contractFile,JSON.stringify(contract));
+    const rejected=cli(['triage','propose',root,'--source','Approved source','--goal','Create the approved task','--risk','heavy','--reason','Approved reason','--contract',contractFile]);
+    assert.notEqual(rejected.code,0,`${value} unexpectedly passed`);
+    assert.match(rejected.stderr,/placeholder content/,`${value} failed for an unrelated reason`);
   }
   const explanation=structuredClone(original);
   explanation.criteria[0].text='TODO is a placeholder term; complete acceptance criteria must explain this rule.';
