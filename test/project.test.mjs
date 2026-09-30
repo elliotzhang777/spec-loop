@@ -11,7 +11,7 @@ test('substantive checks preserve domain precision words but reject bare placeho
   assert.doesNotThrow(()=>assertSubstantive('旧数据中的未知耗时要明确标识。','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('仅含 unknown 的字段以及显式 TODO/TBD/待填写占位内容仍被拒绝。','criterion'));
   assert.doesNotThrow(()=>assertSubstantive('TODO must be rejected when used as an unfinished field.','criterion'));
-  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.','待填写（负责人确认后补充）。','TBD pending review.','TODO implement criterion','TODO is pending review.','TBD is pending review.','TODO must be implemented before acceptance.','TODO（负责人确认后补充）。','TBD(implement criterion)']){
+  for(const value of ['unknown','未知','TODO','TBD','待填写','TODO:','待填写：','TODO: implement criterion','Complete this TODO field','验收步骤：待填写。','The validation strategy is TBD.','验收步骤：待填写（负责人确认后补充）。','The validation strategy is TBD pending review.','待填写（负责人确认后补充）。','TBD pending review.','TODO implement criterion','TODO is pending review.','TBD is pending review.','TODO must be implemented before acceptance.','TODO（负责人确认后补充）。','TBD(implement criterion)','The validation strategy is TBD(implement criterion).','The validation strategy is TBD（负责人确认后补充）。']){
     assert.throws(()=>assertSubstantive(value,'criterion'),/placeholder content/);
   }
 });
@@ -38,7 +38,7 @@ test('Proposal entry rejects placeholder fields independently',async()=>{
   assert.equal(initialized.code,0,initialized.stderr);
   assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
   const contractFile=path.join(root,'contract.json');
-  for(const [field,value,rejection] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['criterion','未知',/Too small/],['criterion','验收步骤：待填写。'],['criterion','验收步骤：待填写（负责人确认后补充）。'],['criterion','待填写（负责人确认后补充）。'],['criterion','TODO is pending review.'],['criterion','TODO（负责人确认后补充）。'],['scenario','TBD:'],['scenario','TBD pending review.'],['scenario','TBD is pending review.'],['scenario','TBD(implement criterion)'],['expected','待填写：'],['expected','The validation strategy is TBD.'],['expected','The validation strategy is TBD pending review.'],['expected','TODO implement criterion'],['expected','TODO must be implemented before acceptance.']]){
+  for(const [field,value,rejection] of [['source','unknown'],['goal','TODO:'],['reason','待填写：'],['criterion','unknown'],['criterion','未知',/Too small/],['criterion','验收步骤：待填写。'],['criterion','验收步骤：待填写（负责人确认后补充）。'],['criterion','待填写（负责人确认后补充）。'],['criterion','TODO is pending review.'],['criterion','TODO（负责人确认后补充）。'],['scenario','TBD:'],['scenario','TBD pending review.'],['scenario','TBD is pending review.'],['scenario','TBD(implement criterion)'],['expected','待填写：'],['expected','The validation strategy is TBD.'],['expected','The validation strategy is TBD pending review.'],['expected','The validation strategy is TBD(implement criterion).'],['expected','The validation strategy is TBD（负责人确认后补充）。'],['expected','TODO implement criterion'],['expected','TODO must be implemented before acceptance.']]){
     const contract=structuredClone(original);
     if(field==='criterion')contract.criteria[0].text=value;
     if(field==='scenario')contract.use_cases[0].scenario=value;
