@@ -40,6 +40,7 @@
 - 本工单及波次获准启动后，已批准范围、Gate 计划和预算内的正式 Gate、独立 V/R、修复及新 HEAD 复验连续执行；候选变化须重新生成并绑定验证证据，不逐候选重请执行授权。最终 Heavy 人工验收和 Phase 4 阶段验收仍须在稳定候选与完整清单形成后，由用户明确决定。
 - 2026-09-28 前置指标事实：海工 report-only 报告 62 项；先前 Ready 3 的工单已推进至 Candidate，最新扫描 Ready 0、阻塞 62、来源缺失 0。尚无人工采纳/误报反馈，采纳率为 `null`。AC-3 所称“批准门槛”尚未量化，不能据这次扫描宣称达到门槛或启动本工单的最终 Heavy Gate。
 - 2026-09-30 第一轮失败：当前 Project 的 report-only 稳定扫描把 TASK-026 v1 历史壳、TASK-028 在途 v1 标为 Ready，但受控 `run-ready` 只读预览为空；T037-AC-3 记 FAIL，根因缺陷见 [TASK-044](TASK-044-report-only-v1-false-ready.md)。第二轮修复后须与其余适用用例一同重测；采纳率门槛仍待明确。
+- 2026-09-30 第二轮技术复测：隔离组合候选 `49612eb` 消除上述误报；当前 Project Ready 0、海工 v2 Ready 1 与受控预览相同，report-only `missing_data=0`。其余 AC-3 门槛及正式 full Gate/V/R 未完成，仍不能给 AC-3 最终 PASS。
 
 ## 变更记录
 

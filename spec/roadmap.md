@@ -99,11 +99,11 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 | [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 进行中 | 完成剩余浏览器、安全、兼容与性能实现及定向反馈 | TASK-028 前置事实、正式 Heavy Gate/V/R 和人工决定 |
 | [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 已批准 | 核对真实配置前置和不依赖外部连接的准备项 | 真实飞书配置、外部副作用与 Heavy 决定 |
 | [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 | 准备最终组合验收清单及可验证前置 | TASK-026/029 等依赖与最终 Heavy/阶段决定 |
-| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 已批准 | 第二轮修复 v1 Ready 误报并定向验证 | 全矩阵正式复测仍依赖集成候选和各人工决定 |
+| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 进行中 | 第二轮组合候选技术复测已通过；待正式 Gate/V/R | 全矩阵正式复测仍依赖集成候选和各人工决定 |
 
 实施按依赖顺序进行，独立可执行项不等待阻塞项；集成冻结候选后集中执行适用的 targeted Gate、各批准 Heavy Gate、独立 V/R 与人工裁决。TASK-028 保持在途 v1，不中途迁移；原 P4-B1～B4 仅作为历史和内部资源分组。现有 Scheduler Wave 不是跨规格库轮次的一键执行器。
 
-第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC 及批准 Gate、浏览器路径、回归和人工决定；可执行技术用例完成后，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮将新工单 AC 纳入同一完整适用矩阵，修复后重测；尚未冻结跨 Task 候选，旧候选自测不能视作正式本轮 PASS。
+第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮[完整矩阵](05-delivery/2026-09-30-Phase4-第二轮完整测试矩阵.md)覆盖 6 个工单、51 条 AC；隔离组合候选 `49612eb` 的 336 个技术用例/场景全部通过，正式 Gate/V/R 与人工裁决仍按前置条件推进。
 
 ### 目标
 
