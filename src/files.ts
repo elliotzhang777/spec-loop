@@ -31,13 +31,24 @@ export async function exists(file: string): Promise<boolean> {
 }
 
 const BARE_PLACEHOLDER = /^(?:unknown|未知|tbd|todo|placeholder|fill me|lorem ipsum|待填写|待补充)[\s。.!！?？:：-]*$/i;
-const EXPLICIT_PLACEHOLDER_MARKER = /\b(?:todo|tbd)\b|待填写|待补充/i;
-const EXPLANATORY_MARKER_MENTION = /(?:仅含|单独|显式).*?(?:占位内容|占位词|被拒绝)|\b(?:todo|tbd)\b\s+(?:(?:is|means|denotes|refers to)\s+(?:an?\s+)?(?:placeholder|marker|term)|(?:must|should)\s+(?:be\s+)?(?:rejected|avoided|not\s+used))\b|\breject\s+(?:standalone|bare|explicit)\b/i;
+const EXPLICIT_PLACEHOLDER_MARKER = /\b(?:todo|tbd)\b|待填写|待补充/gi;
+const EXPLANATORY_MARKER_GROUP = /(?:仅含|单独|显式)\s*(?:todo|tbd|待填写|待补充)(?:\s*[/、和或]\s*(?:todo|tbd|待填写|待补充))*\s*(?:等)?\s*(?:占位内容|占位词)(?:仍|应|必须)?(?:被)?(?:拒绝|不允许)|\breject\s+(?:standalone|bare|explicit)\s+(?:todo|tbd)(?:\s*[/,]\s*(?:todo|tbd))*\s+placeholders?\b/gi;
+const EXPLANATORY_ENGLISH_MENTION = /^(?:todo|tbd)\s+(?:(?:is|means|denotes|refers to)\s+(?:an?\s+)?(?:placeholder|marker|term)|(?:must|should)\s+(?:be\s+)?(?:rejected|avoided|not\s+used))\b/i;
+const EXPLANATORY_CHINESE_MENTION = /^(?:待填写|待补充)(?:等)?(?:占位内容|占位词|应被拒绝|必须拒绝)/;
 const TEMPLATE_MARKER = /<[^>]+>|\{\{[^}]+\}\}/;
 const FILL_INSTRUCTION = /\b(?:complete|fill(?:\s+in)?)\s+(?:this\s+)?(?:todo|field)\b/i;
 export function assertSubstantive(value: string, label: string): void {
   const normalized = value.trim();
-  const unresolvedPlaceholder = normalized.split(/[,，;；。.!！?？\n]+/).some((clause) => EXPLICIT_PLACEHOLDER_MARKER.test(clause) && !EXPLANATORY_MARKER_MENTION.test(clause));
+  const unresolvedPlaceholder = normalized.split(/[,，;；。.!！?？\n]+/).some((clause) => {
+    const markers = [...clause.matchAll(EXPLICIT_PLACEHOLDER_MARKER)];
+    if (!markers.length) return false;
+    const explainedGroups = [...clause.matchAll(EXPLANATORY_MARKER_GROUP)];
+    return markers.some((marker) => {
+      if (explainedGroups.some((group) => marker.index >= group.index && marker.index < group.index + group[0].length)) return false;
+      const mention = clause.slice(marker.index);
+      return !EXPLANATORY_ENGLISH_MENTION.test(mention) && !EXPLANATORY_CHINESE_MENTION.test(mention);
+    });
+  });
   if (normalized.length < 3 || BARE_PLACEHOLDER.test(normalized) || unresolvedPlaceholder || TEMPLATE_MARKER.test(normalized) || FILL_INSTRUCTION.test(normalized)) throw new Error(`${label}: empty or placeholder content`);
 }
 
