@@ -276,7 +276,10 @@ test('Supervisor verifies a timed-out watchdog has exited before it starts anoth
   assert.equal(cli(['plan', taskRoot]).code, 0)
   const mutex = path.join(root, '.spec-loop', 'execution-events.lock')
   t.after(async () => { await rm(mutex, { recursive: true, force: true }); await stopManagedSchedulerSupervisor(root).catch(() => {}) })
-  await startManagedSchedulerSupervisor(root, { intervalSeconds: 1, staleSeconds: 3, cycleTimeoutSeconds: 3,testMode:true,maxRuntimeSeconds:120,testSessionId:'timeout-supervisor-test' })
+  // This case holds the event lock to verify worker termination and recovery.
+  // Keep its circuit threshold above the bounded intentional outage; a separate
+  // test exercises the production default threshold and explicit circuit reset.
+  await startManagedSchedulerSupervisor(root, { intervalSeconds: 1, staleSeconds: 3, cycleTimeoutSeconds: 3,maxConsecutiveFailures:20,testMode:true,maxRuntimeSeconds:120,testSessionId:'timeout-supervisor-test' })
   const driverLock = path.join(root, '.spec-loop', 'locks', 'workflow-driver-TASK-SUPERVISED-TIMEOUT.lock')
   await mkdir(driverLock, { recursive: true })
   await writeFile(path.join(driverLock, 'owner.json'), `${JSON.stringify({ pid: 99999999, created_at: new Date().toISOString() })}\n`)
@@ -300,6 +303,7 @@ test('Supervisor verifies a timed-out watchdog has exited before it starts anoth
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   assert.equal(status.marker.state, 'degraded')
+  assert.notEqual(status.reason, 'circuit_open')
   assert.equal(await processMatches(worker.pid, worker.startedAt), false)
 
   await rm(mutex, { recursive: true, force: true })
