@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {spawnSync} from 'node:child_process'
+import {readFileSync} from 'node:fs'
+import path from 'node:path'
 import {auditAutonomousRun} from '../tools/phase4-dogfood-history.mjs'
 
 const history=['m_working','m_submitted','plan_compiled','v_passed','candidate']
@@ -17,4 +20,22 @@ test('waiting for an operator and incomplete history both fail closed',()=>{
   const waiting={...run,history:history.map((entry,index)=>index===2?{...entry,stage:'waiting_human_review'}:entry)}
   assert.throws(()=>auditAutonomousRun(waiting,'2026-09-30T23:59:00.000Z'),/human wait/)
   assert.throws(()=>auditAutonomousRun({...run,history:history.slice(0,3)},'2026-09-30T23:59:00.000Z'),/complete managed history/)
+})
+test('Candidate requires an independent R event',()=>{
+  const wrongActor={...run,history:history.map(entry=>entry.stage==='candidate'?{...entry,actor:'controller'}:entry)}
+  assert.throws(()=>auditAutonomousRun(wrongActor,'2026-09-30T23:59:00.000Z'),/invalid candidate actor/)
+})
+test('real TASK-049 history passes and immutable TASK-029 history fails',()=>{
+  const gitCommon=spawnSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'})
+  assert.equal(gitCommon.status,0,gitCommon.stderr)
+  const root=path.dirname(gitCommon.stdout.trim())
+  const task=id=>{
+    const folder=path.join(root,'.spec-loop/tasks',id)
+    const run=JSON.parse(readFileSync(path.join(folder,'ACCEPTANCE_RUN.json'),'utf8'))
+    const contract=readFileSync(path.join(folder,'ACCEPTANCE_CONTRACT_V2.md'),'utf8')
+    return {run,approvedAt:contract.match(/^  approved_at: (.+)$/m)?.[1]}
+  }
+  const standard=task('task-049'),heavy=task('task-029')
+  assert.equal(auditAutonomousRun(standard.run,standard.approvedAt).automated,true)
+  assert.throws(()=>auditAutonomousRun(heavy.run,heavy.approvedAt),/loop-time human wait/)
 })

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 
 const requiredStages=['m_working','m_submitted','plan_compiled','v_passed','candidate']
+const stageActors={m_submitted:'M',plan_compiled:'controller',v_passed:'V',candidate:'R'}
 
 export function auditAutonomousRun(run,approvedAt){
   assert.equal(run?.stage,'candidate','dogfood Task must reach Candidate')
@@ -13,6 +14,7 @@ export function auditAutonomousRun(run,approvedAt){
     assert.notEqual(entry.actor,'human',`loop-time human action at sequence ${entry.sequence}`)
     assert.notEqual(entry.stage,'waiting_human_review',`loop-time human wait at sequence ${entry.sequence}`)
     assert.ok(['controller','M','V','R'].includes(entry.actor),`unexpected managed actor at sequence ${entry.sequence}`)
+    if(stageActors[entry.stage])assert.equal(entry.actor,stageActors[entry.stage],`invalid ${entry.stage} actor at sequence ${entry.sequence}`)
   }
   assert.equal(stages.at(-1),'candidate','managed history must end at Candidate')
   let index=-1
