@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { waveFixture, git } from '../test/wave-review.helpers.mjs'
 import { runReadyWave } from '../dist/scheduler-control.js'
@@ -14,6 +15,8 @@ import { stopManagedSchedulerSupervisor } from '../dist/scheduler-supervisor.js'
 // Run after npm run build. A locally installed Playwright module/browser may
 // be supplied without modifying the target project's dependencies.
 const { chromium } = await import(process.env.SPEC_LOOP_PLAYWRIGHT_MODULE ?? 'playwright')
+const installedChrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const browserExecutable=process.env.SPEC_LOOP_CHROMIUM_EXECUTABLE ?? (existsSync(installedChrome)?installedChrome:undefined)
 const output = path.resolve(process.env.SPEC_LOOP_BROWSER_OUTPUT ?? '.spec-loop/output/wave-review-browser')
 await mkdir(output, { recursive: true })
 const repositoryRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
@@ -34,7 +37,7 @@ try {
   const wave = await runReadyWave(f.root, { owner: 'browser-qa', testSessionId: 'wave-review-browser', testMaxRuntimeSeconds: 180 })
   await writeFile(path.join(f.root,'.spec-loop/scheduler/wave-reviews/WAVE-BROWSER-DAMAGED.json'),'{')
   server = await startExecutionViewServer(f.root)
-  browser = await chromium.launch({ headless: true, ...(process.env.SPEC_LOOP_CHROMIUM_EXECUTABLE ? { executablePath: process.env.SPEC_LOOP_CHROMIUM_EXECUTABLE } : {}) })
+  browser = await chromium.launch({ headless: true, ...(browserExecutable ? { executablePath: browserExecutable } : {}) })
   page = await browser.newPage({ viewport: { width: 1440, height: 1080 } })
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })

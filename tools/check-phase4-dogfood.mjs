@@ -5,6 +5,7 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/pr
 import path from 'node:path'
 import { readApprovedAcceptanceContract } from '../dist/acceptance-loop.js'
 import { readRoleInvocation } from '../dist/role-orchestrator.js'
+import { auditAutonomousRun } from './phase4-dogfood-history.mjs'
 
 // Audit two real, approved Project Tasks and their managed Provider and
 // Controller records. The Gate is read-only with respect to both Tasks.
@@ -60,6 +61,7 @@ async function taskEvidence(taskId, expectedRisk) {
   const run = await json(path.join(taskRoot, 'ACCEPTANCE_RUN.json'))
   assert.equal(run.stage, 'candidate', `${taskId} has not reached Candidate`)
   assert.equal(run.contract_hash, contract.contract_hash)
+  const autonomy=auditAutonomousRun(run,contract.approval.approved_at)
   const candidateFile = path.join(evidenceRoot, `${taskId}-acceptance-v2/CANDIDATE.json`)
   const candidateRaw = await readFile(candidateFile), candidate = JSON.parse(candidateRaw.toString('utf8'))
   for (const [key, value] of Object.entries({
@@ -108,13 +110,13 @@ async function taskEvidence(taskId, expectedRisk) {
   return {
     task_id: taskId, risk: expectedRisk, approved_by: contract.approval.approved_by,
     head: run.current_head, contract_hash: run.contract_hash, plan_hash: run.plan_hash,
-    candidate_id: candidate.candidate_id, candidate_sha256: sha256(candidateRaw),
+    candidate_id: candidate.candidate_id, candidate_sha256: sha256(candidateRaw), autonomy,
     invocations, maker_sha256: sha256(makerRaw), v, r,
     gates: { count: gates.length, sha256: sha256(gatesRaw), ids: gates.map(gate => gate.id) },
   }
 }
 
-const tasks = [await taskEvidence('TASK-049', 'standard'), await taskEvidence('TASK-029', 'heavy')]
+const tasks = [await taskEvidence('TASK-049', 'standard'), await taskEvidence('TASK-058', 'heavy')]
 const phaseRun = await json(path.join(root, '.spec-loop/tasks/task-037/ACCEPTANCE_RUN.json'))
 const phaseHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' }).stdout.trim()
 assert.equal(phaseRun.current_head, phaseHead, 'Dogfood Gate must bind the current Phase 4 candidate')
