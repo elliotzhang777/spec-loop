@@ -1,6 +1,6 @@
 # DES-004：受控自动单任务 Controller
 
-- 状态：进行中
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-07-12
 - 最后更新：2026-09-04
@@ -124,8 +124,12 @@ R: independent evidence review → Candidate | M | V | human
 | [TASK-041](../04-task/TASK-041-candidate-quality-portable-files.md) | 公开示例配置与 CRLF 候选质量兼容 | TASK-032、040 | 已完成 |
 | [TASK-042](../04-task/TASK-042-v2-controlled-v-harness-freeze.md) | v2 Controlled V 自动冻结干净候选与 collect 证据 | TASK-030、032 | 已完成 |
 | [TASK-043](../04-task/TASK-043-approved-repository-bash-gates.md) | P 契约与 Run 精确绑定的仓库 Bash Gate | TASK-030、042 | 已完成 |
-| [TASK-045](../04-task/TASK-045-proposal-unknown-domain-term.md) | Proposal 占位检查保留领域术语 | TASK-032 | 进行中 |
-| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 唯一全量 P/M/V/R Heavy Dogfood | TASK-026、029、031～036 | 已批准 |
+| [TASK-045](../04-task/TASK-045-proposal-unknown-domain-term.md) | Proposal 占位检查保留领域术语 | TASK-032 历史关联 | 已完成 |
+| [TASK-049](../04-task/TASK-049-controlled-gate-failure-fingerprint.md) | 受管 V 失败指纹包含稳定失败用例身份，保留同根因重复停机 | TASK-030、TASK-029 集成验证 | 已完成 |
+| [TASK-050](../04-task/TASK-050-unstarted-v2-contract-correction.md) | M 提交前 P 批准依赖数据修订并归档原 Contract 与 Run 历史 | TASK-030、031、045 | 已完成 |
+| [TASK-051](../04-task/TASK-051-embedded-proposal-placeholders.md) | Proposal 内嵌占位内容边界 | TASK-045 | 已完成 |
+| [TASK-052](../04-task/TASK-052-controlled-gate-fingerprint-identity-order.md) | 失败数字身份与 TAP 顺序稳定性 | TASK-049 | 已完成 |
+| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 唯一全量 P/M/V/R Heavy Dogfood | TASK-029；本地确认 | 已完成 |
 
 ## 实际实现
 
@@ -134,7 +138,9 @@ R: independent evidence review → Candidate | M | V | human
 - 已完成：TASK-040 在 `eca847d` 独立 V/R PASS；M 仅附加真实 worktree/admin 与 common Git 根，参数去重并拒绝越界/符号链接，V/R 仍只给独立 Evidence 根。
 - 已完成：TASK-041 在 `eca847d` 独立 V/R PASS；精确放行三种 `.env` 示例、允许纯 CRLF，真实环境/私钥文件与尾随空格保持 fail closed。
 - 已完成：TASK-042 在 `eca847d` 独立 V/R PASS；缺失旧 Harness state 可自动产生 HEAD/base/status/diff/content 指纹及 collect hash，脏树和不匹配候选 fail closed。
-- 已完成：TASK-043 在 `4366ed8` 独立 V/R PASS；`bash scripts/check.sh` 必须精确匹配经完整性校验且与当前 Run 相符的 P 契约，脚本不可越界/链接，实际运行固定 `/bin/bash` 和受控 PATH。完整 Phase 4 Heavy 尚未执行。
+- 已完成：TASK-043 在 `4366ed8` 独立 V/R PASS；`bash` 调用的仓库 `scripts/` 内脚本必须精确匹配经完整性校验且与当前 Run 相符的 P 契约，脚本不可越界/链接，实际运行固定 `/bin/bash` 和受控 PATH。完整 Phase 4 Heavy 尚未执行。
+- 已完成：TASK-045/051 在 `8ed8b89` 的定向 Gate 2/2、独立 V/R PASS；合法 `unknown` 文本保留，裸值和内嵌未完成占位指令被拒绝。TASK-050 在 `b25019b` 定向 Gate 2/2、独立 V/R PASS；实际 Contract v2 依赖修订已审计归档，report-only `missing_data=0`。
+- 已完成：TASK-049 在 `b587ed0` 的定向 Gate 2/2、独立 V/R PASS；稳定失败身份保留数字并对失败集合排序，旧冲突和第一次 R FAIL 保留。TASK-052 在集成 `c45dea6` 的全量质量 326/326 PASS 后关闭。
 
 ## 变更记录
 
@@ -148,3 +154,11 @@ R: independent evidence review → Candidate | M | V | human
 | 2026-09-29 | 候选质量兼容完成定向验收 | TASK-041 独立 V/R PASS，保留敏感文件和真实空白错误拒绝 | TASK-041 |
 | 2026-09-29 | Controlled V 自动冻结完成定向验收 | TASK-042 独立 V/R PASS，同候选幂等且不跳过 Gate 前后指纹校验 | TASK-042 |
 | 2026-09-29 | 仓库 Bash Gate 完成定向验收 | TASK-043 独立 V/R PASS；契约完整性、Run 绑定及 PATH 假解释器复现均封闭 | TASK-043 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-054 的已批准未绑定工单导入、TASK-058 的无人工介入 Heavy Dogfood、TASK-061 的批准 Playwright 声明绑定均已按各自 AC 关闭。最终 TASK-037 `2ebee82` 受控 8/8、独立 V/R PASS 并成 Candidate；用户最终 Heavy/阶段决定待办。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-037 精确候选 `2ebee82` 的 Heavy 8/8、真实 Standard/Heavy Dogfood、独立 V/R、当前视觉 Review 与用户最终 Heavy/Phase 4 验收通过；阶段已关闭。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

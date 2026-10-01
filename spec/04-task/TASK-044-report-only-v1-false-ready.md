@@ -1,6 +1,6 @@
 # TASK-044：Report-only 不得把 v1 壳标为可派发 Ready
 
-- 状态：进行中
+- 状态：已完成
 - 风险等级：light
 - Spec-Loop Task：.spec-loop/tasks/task-044
 - Proposal：PROP-13
@@ -37,9 +37,9 @@ Report-only 的 `ready` 只表示当前受控 Scheduler 可派发；在途 v1 �
 
 ## 验收标准
 
-- [ ] AC-1：v1 `planned`、`working` 等非终态仍可作为报告建议列出，但 `ready=false`，原因明确为 v1 需人工兼容流程；不得显示“可派发”。
-- [ ] AC-2：合法 v2 Ready、依赖阻塞、待审 Review hold 和运行中的角色 invocation 判定不回退；重复扫描仍 canonical 等价、无 Task 写入或私有信息泄漏。
-- [ ] AC-3：当前 spec-loop 报告中的 TASK-026 v1 历史壳与 TASK-028 在途 v1 均非 Ready；受控 `run-ready` 只读预览也不派发二者。
+- [x] AC-1：v1 `planned`、`working` 等非终态仍可作为报告建议列出，但 `ready=false`，原因明确为 v1 需人工兼容流程；不得显示“可派发”。
+- [x] AC-2：合法 v2 Ready、依赖阻塞、待审 Review hold 和运行中的角色 invocation 判定不回退；重复扫描仍 canonical 等价、无 Task 写入或私有信息泄漏。
+- [x] AC-3：当前 spec-loop 报告中的 TASK-026 v1 历史壳与 TASK-028 在途 v1 均非 Ready；受控 `run-ready` 只读预览也不派发二者。
 
 ## 验证计划
 
@@ -68,15 +68,19 @@ Report-only 的 `ready` 只表示当前受控 Scheduler 可派发；在途 v1 �
 
 ## 交付记录
 
-- 完成日期：尚未正式验收；第二轮隔离技术复测与受管 targeted Harness Gate 已完成
+- 完成日期：2026-09-30；`78bfd70` 当前候选的受管 M、独立 V、独立 R 与 targeted Gate 全部完成
 - 变更文件/交付物：`src/report-scheduler.ts`、`test/report-scheduler.test.mjs`；隔离修复提交 `5cdcebc`，最终隔离组合技术候选 `e5ddd81`
 - 与原设计的差异：无
+
+## 第四轮受管验收
+
+当前组合候选 `78bfd701ed838ebf08f186bf94417f5414103c26` 在原修复上补充 `verifying`、`iterating` 两种 v1 非终态回归，连同 `planned`、`working` 均保持可见、`ready=false`。受管 M invocation `INV-TASK-044-M-8ed01252-a6ef-40ee-b00a-d2485b62c159` 的原始 token 预算中断、扩额和恢复记录均保留；新提交干净，自测在当前本机环境 4/4 PASS。独立 V `INV-TASK-044-V-a846db03-ba60-43b0-a1d1-b2d443b070d9` PASS，控制器在新 HEAD 重跑四个 targeted Gate 全部 PASS；独立 R `INV-TASK-044-R-129243d9-f098-4910-b550-3f433cfd710c` PASS，v2 Candidate `CANDIDATE-TASK-044-1790770031972` 已形成。Plan hash `9e8466f09307d61047db2aae0c8d4fa95f15694853ac31ed6c32c78d6d5a4e8f`；[Harness Report](../../.spec-loop/output/TASK-044-harness-report.md) SHA-256 `a12b2392f68053b6e0474a2be7cc89ca5b87b3e5b95aaccd2922e5fa2c13d767`。本工单不要求视觉 Review；结果已回写 Design、Feature、Product，不以 Candidate 授权 merge/push/deploy。
 
 ## 第二轮技术证据
 
 组合候选 `49612eb` 的报告调度器定向测试 4/4、完整质量套件 320/320 均通过。当前 Project 两次扫描 canonical hash 为 `58c412c4bb7ac2666dc7e667d5302f45a8673b967c044cec7a737df939f363c2`，TASK-026/028 均 `ready=false`，第二次 `equivalent_to_previous=true`；海工 v2 `WEB-TASK-013` 保持 Ready 且与受控预览一致。逐用例 ID 和报告哈希见[第二轮台账](../05-delivery/2026-09-30-Phase4-第二轮逐用例结果.json)。这些是 Maker 技术自测，正式 Contract/Gate、独立 V/R 与最终工单关闭仍待完成。
 
-v2 Contract 已随 `PROP-13`/`APR-15` 由 Codex 按用户“继续完成、不要找我确认”指示作委托批准并绑定受管 Task，输入 hash `fc6e8427e79e76b135fba197e08d0055676a43ba6a1fa4fc06fd020353c2a2c7`。[targeted Gate Plan](../../.spec-loop/output/TASK-044-GATES-draft.md) 解析 hash `b5f816268ab8afb8576f1e90cca447864481c6636d03d3b7178a7229dbf7a1ad`，4 个 Gate、`persistent/fixtures`。最终隔离组合候选 `e5ddd81` 的[受管 Harness Report](../../.spec-loop/output/TASK-044-harness-report.md)为 4/4 PASS；真实 Project 中 TASK-026 v1 planned 与 TASK-028 v1 delivered 均非 Ready，受控预览仅列 TASK-044，连续报告 canonical hash `551bda655ec8811076597a6a4627cd912d94265464708145823d11a70025658e`。TASK-028 在途状态的非 Ready 结果仍由交付前同代码候选的第二轮扫描与 planned/working fixture 证明。[最终组合候选逐用例台账](../05-delivery/2026-09-30-Phase4-最终组合候选逐用例结果.json)为 336/336 技术 PASS。v2 Run 尚在 M 阶段，未生成独立 V/R 或 Candidate，不把 Harness PASS 冒充最终 AC PASS。
+v2 Contract 已随 `PROP-13`/`APR-15` 由 Codex 按用户“继续完成、不要找我确认”指示作委托批准并绑定受管 Task，输入 hash `fc6e8427e79e76b135fba197e08d0055676a43ba6a1fa4fc06fd020353c2a2c7`。[targeted Gate Plan](../../.spec-loop/output/TASK-044-GATES-draft.md) 解析 hash `b5f816268ab8afb8576f1e90cca447864481c6636d03d3b7178a7229dbf7a1ad`，4 个 Gate、`persistent/fixtures`。第三轮最终隔离组合候选 `7f5cacd` 的[受管 Harness Report](../../.spec-loop/output/TASK-044-harness-report.md)为 4/4 PASS，SHA-256 `9238e8a1b07b35bb1684b688a97f8238f1900ab25219695bcd65bd4decfce9c5`；真实 Project 中 TASK-026 v1 planned 与 TASK-028 v1 delivered 均非 Ready，海工 v2 Ready 与受控预览一致，重复报告 canonical 等价。TASK-028 在途状态的非 Ready 结果仍由交付前同代码候选的第二轮扫描与 planned/working fixture 证明。[第三轮逐用例台账](../05-delivery/2026-09-30-Phase4-第三轮最终候选逐用例结果.json)记录当前技术结果。v2 Run 尚在 M 阶段，未生成独立 V/R 或 Candidate，不把 Harness PASS 冒充最终 AC PASS。
 
 ## 变更记录
 

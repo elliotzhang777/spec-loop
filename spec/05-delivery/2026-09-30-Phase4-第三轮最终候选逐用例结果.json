@@ -1,0 +1,3539 @@
+{
+  "schema_version": 1,
+  "round": "2026-09-30 Phase 4 第三轮",
+  "candidate_head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284",
+  "evidence_level": "technical Gate and report-only; v2 M/V/R and final human decisions pending",
+  "summary": {
+    "unique_cases": 338,
+    "pass": 337,
+    "fail": 1,
+    "node_pass": 321,
+    "playwright_pass": 2,
+    "benchmark": {
+      "cold_ms": 1417,
+      "incremental_ms": 298,
+      "page_visible_ms": 324
+    },
+    "dogfood_projects": 3,
+    "dogfood_browser_paths": 4,
+    "wave_review_browser_facts": 9,
+    "scheduler_root_missing_data": 1,
+    "scheduler_offshore_missing_data": 0
+  },
+  "reports": {
+    "execution-view-heavy-full": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-full.txt",
+      "sha256": "65a7c9b5846a7612a6eed116282c839d3c3b0428a37808ff21662794ca09a231",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-benchmark": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-benchmark.txt",
+      "sha256": "764fe2a1f10727a258547f3a92f29842b09df0e89999cdbb158fcf5470cedb98",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-dogfood": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-dogfood.txt",
+      "sha256": "5289588112ba8f0c9d02229f3c312756a342f3071e4f91aeebfab6199f556cda",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-adversarial": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-adversarial.txt",
+      "sha256": "251282a39d802750f517ad338541e91536c594e71c72c1020f47f6878adbebd8",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-lifecycle": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-lifecycle.txt",
+      "sha256": "d1c090aa5c000f85efa4badce05a37935fb1a733f753be68132d0af522eddaa0",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-browser": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-browser.txt",
+      "sha256": "aedbd84f684fb2becc4a927a5661d09e36868cad1fd0b1181663660402891140",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "execution-view-heavy-e2e": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-gate-execution-view-heavy-e2e.txt",
+      "sha256": "8dd2af54927ec0561b85f6a797a05c49eb69065a48bf055261f42672d65bbed5",
+      "exit_code": 0,
+      "plan_sha256": "a494403323a21293c66f080becdeeafcb4beced16aca8d4a8ea35adce2dd4805",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "task_044_targeted": {
+      "path": ".spec-loop/output/TASK-044-harness-report.md",
+      "sha256": "9238e8a1b07b35bb1684b688a97f8238f1900ab25219695bcd65bd4decfce9c5",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "task_045_targeted": {
+      "path": ".spec-loop/output/TASK-045-harness-report.md",
+      "sha256": "bbbcf3cd81edf57fbfa5f4158bbb202c40e42a008654298fa0aaf43aa9bc387f",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "task_046_targeted": {
+      "path": ".spec-loop/output/TASK-046-harness-report.md",
+      "sha256": "7eac28dc21d774373d54d5841d81b26e1a7e661019cb1b8ae7f8b5fcf5399c80",
+      "head": "7f5cacd26ba8f8aec7567dd310a0c0ba36762284"
+    },
+    "scheduler-root-1": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-scheduler-root-1.json",
+      "sha256": "5d9fa34b1f3efcb54edb1e791250d5005795c433b369e677b0e5b8af447acd2e"
+    },
+    "scheduler-root-2": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-scheduler-root-2.json",
+      "sha256": "66614470e630abec730247cebc44778a69e53bee7e76927fbe6e730cecdc1cc9"
+    },
+    "scheduler-offshore": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-scheduler-offshore.json",
+      "sha256": "6191b574b285b0db49561b7625a718180a08e4770dc996e71d604987822f9278"
+    },
+    "root-preview": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-root-preview.json",
+      "sha256": "07944d63ea8f3a75e8a8e45586a53e5aea231095cbc1203823dbaee88110fd45"
+    },
+    "offshore-preview": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-offshore-preview.json",
+      "sha256": "ecfcfd5a9f666e6b536ee31f0a29ce4e4a4b662594389e6dd7e7e6065b6f1b97"
+    },
+    "wave_review_browser": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-wave-review-browser/report.json",
+      "sha256": "eb3553c2e2284cd34a08a16909add8260eee95807d279c58fd43b225fc4b5ad3"
+    },
+    "playwright_manifest": {
+      "path": ".spec-loop/output/ROUND3-7f5cacd-heavy-archive/TASK-029-web-execution-view-heavy-e2e/manifest.json",
+      "sha256": "edd2a7162522cd73b5bd33f051778b5de74260f88bcab92d8899dc17d5ddf1ea"
+    }
+  },
+  "cases": [
+    {
+      "id": "node:10cebff403ea609d",
+      "title": "initial contract IDs are continuous, while revised contracts keep stable ordered IDs",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cb49689bc2dba68e",
+      "title": "v2 P/M/V/R creates Candidate without mutating the v1 Task lifecycle",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:65a4bffcca34cb66",
+      "title": "V and R resolve relative Evidence paths from the Project root",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:241fdecf789c6d51",
+      "title": "V and R accept plain Evidence filenames beside their RESULT file",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c0d4142065de3c77",
+      "title": "Candidate baseline drift is detected read-only and explicitly requeues M/V/R without merging",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:717838de9fac658b",
+      "title": "managed role invocations isolate M/V/R and fail closed after snapshot mutation or interruption",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6766db574c202cad",
+      "title": "Controlled V freezes a clean v2 candidate and runs only its exactly approved repository Bash Gate",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a015abde32d100fc",
+      "title": "Controlled V rejects an approved Bash Gate with an absolute interpreter path",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ef6691665bfd92d5",
+      "title": "Controlled V rejects a forged approved Bash Gate contract before execution",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:db2dce51e5fae353",
+      "title": "Controlled V rejects a self-consistent Bash Gate contract that differs from the current Run",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1da6a78a2abe604d",
+      "title": "Controlled V does not resolve an approved Bash Gate or its tools from injected PATH entries",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f7a2b2f84a0c7278",
+      "title": "Controlled V passes only explicitly named task-scoped environment variables to Gates",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ee902e0b335cdb37",
+      "title": "Controlled V ignores numbered environment variables belonging to other tasks",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ebffe2fdc7bc228f",
+      "title": "Codex runtime probe is cached by semantic identity and enforces UTF-8 Evidence access",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8def679102d5d8bc",
+      "title": "startup probe inherits cancellation and reports consumption before aborting",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c7b99697b2b24e3c",
+      "title": "heartbeat chatter and token growth do not prevent the Provider idle fuse",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:82a2ac762edeca07",
+      "title": "live usage fuse kills the complete Provider process tree before its long sleep finishes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:afb7d03cdbb119ea",
+      "title": "successful V and R invocations auto-ingest valid structured RESULT Evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:2e8cb3dbc41c22c5",
+      "title": "task stop records the actual committed Worktree HEAD and freezes both v1 and v2 state",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5fa0e1559d9130be",
+      "title": "provider identity changes fail closed and repeated deterministic launch failures open the circuit",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bead65c7a3b816ef",
+      "title": "custom verification Provider cannot write outside its Evidence root",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:4a3fcd19d709539e",
+      "title": "a PATH alias named codex cannot bypass the Provider sandbox",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b99f422f4b71e670",
+      "title": "a forged Codex package path cannot become a trusted Provider",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c4315e5af6d587d6",
+      "title": "a forged Codex installation under a substituted HOME stays confined",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:75e596d101de66de",
+      "title": "Codex diagnostics cannot write outside the Project before role sandboxing",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:be3e494ed369a459",
+      "title": "scope, executable and Java requirements fail before an acceptance Run or role invocation starts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:42ae4ec3581dadee",
+      "title": "V rejects symbolic-link Evidence even when the link itself is inside the Project root",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:94e587882f957db3",
+      "title": "M role cannot commit a modification to the approved formal Task specification",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:916164cac9f62fb8",
+      "title": "M result ingestion resumes plan compilation after a control-plane Gate configuration repair",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d3d9752d77ac9b5d",
+      "title": "M rework requires a new HEAD and the third semantic repair enters Review Inbox",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:70655de79383d326",
+      "title": "same V failure fingerprint stops early while infrastructure retry does not consume semantic budget",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8303899e3f34d61e",
+      "title": "protected AC cannot be waived and spec replacement must be a newly approved contract version",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b560b4988b16715a",
+      "title": "waiving one optional AC preserves every protected criterion and its evidence contract",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:4aa8d7163f1d4267",
+      "title": "waiving a middle AC preserves stable IDs for both surviving criteria",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e7167814717d3187",
+      "title": "cancel and return-to-M resolve active conflicts and clear the Review Inbox",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ca2585d7b9734ea0",
+      "title": "R evidence failure routes back to V and both roles require fresh Evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8fcbe99df17eaa89",
+      "title": "V and R reject a changed Gate Plan or tampered V Evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:db5ed6c13ff9108a",
+      "title": "scheduler continues independent Ready work, blocks downstream, and escalates critical conflicts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:dc982e26d0415b7d",
+      "title": "empty templates and placeholders fail",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:089660a69b41e467",
+      "title": "fabricated TASK_STATE lifecycle fails state history check",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5a5743b27863de17",
+      "title": "Attempt is rejected in draft state",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3ccfe294ae7dd199",
+      "title": "failed Attempt rejects missing or placeholder fingerprint before append",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5d232e034ddeaa99",
+      "title": "Attempt rejects secret-like content",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cda427f8dd31f810",
+      "title": "malformed Ledger JSON fails",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:585a99520e5c74cd",
+      "title": "duplicate and unknown Ledger fields fail",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:38e714266eeaddbe",
+      "title": "non-continuous Attempt and placeholder fingerprint fail",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:920498ed31708aef",
+      "title": "unknown Budget field fails",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c338aa46c9ea32bf",
+      "title": "Run Log divergence fails",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:964c149da3bdef64",
+      "title": "Round may not move backwards or exceed current Round",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b93825a5f0587f38",
+      "title": "prepared multi-file transaction recovers before check",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:07afbd9f997ca6fa",
+      "title": "task init defaults repository to the caller working directory",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7ff341668b0bb6a7",
+      "title": "Standard dogfood reaches delivered with runtime evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:78096ef7728d5b86",
+      "title": "Heavy dogfood performs two rounds and independent human acceptance",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8d5807507831b186",
+      "title": "Heavy pass rejects missing human check",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:528fd6e19444518b",
+      "title": "Delivery rejects incomplete AC mapping",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:68d55831eedab7ff",
+      "title": "Evidence ordering remains continuous after EV-9",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:02163860698c1b99",
+      "title": "history above 32 MiB remains readable, rotates on write and keeps cross-segment steps and cancellation",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:534d6ffff1833e23",
+      "title": "archival hashes and the global chain reject damaged or missing segments",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3c945d436de8fdd5",
+      "title": "losing every archived segment cannot silently restart the event chain",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f3c39915a683be95",
+      "title": "archive-events CLI seals history and permits an open step to finish afterwards",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9df401b8f9fbde58",
+      "title": "reader rejects a closed step run id reused with a valid recomputed chain",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5dda90aba41fa9ba",
+      "title": "event writer rejects Secret canaries in task identities",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:789c7044c82f37ff",
+      "title": "execution events produce exact active, waiting, wall-clock and current elapsed time",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:451785befd40828c",
+      "title": "a growing Project retains every Task and active detail inside the snapshot limit",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a3cb998baff7b8c0",
+      "title": "cancelled tasks close active steps, freeze elapsed time, and bound Dashboard history",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a670b737c1ec8b36",
+      "title": "Dashboard distinguishes historical records and exposes bounded live role heartbeat, deadline and usage",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:93afbaf019e654d5",
+      "title": "an open Round envelope does not become continuous active execution or a live step",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3ed71d208c45f119",
+      "title": "an unclosed detail activity from an older Round is not shown as the current live step",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5ff0d871ee455378",
+      "title": "latest unclosed step wins over newer Task state and keeps concurrent work visible",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:30ac7c4c39cb780b",
+      "title": "Round work activities expose reproduce, analysis, change and command timings without double counting",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9aa204c774a65945",
+      "title": "legacy gates retain exact duration while missing lifecycle time remains unknown",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:63694349b5b08115",
+      "title": "legacy Gate traversal and Attempt secret canaries fail closed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f0c4b0ca32ecd3a6",
+      "title": "target task dependencies are projected for Heavy Task DAG reconstruction",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9f2e2b3701d5213d",
+      "title": "Round startup fails closed when a managed dependency is unfinished",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:fda8b17f4256c329",
+      "title": "a v2 Candidate satisfies target task dependency checks even when its v1 lifecycle remains planned",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7d1e4d6d32f708eb",
+      "title": "a fresh v2 Candidate is projected as delivered instead of the stale v1 planned lifecycle",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:081bbc87df3adb31",
+      "title": "target-only Heavy Tasks remain visible without fabricated execution timing",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0efe2fe4b90b07a3",
+      "title": "H wave overview expands past H15 without leaking later maintenance tasks into a wave",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d8e4112957b478f3",
+      "title": "operational WQ waves preserve dependency order and block tasks whose prerequisites are unfinished",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:30f0de311122f851",
+      "title": "clock-only growth does not change the snapshot revision or force a full UI redraw",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:dafd26754a569ac8",
+      "title": "event tampering and secret-bearing summaries fail closed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:08b25b8ea8c447f9",
+      "title": "concurrent writers keep a continuous hash chain and dead bounded steps become interrupted",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d88846629a8a77a1",
+      "title": "local execution view is loopback-only, read-only and supports stable ETags",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b08de7ce5055e8b3",
+      "title": "background execution view lifecycle is idempotent and rejects stale process markers",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d6351bf2e1a8bfa0",
+      "title": "occupied view port does not leave a live marker or block a later start",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:dd94afd9fd1ce355",
+      "title": "a living slow dashboard keeps its owner marker and is not started twice",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:33a810ac453619d2",
+      "title": "dashboard shutdown bounds requests that never finish",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8af164d7ab8fb56a",
+      "title": "verified event cache isolates callers, handles appended history and still rejects rewritten prefixes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3a0ed8b0429e96cb",
+      "title": "snapshot task state cache rejects changed authority history",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b302af2a43ec44a5",
+      "title": "deleting a disposable UI snapshot preserves canonical facts and cold rebuild",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ee35fa92ef2251a4",
+      "title": "event cache does not treat an append after an unterminated line as a valid event",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6a7416ccaa3aedec",
+      "title": "worktree, T1 gate and Harness report use real Git HEAD",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:defc1734c75e5457",
+      "title": "long-connection handler persists and acknowledges before a slow Controller completes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5447644e7427fe46",
+      "title": "callback acceptance does not wait for a Confirmation lock held by a running Controller",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f3a2ecab763b0a9c",
+      "title": "tenant, project, open_id and request-type authorization fail closed and are audited",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:afc7410d35ea9041",
+      "title": "expired, stale-authority and tampered actions cannot invoke the Controller",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b6e9f83e9b33ea4c",
+      "title": "event, request and action dedupe make concurrent clicks execute one effective command",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1da5bc7f4d4b8bf9",
+      "title": "a competing action for the same request is deterministically rejected before execution",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:17bd20fda9ae4354",
+      "title": "Controller state rejection does not consume the confirmation request",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:319f198de6d0986a",
+      "title": "disabled Feishu connector still allows the same request through the local fallback entry",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b3ed756f3660efe9",
+      "title": "local CLI completes a current request through the production Controller",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:250d69da8e82cad7",
+      "title": "production Controller rejection becomes a proposal-domain constraint",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c081e061cfb74dda",
+      "title": "production Controller resumes an iterating task from a predefined needs-user choice",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9fda0e00161828cf",
+      "title": "pause_task stops a working Task until a later structured choice resumes the same Round",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:335c815fc9d54811",
+      "title": "structured Heavy acceptance is consumed by task verification as the local human check",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e9a524b2fc9b81e4",
+      "title": "structured Heavy rejection cannot be bypassed with the local human-check flag",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ef64366646188862",
+      "title": "Heavy decision is rejected after its bound Gate Plan changes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:06570c16aaea8f0e",
+      "title": "Heavy acceptance from an earlier Round is not consumed by a later Round with the same revision",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a00ba28074159fee",
+      "title": "structured verification authorization is consumed when Harness prepares the exact candidate",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a59741dbddcb1e8d",
+      "title": "production Controller rejects a request after the actual repository HEAD changes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f919938cf0398d38",
+      "title": "an unauthorized click cannot poison the authorized actor action key",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:82b7423b0c1232ef",
+      "title": "startup reconcile reclaims a stale processing action and completes it idempotently",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:51da10e5b5c63e57",
+      "title": "startup reconcile never steals a stale claim from a live process",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:054184f004e1696d",
+      "title": "concurrent startup reconcile recovers a hard crash after the Controller persisted success",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bc10216913da1438",
+      "title": "startup reconcile restores a Controller success even after the confirmation TTL elapsed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:223a4187df9f78f9",
+      "title": "running connector processes a real card action and updates its result card",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e1bb18c38578b10b",
+      "title": "Connector writes only its inbox and calls a structured Controller Adapter",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:eeaabd17069b2186",
+      "title": "managed confirmation requests produce classified and paired user waits",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1df87e8f2d1e1d43",
+      "title": "a committed confirmation wait is recovered after event-store failure",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:76d6cf1d91faf1ff",
+      "title": "all five request types bind immutable authority facts and fixed action allowlists",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:dcf7e947eae0e0ad",
+      "title": "cards show decision context while action payloads contain only opaque request and fixed action ids",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:91ecedc4bb3ebb97",
+      "title": "revision, Acceptance, screenshots and Gate Plan changes invalidate the old request",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:19be599492fc1e80",
+      "title": "requests are single-consumption, actor-bound, action-bound and expiry-bound",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c3dcd4c27c76c559",
+      "title": "confirmation store reclaims a lock left by a crashed process",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b6adcf1d2c019a8e",
+      "title": "authority changes atomically invalidate the request before consumption",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:510383c0d7d7b4f1",
+      "title": "consumption reads an independently persisted current authority projection",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0fa1b60b4cb91e06",
+      "title": "regeneration invalidates the old request and binds a new revision and content hash",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9b1b1ea84ca5d687",
+      "title": "projection deletion is rebuildable while projection or history tampering fails closed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:584cfae535603d36",
+      "title": "missing history can never be replaced by empty rebuilt projections",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:55083763b309959e",
+      "title": "sensitive summaries and non-predefined options fail before persistence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:40f9683e1fa7d5ef",
+      "title": "request schema rejects semantically inconsistent terminal snapshots",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:da1c00331d1886c8",
+      "title": "history rejects creation, expiry and consumption events at impossible times",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e6f575864e7c57e5",
+      "title": "global history time cannot move backwards and invalid events are rejected before persistence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e58f2058a76e77eb",
+      "title": "feishu config initializes disabled and validates strictly",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:98e0490c918e49e5",
+      "title": "enabled config requires targets, approvers and valid retry bounds",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f1acd9347dfa0d64",
+      "title": "config and connector paths reject symbolic links",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f8f7a743eca9dc71",
+      "title": "secret provider resolves references without exposing values",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7ec770be880374ae",
+      "title": "fake and official transports share the lifecycle contract",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5566ca1850144f50",
+      "title": "official transport preserves Feishu event and tenant identity from normalized raw callbacks",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8fac290ebd0f527a",
+      "title": "official transport sends with the configured receive id type",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0a6f394705cbbad6",
+      "title": "official preflight requires bot activation and message permission",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c17f81a996062e2f",
+      "title": "official preflight cancellation does not wait for a stuck token request",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:55ac180a7cdf3abb",
+      "title": "official connect failure removes the old callback before retry",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1f7499c302032d22",
+      "title": "channel factory errors are redacted for preflight and message methods",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:49c149513c8d7925",
+      "title": "current and previous tenant access tokens stay redacted after refresh",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:edd55d17766294b6",
+      "title": "disconnect force-closes an official channel while it is still connecting",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e50a7091d5652859",
+      "title": "disconnect aborts a pending endpoint request and stops official SDK reconnect",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a251d3aa3efe42ec",
+      "title": "disconnect during a slow factory prevents callbacks and concurrent retry",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a6d522673ec37f37",
+      "title": "connector lease prevents a second local consumer",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bdbd2bfedbe616eb",
+      "title": "lease competition failure still disconnects the preflight transport",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8329e80f5f040f0c",
+      "title": "running connector renews its lease until stopped",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6f8521bcfeb0ce7c",
+      "title": "slow transport connection keeps renewing before callbacks are accepted",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:147a6fa94e8971d4",
+      "title": "abort can stop a connector whose transport connect never resolves",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9abde0ea8beceba6",
+      "title": "stop requests are token-bound and handled cooperatively without signalling a pid",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e73d090d9997f65e",
+      "title": "an expired owner cannot renew over a replacement lease",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0d4bb24e4b0a8453",
+      "title": "an expired lease cannot be revived by its original token",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3166ff331da4f101",
+      "title": "pre-aborted external signals stop before connecting and release the lease",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b0ba661e8b7b551d",
+      "title": "abort cancels preflight and always disconnects transport before lease acquisition",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:68f05cc89c52a470",
+      "title": "aborting closes the action gate before transport disconnect completes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e90e0796651b466e",
+      "title": "credential resolution failure happens before lease acquisition",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:70dfbf39d4b5a657",
+      "title": "concurrent renewals are serialized without losing lease ownership",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b32ba368a5a1128e",
+      "title": "lease fencing prevents takeover until callback persistence finishes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:2d611611ef9f0859",
+      "title": "orphaned mutation locks fail closed instead of being reclaimed concurrently",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d7674889d1723acd",
+      "title": "lease ttl starts only after mutation lock acquisition",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:2d70759b53f145d6",
+      "title": "CLI config and status never print credential values",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:71d1c64f2d31cf15",
+      "title": "default config is stable JSON without credential values",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cecea864543ac73b",
+      "title": "progress snapshot and card expose only the required project facts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7839d67380ab01ca",
+      "title": "high-frequency progress is aggregated and updates one existing card",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:03645ac68aa1b50b",
+      "title": "new progress can enter the outbox while a slow network send is in flight",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:478ba096b176abe6",
+      "title": "a lost send response is retried with the same platform idempotency key",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5b1a9e981f86a8c0",
+      "title": "a newer snapshot survives an ambiguous older send and is applied after idempotent recovery",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e3f2c00899d10774",
+      "title": "critical events use a durable idempotency key across duplicate enqueue",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:51983e7797994e0e",
+      "title": "retryable and permanent delivery errors enter the correct outbox states",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ac3c2710e44e6d1d",
+      "title": "a missing progress card is retried as a new send instead of duplicating immediately",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6b1bc3e9751eaf8c",
+      "title": "restart reconcile retries ambiguous critical sends with the same platform idempotency key",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:deba01406357ed8b",
+      "title": "a crashed process stale mutation lock is recovered before enqueue",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0f58271003edc707",
+      "title": "official delivery errors preserve status and retry metadata for outbox classification",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b8447e6361ff6767",
+      "title": "official SDK adapter preserves HTTP status and Retry-After metadata",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:564cd4fe492ffcca",
+      "title": "official SDK adapter classifies the documented Feishu rate-limit code for 200 and 400 responses",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d232e603cc9e16ca",
+      "title": "persisted outbox payload must still match its allowlisted source after restart",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:780cb0af0543ef4d",
+      "title": "official HTTP 404 while updating a card clears the old message and schedules recreation",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:802f5e6b742b219b",
+      "title": "running connector projects local task facts and drains the outbox",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:4248151f08345a96",
+      "title": "project projection ignores Harness and Gate facts from another round or revision",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cfb617b3535859d4",
+      "title": "project projection follows the current Prepare hash when Harness head advances",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:eb458eb9d002a1ea",
+      "title": "unsafe card payloads are rejected and notification failures do not touch task state",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:50d261ca7143b372",
+      "title": "startup reconcile expires confirmations and requeues ambiguous outbox sends before networking",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3232adb96806a506",
+      "title": "dead letters require an explicit operator retry and retain deterministic delivery facts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:803636607ab20bb1",
+      "title": "central redaction removes credentials, Authorization data and raw platform identities",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:acb1b5279e893607",
+      "title": "supervisor retries transient preflight failures and records a safe operational state",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c3dcf5e2776f29fa",
+      "title": "disable is fail-safe and does not modify local task facts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:66ac8e5342de0391",
+      "title": "dead process inbox locks are reclaimed without stealing an active owner",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:831f79e858e37629",
+      "title": "continuous Gate rejects unknown actions, Controller Adapters and remote write entrypoints",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:316e59026ed878ac",
+      "title": "concurrent atomic transactions cannot recover or remove another writer journal",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7c566149223a7ec4",
+      "title": "guard continues within limits",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0460e35f871f89e4",
+      "title": "guard stops on absolute attempt budget",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f44852c8e5705107",
+      "title": "guard requests user on repeated error",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f22bb8942456419d",
+      "title": "guard requests user on no progress",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9bb2f4a29f0d7cf2",
+      "title": "guard stops on token budget",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:049b6b4c81d23469",
+      "title": "workspace rejects dirty repository and expired execution approval",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:eae371e4279a6837",
+      "title": "Harness enforces stage order and reconcile checks durable files",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:89b1b544e9705ccf",
+      "title": "Harness reconcile rolls stale collected evidence back to a rerunnable stage",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a006b7e56268a117",
+      "title": "Gate rejects shell dispatchers and records hard timeout",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:92e62ea0c8a9eeac",
+      "title": "Harness report rejects tampered gate artifact",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a113635e72dfd210",
+      "title": "Gate stability runs reject a check that only passes once",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1e8ceb2b50ef4c6e",
+      "title": "target spec check rejects placeholders and symlinked required files",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:13d28ff01eeb988f",
+      "title": "cross-root transaction writes both roots and recovers a prepared journal",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:df40025133f9bf74",
+      "title": "one hundred concurrent cross-root transactions are serialized without journal races",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e246e0f11f96126a",
+      "title": "cross-root transaction rejects symbolic journal and temp directories before writing",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8fe19c98e0bc7e27",
+      "title": "Harness report rejects Gate order changes after execution",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:871c9e7462f62b42",
+      "title": "artifact inspection is bounded, does not follow symlinks, and only proposes terminal worktrees",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e8f822bfe3730059",
+      "title": "explicit retirement refuses HEAD drift and preserves the committed recovery branch",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:55f95e53c32a53e3",
+      "title": "retention policy uses shared dependency caches and archives bounded authoritative Evidence idempotently",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:016efd129ede646d",
+      "title": "managed process settles after the root exits even when a detached grandchild holds its pipes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:45bb084e745ffc6e",
+      "title": "managed process hard timeout is independent from pipe drain timeout",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:12a07c318e7f2ae0",
+      "title": "an unidentifiable live managed child is killed and cannot report success",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bfe89a8188e99523",
+      "title": "a child that exits before its identity probe completes remains a valid fast result",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f0b4b29780752c7d",
+      "title": "repeated and concurrent termination cannot turn unverified pipe completion into stopped",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5b4fc711134fd20e",
+      "title": "aborting a lock waiter keeps the live holder and prevents late acquisition",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:57063c7831793183",
+      "title": "owned directory lock detects PID reuse and only releases its own nonce",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8bde922c2186166a",
+      "title": "unknown owner identity preserves both current and legacy live locks",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1707b87777691495",
+      "title": "a recovery mutex with unknown identity is never stolen after its protection period",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b0cc9448653ce87b",
+      "title": "owned directory lock protects a missing owner briefly and then reclaims it",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a43acac092951411",
+      "title": "owned directory lock protects a partially written owner and serializes concurrent recovery",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8d8b9fd0f7a1c344",
+      "title": "owned directory lock release failure does not mask the operation error",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:58ca9c6407d52176",
+      "title": "owned directory lock maxWaitMs zero never waits for a live recovery owner",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:806227f0bcb8d81b",
+      "title": "latest-value writer coalesces queued heartbeats and flushes the terminal snapshot",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:4992f6aeacbd40a3",
+      "title": "control-plane operation timeout fails closed with a bounded diagnostic",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:13a4caf8507614e6",
+      "title": "Playwright Gate runs target-local CLI, proves tests ran, and hashes browser artifacts",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3eb4362b1d472fd4",
+      "title": "Playwright Gate discovers a target-local CLI in a nested web package",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b6fcbb65e55e8053",
+      "title": "Playwright Gate rejects flaky, skipped, missing HTML, invalid image and timeout evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:70ec6b9adfe25109",
+      "title": "Playwright Gate rejects a successful process that executed zero tests or produced no screenshot",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a0ef41b13ba2754a",
+      "title": "Playwright Gate allows screenshot-free functional evidence when the Gate explicitly opts out",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e32e284d35c2ec8e",
+      "title": "Playwright Gate rejects an installed CLI that is not pinned by a tracked lockfile",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c610593486dd0d91",
+      "title": "Playwright Gate does not accept a similar pnpm package name as the runner lock",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cae9594729059066",
+      "title": "Playwright Gate accepts the exact runner version from a tracked pnpm lockfile",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d00f6f1f27d1a0e9",
+      "title": "Playwright Gate requires screenshots when it covers a visual Review AC",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e12b39ce358dbc2c",
+      "title": "Playwright Gate accepts exact Yarn Berry locks and rejects similar package names",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d17dffb8e413b273",
+      "title": "Playwright Gate fingerprints tracked deletions and rejects legacy Collect Evidence without a content fingerprint",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9956e78efc731c85",
+      "title": "required process identity rejects a missing start time",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:3f951238f72be5fe",
+      "title": "process inspection distinguishes an unknown identity from death and PID reuse",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cf8a20ce4f7d63cb",
+      "title": "verified termination falls back to a direct PID for a non-process-group child",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0e8f2371180492dc",
+      "title": "PID identity mismatch fails closed and does not signal an unrelated process",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b88ba43094835a83",
+      "title": "a failed identity query does not certify a live process as stopped",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f78016b310e153dd",
+      "title": "termination shares one absolute deadline across slow identity probes",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6dd6666c5130016c",
+      "title": "substantive checks preserve domain precision words but reject bare placeholders",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1",
+        "T045-AC-2"
+      ]
+    },
+    {
+      "id": "node:0c762a64e712ed0a",
+      "title": "project init, provider doctor and rebuildable task queries",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7640a0f956b5adff",
+      "title": "proposal requires approval before task creation and registry rebuilds from task dirs",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:92397253c1599087",
+      "title": "project default protocol requires complete v2 contracts without migrating existing v1 tasks",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:6666a4d04bfaa56a",
+      "title": "approved proposal explicitly adopts a matching named draft target task",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8a7e08fbf19496de",
+      "title": "task creation fails closed when multiple target specs match one ID",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:49482c5d7cf97002",
+      "title": "fullstack proposals route backend TASK and frontend WEB-TASK into their source specification libraries",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ed226baeb4ef1b30",
+      "title": "runtime diagnostics coalesce and invalidate on executable or argument changes; explicit doctor stays fresh",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a24fc1ebc3fb592f",
+      "title": "noise, repeated messages, stderr and increasing usage do not prolong useful progress",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:62e7f05ea91cdd2b",
+      "title": "usage is parsed once across chunk boundaries and UTF-8 fragments",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bc04b94ec18145bc",
+      "title": "cumulative usage cannot move backwards or contradict its components",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:25c555557dc88884",
+      "title": "incremental receipts deduplicate replay and reject changed events",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cbc439ef30ab445f",
+      "title": "oversized lines are bounded and cannot silently lose usage accounting",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:42a75e1b23aacb3f",
+      "title": "ordinary large Codex tool records retain later usage accounting",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5d54e425eee9fb30",
+      "title": "split cumulative components merge without undercounting or false backwards errors",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:47ce971e6ae2750e",
+      "title": "usage within one envelope is counted independently and replayed exactly once",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bacb4fa4d6b0dbdc",
+      "title": "changing numeric JSON telemetry does not renew useful progress",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1e737108a41626af",
+      "title": "report-only scheduler is canonical, measurable, read-only to Tasks, and fail closed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:cc07f3b7745f4915",
+      "title": "report-only keeps planned and working v1 tasks visible without calling them dispatch ready",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:776b33ca045a75ba",
+      "title": "report-only rejects private source text and duplicate feedback without publishing false metrics",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e95c1611f55a1ed4",
+      "title": "damaged wave-review holds fail closed and valid holds use a generic report reason",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e4b349400d9b82e6",
+      "title": "versioned repository root contains only current engineering responsibilities",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:d3a099e22b7a1ad7",
+      "title": "current documentation local links resolve after delivery archive moves",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:16259f3442c204dd",
+      "title": "required visual review blocks verification until revision-bound human approval",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7ca91b9d5e374749",
+      "title": "visual approval is invalid after revision drift or screenshot tampering",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1fb14711824bb9c6",
+      "title": "visual review request only accepts image evidence",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:06e0aeac12b2e813",
+      "title": "visual review rejects a symbolic parent directory",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:4de0791164b85ab6",
+      "title": "visual review rejects a symbolic transaction directory before writing temporary data",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ae446ff904b7f299",
+      "title": "visual contract downgrade and decision projection forgery are rejected",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:262a61713a1b84a4",
+      "title": "scheduler leases fence stale workers, serialize conflicting resources, and honor Pause/Kill",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:87a7486b41df32b6",
+      "title": "wave executor concurrently dispatches Ready Tasks within elapsed, token and cost ceilings",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ba1f5f75eb1ff44f",
+      "title": "dead wave drivers are reconciled into an explicit requeue state",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:73d35d6985f7a49e",
+      "title": "independent Supervisor survives its caller and automatically closes a dead Driver task",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:32cc195aa826943b",
+      "title": "Supervisor verifies a timed-out watchdog has exited before it starts another cycle",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:70a9b65abb425083",
+      "title": "test-mode Supervisor self-terminates at its bounded runtime",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b79ef6a0958ba559",
+      "title": "persistent Supervisor circuit blocks automatic restart until explicit reset",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:2eb05dedb4d3e334",
+      "title": "run-ready Supervisor bootstrap replaces a live process with a stale heartbeat",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:fe6835d3d9c8856e",
+      "title": "invalid and future heartbeats cannot be healthy and damaged records do not hide healthy siblings",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:31b5a5e21b9f31e2",
+      "title": "a hanging stop batch returns within its total budget, continues independent stops, and never publishes late completion",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:86206567990ac826",
+      "title": "an old watchdog observation cannot cancel a new healthy execution or a recovered effect",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:ddc748d8403eb159",
+      "title": "a verified direct stop settles its observed intent without overwriting a newer request",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bafdaea2b1521e21",
+      "title": "old wave recovery and watchdog observations cannot cancel a newer leased invocation",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0bcaef37bf45df9a",
+      "title": "failed Project lease admission leaves no running wave for later recovery",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:307a72dcd967dd49",
+      "title": "versioned target-spec manifest is complete and every bundled asset loads",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:0d1bbf77c19c6680",
+      "title": "published target-spec releases remain byte-for-byte immutable",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:012e5a116751046a",
+      "title": "current backend, frontend and fullstack profiles load the split source specification libraries",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7adcfe794399afef",
+      "title": "backend and frontend profiles install only their own specification library at the source root",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:19d52daa5e503193",
+      "title": "fullstack profile installs source-owned main and satellite specs, preserves files, and validates WEB-TASK traces",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:07bfc4150edb673d",
+      "title": "Spec-Loop own specification library passes the shared checker",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:a59be817a6ec574e",
+      "title": "project init and spec-init share assets, fill gaps and never overwrite entries",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:84e8fac9f913c9f8",
+      "title": "placeholder detection rejects unresolved values but permits explanatory prose and code",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e2ca66f8fbb6b90f",
+      "title": "spec-check accepts legal IDs with optional kebab-case names and prose terms",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9540848828ccda80",
+      "title": "spec-check adversarially rejects invalid names, IDs, statuses, placeholders and traces",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:894eaf0b79ee7ac0",
+      "title": "spec-init and spec-check reject symlinked specification layers",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9fe4a91da260853f",
+      "title": "spec-init and spec-check reject symlinked ancestors of a nested spec_root",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c71bd2c4f366bd5e",
+      "title": "timed-out queued heartbeats cannot replace a completed terminal state or replay from a journal",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8639ad3b673f0760",
+      "title": "timed-out queued heartbeats cannot replace a removed terminal state or replay from a journal",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:f4db890cc28ed4e7",
+      "title": "aborted telemetry never creates a file even without a following terminal write",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:07ecfcf75330075d",
+      "title": "conditional telemetry removal leaves a replacement owner intact",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b21446993ab863f4",
+      "title": "Supervisor startup heartbeat timeout releases its lock and signal listeners",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:49fcf8a4d506a2b2",
+      "title": "v2 Gate Planner and Spring T2 evidence are scoped, hashed, and fail closed",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:9f2d746219c25ae2",
+      "title": "automatic view respects CI, noninteractive sessions and --no-view",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b4ffc1987e0187b4",
+      "title": "automatic view reuses the managed start path and prints its URL",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:5e9f4246c29c2d9f",
+      "title": "view or browser startup failure does not fail the task command",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:7dce6e5dc487415e",
+      "title": "a batch waits for every M, then every V, before starting R",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:8b2648a4c47e203a",
+      "title": "the whole batch gets one consolidated repair and no third verification",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:866ff863af1b0b3d",
+      "title": "R failure joins the same repair, and repeated or held actions cannot spin",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e706a4a22600da94",
+      "title": "a Task awaiting human review does not block independent V-passed Tasks from R",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c6a279564f978b17",
+      "title": "a new wave leaves unrelated drifted Candidates outside its scope",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b946cd17d1ceab1e",
+      "title": "a crashed authorization Worker becomes failed while living or unknown owners remain protected",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:c3b3dc21929e6b42",
+      "title": "failed wave finalization is bounded, retains its Candidate and pauses further dispatch",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:2428ff400e5ac068",
+      "title": "concurrent review refreshes cannot overwrite a newer Task hold",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:b9af5945a9bd9ed8",
+      "title": "a wave repairs V failures without renewed HEAD authorization, then atomically reviews a subset and authorizes bounded continuation",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:28ab03f7c8a07df5",
+      "title": "a fresh wave stops after its second V failure without scheduling a third M",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:bd5d1c6397c3b1d9",
+      "title": "ordinary needs_user lets independent Tasks reach R and keeps unreviewed Tasks parked",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:e7aedea6287840a7",
+      "title": "missing RESULT fields are rejected and explicit rework releases old invalid results for a fresh V/R",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "node:1842eb2ac0ad8f6c",
+      "title": "older pending reviews remain listed and damaged records do not hide valid reviews",
+      "result": "PASS",
+      "gate": "execution-view-heavy-full",
+      "target_ac": [
+        "T029-AC-6",
+        "T046-AC-1"
+      ]
+    },
+    {
+      "id": "playwright:30af7a37c3e9fb8b",
+      "title": "desktop and 390px execution view show the current Task without browser errors",
+      "result": "PASS",
+      "draft_gate": "execution-view-heavy-e2e",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-5"
+      ]
+    },
+    {
+      "id": "playwright:4e559be01db6064b",
+      "title": "untrusted project name renders as text and cannot execute browser code",
+      "result": "PASS",
+      "draft_gate": "execution-view-heavy-e2e",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-5"
+      ]
+    },
+    {
+      "id": "benchmark:cold_ms",
+      "title": "200×200 冷重建",
+      "result": "PASS",
+      "actual_ms": 1417,
+      "limit_ms": 2000,
+      "draft_gate": "execution-view-heavy-benchmark",
+      "target_ac": [
+        "T029-AC-2"
+      ]
+    },
+    {
+      "id": "benchmark:incremental_ms",
+      "title": "单事件增量投影",
+      "result": "PASS",
+      "actual_ms": 298,
+      "limit_ms": 500,
+      "draft_gate": "execution-view-heavy-benchmark",
+      "target_ac": [
+        "T029-AC-2"
+      ]
+    },
+    {
+      "id": "benchmark:page_visible_ms",
+      "title": "单事件页面可见",
+      "result": "PASS",
+      "actual_ms": 324,
+      "limit_ms": 500,
+      "draft_gate": "execution-view-heavy-benchmark",
+      "target_ac": [
+        "T029-AC-2"
+      ]
+    },
+    {
+      "id": "dogfood:PROJ-SPEC-LOOP",
+      "title": "PROJ-SPEC-LOOP 缓存删除重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 17,
+      "expected": 17,
+      "draft_gate": "execution-view-heavy-dogfood",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-5",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood:PROJ-QUANT-SYSTEM",
+      "title": "PROJ-QUANT-SYSTEM 缓存删除重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 17,
+      "expected": 17,
+      "draft_gate": "execution-view-heavy-dogfood",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-5",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood:PROJ-OFFSHORE-ELECTRICAL-MANAGEMENT",
+      "title": "PROJ-OFFSHORE-ELECTRICAL-MANAGEMENT 缓存删除重建与固定时刻一致性",
+      "result": "PASS",
+      "reconstructed": 68,
+      "expected": 68,
+      "draft_gate": "execution-view-heavy-dogfood",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-5",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood-browser:root:1440",
+      "title": "PROJ-SPEC-LOOP 1440px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "f1c59312871d2e097b8d31710fe909bfaa8d49782c3d039ac69d20eeac9cc4e9",
+      "detail_sha256": "fa084c9fc6844cd9ac19edaf0e743b0d2ca5514dc19d948803c21aa541c2d27d",
+      "draft_gate": "execution-view-heavy-browser",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood-browser:root:390",
+      "title": "PROJ-SPEC-LOOP 390px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "72cff840638c9da98ae8746aba0b9b6cc7cbe94980f334e9a1aad825286bfc8b",
+      "detail_sha256": "93684f228a6263f16f2fb7ca352584dbcddcf1ba48a1d3acf1702945bc8819c1",
+      "draft_gate": "execution-view-heavy-browser",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood-browser:project:quant-system:1440",
+      "title": "PROJ-QUANT-SYSTEM 1440px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "a9790469a3552a0215cba0584725c5213b56be5a01e08f6a8e2d568fb48fb662",
+      "detail_sha256": "ccc6b223ed032bd64f7328a6fe42e2e8da0a919cb656178bfc9f7fc30b037ac4",
+      "draft_gate": "execution-view-heavy-browser",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "dogfood-browser:project:quant-system:390",
+      "title": "PROJ-QUANT-SYSTEM 390px 任务详情路径",
+      "result": "PASS",
+      "screenshot_sha256": "de8817ad2877aca6217d4b41a4aab184ddec2551c24db0c099719b31965f2ace",
+      "detail_sha256": "3e4125626f828c379f47ba8fb413dde2111a084bd498425902a66c2f10273f9b",
+      "draft_gate": "execution-view-heavy-browser",
+      "target_ac": [
+        "T029-AC-1",
+        "T029-AC-4",
+        "T029-AC-8"
+      ]
+    },
+    {
+      "id": "wave-review-browser",
+      "title": "波次 Review GUI、受控下一轮、窄屏与证据绑定",
+      "result": "PASS",
+      "facts": [
+        "a damaged historical review is reported without blocking valid wave decisions",
+        "batch review shows its verification round and unresolved state",
+        "needs_user Task releases resources while an independent Task reaches R",
+        "one GUI decision accepts a subset and starts exactly the authorized next Task",
+        "next wave automatically advances M → controlled V → independent R at a new HEAD",
+        "saved decisions update both the wave selector and the candidate row",
+        "registered screenshots are readable and approval binds the current request hash",
+        "mobile review keeps task rows horizontally scrollable",
+        "no browser console errors, merge, push or deployment"
+      ],
+      "screenshot_count": 7,
+      "draft_gate": "phase4-wave-review-browser-fixture",
+      "target_ac": [
+        "T037-AC-1",
+        "T037-AC-4"
+      ]
+    },
+    {
+      "id": "scheduler:root-v1-not-ready",
+      "title": "当前 Project 的 TASK-026/028 v1 均不可派发",
+      "result": "PASS",
+      "draft_gate": "report-only-v1-targeted",
+      "target_ac": [
+        "T044-AC-1",
+        "T044-AC-3",
+        "T037-AC-3"
+      ]
+    },
+    {
+      "id": "scheduler:root-canonical-repeat",
+      "title": "当前 Project 连续扫描 canonical 等价",
+      "result": "PASS",
+      "draft_gate": "report-only-v1-targeted",
+      "target_ac": [
+        "T044-AC-2"
+      ]
+    },
+    {
+      "id": "scheduler:offshore-v2-ready",
+      "title": "海工 v2 WEB-TASK-013 的 Ready 与受控预览一致",
+      "result": "PASS",
+      "draft_gate": "report-only-v1-targeted",
+      "target_ac": [
+        "T044-AC-2"
+      ]
+    },
+    {
+      "id": "scheduler:root-missing-data-zero",
+      "title": "当前 Project report-only 扫描 missing_data 应为 0",
+      "result": "FAIL",
+      "actual": 1,
+      "expected": 0,
+      "reason": "TASK-045 已批准 v2 Contract 引用未受管的历史 TASK-032",
+      "target_ac": [
+        "T037-AC-3"
+      ],
+      "report": ".spec-loop/output/ROUND3-7f5cacd-scheduler-root-1.json"
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 # FEAT-004：批准后的受控自动闭环
 
-- 状态：进行中
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-07-12
-- 最后更新：2026-09-04
+- 最后更新：2026-10-02
 - 所属产品：[PROD-001](../01-product/PROD-001-local-spec-loop.md)
 - 所属阶段：Phase 4
 
@@ -52,8 +52,12 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 | Task | [TASK-041 候选质量兼容示例配置与 CRLF](../04-task/TASK-041-candidate-quality-portable-files.md) | 已完成 |
 | Task | [TASK-042 v2 Controlled V 自动冻结候选](../04-task/TASK-042-v2-controlled-v-harness-freeze.md) | 已完成 |
 | Task | [TASK-043 仓库 Bash Gate 精确授权](../04-task/TASK-043-approved-repository-bash-gates.md) | 已完成 |
-| Task | [TASK-045 Proposal 领域术语误判缺陷](../04-task/TASK-045-proposal-unknown-domain-term.md) | 进行中 |
-| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
+| Task | [TASK-045 Proposal 领域术语误判缺陷](../04-task/TASK-045-proposal-unknown-domain-term.md) | 已完成 |
+| Task | [TASK-049 受管 Gate 失败指纹误合并](../04-task/TASK-049-controlled-gate-failure-fingerprint.md) | 已完成 |
+| Task | [TASK-050 M 提交前 Contract 依赖修订](../04-task/TASK-050-unstarted-v2-contract-correction.md) | 已完成 |
+| Task | [TASK-051 Proposal 内嵌占位缺陷](../04-task/TASK-051-embedded-proposal-placeholders.md) | 已完成 |
+| Task | [TASK-052 失败数字身份与顺序稳定性](../04-task/TASK-052-controlled-gate-fingerprint-identity-order.md) | 已完成 |
+| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已完成 |
 
 ## 实际交付
 
@@ -64,6 +68,7 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 - TASK-041 的候选文件名策略与 CRLF 空白检查在 `eca847d` 独立 Light V/R PASS；真实环境/私钥与尾随空格继续拒绝。
 - TASK-042 的 Controlled V 自动冻结干净候选在 `eca847d` 独立 Light V/R PASS；HEAD、Workspace、内容指纹与 collect Evidence 持续绑定。
 - TASK-043 的仓库 Bash Gate 在 `4366ed8` 独立 Light V/R PASS；命令、完整 P 契约、当前 Run、脚本真实路径及可信解释器/PATH 均在 Gate 前约束。真实业务 Gate 和最终 Phase 4 Heavy 另按对应工单验收。
+- TASK-045/051 的 Proposal 校验在 `8ed8b89` 通过定向 Gate 和独立 V/R；TASK-050 的 P Contract 依赖修订在 `b25019b` 通过定向 Gate 和独立 V/R，并将实际 TASK-045 修订至版本 2、报告型缺失数降至 0。TASK-049 在 `b587ed0` 通过定向 Gate 和独立 V/R，失败指纹保留用例数字身份并忽略 TAP 顺序；TASK-052 在集成 `c45dea6` 全量质量 326/326 后关闭。
 
 ## 变更记录
 
@@ -77,3 +82,11 @@ P 在创建规格和 Task 时同步形成验收契约并等待人批准；批准
 | 2026-09-29 | 完成候选质量兼容验收 | TASK-041 独立 V/R PASS；同 HEAD 定向长测试复用，未放宽敏感文件拒绝 | TASK-041 |
 | 2026-09-29 | 完成 Controlled V 自动冻结验收 | TASK-042 独立 V/R PASS；脏树、候选漂移与旧未完成 Harness 阶段拒绝 | TASK-042 |
 | 2026-09-29 | 完成仓库 Bash Gate 精确授权验收 | TASK-043 独立 V/R PASS；伪契约、自洽但脱离 Run 的契约及 PATH 假程序均拒绝或隔离 | TASK-043 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-054 已批准工单导入与 TASK-058 Standard/Heavy 无人工介入 Dogfood 完成；TASK-037 当前候选 8/8 Gate、独立 V/R PASS，用户最终 Heavy/Phase 4 阶段决定待办。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-037 当前 `2ebee82` 候选 8/8 Gate、真实 Standard/Heavy Dogfood、独立 V/R、视觉 Review 与用户最终 Heavy/Phase 4 验收通过；FEAT-004 已完成。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

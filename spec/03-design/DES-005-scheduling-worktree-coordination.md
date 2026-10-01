@@ -1,6 +1,6 @@
 # DES-005：Scheduling、Worktree 与资源协调
 
-- 状态：已批准
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-07-12
 - 最后更新：2026-09-30
@@ -143,9 +143,9 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 |---|---|---|---|
 | [TASK-034](../04-task/TASK-034-report-only-scheduler.md) | 幂等 report-only 扫描、建议与质量指标 | TASK-032 | 已完成 |
 | [TASK-035](../04-task/TASK-035-scheduler-leases-controls.md) | Lease、fencing、resource claim、Pause/Kill 和受控 Ready 调度 | TASK-034 稳定 | 已完成 |
-| [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书真实连接器专项 Heavy | 真实配置、TASK-021～025 | 已批准 |
-| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 自动闭环最终 Heavy | 全部 Phase 4 子 Task | 已批准 |
-| [TASK-044](../04-task/TASK-044-report-only-v1-false-ready.md) | Report-only v1 Ready 误报修复 | TASK-034 已完成 | 进行中，第二轮技术复测通过 |
+| [TASK-026](../04-task/TASK-026-feishu-heavy-dogfood.md) | 飞书真实连接器专项 Heavy | 用户撤下功能，历史实现保留 | 已取消 |
+| [TASK-037](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | Phase 4 自动闭环最终 Heavy | TASK-029；本地确认 | 已完成 |
+| [TASK-044](../04-task/TASK-044-report-only-v1-false-ready.md) | Report-only v1 Ready 误报修复 | TASK-034 已完成 | 已完成，`78bfd70` 受管 M/V/R 与 targeted Gate PASS |
 
 ## 实际实现
 
@@ -153,6 +153,7 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 - 第一轮新证据：当前 Project 的 report-only 把 TASK-026/028 两项 v1 `resumable` 标为 Ready，而受控派发预览为空；`TASK-026` 只是不得启动的历史壳。TASK-044 在第二轮使 report-only Ready 与受控可派发语义一致，保持 v1 工单可见且明确人工流程，不修改已完成 TASK-034 的历史结论。
 - 第二轮隔离组合候选 `49612eb`：TASK-026/028 保持可见但 `ready=false`，连续扫描 canonical 等价；海工 v2 `WEB-TASK-013` 仍 Ready 且与受控只读预览一致。正式 V/R 与阶段指标门槛仍待完成。
 - 续执行候选 `e5ddd81`：TASK-044 targeted Harness Gate 4/4 及完整技术复测通过；TASK-026 v1 planned、已交付的 TASK-028 v1 均非 Ready，当前 v2 TASK-044 与海工 `WEB-TASK-013` 的 Ready 和受控预览相符。TASK-037 report-only 门槛已按用户委托量化；独立 V/R 与最终 Heavy 尚未完成。
+- 第四轮 `78bfd70`：TASK-044 对 v1 `planned`、`working`、`verifying`、`iterating` 的 Ready 判定完成回归，当前 HEAD targeted 4/4、独立 V/R PASS，Candidate 已形成；该缺陷工单关闭。TASK-037 当前 Project 的 `missing_data=1` 仍须通过 TASK-045 Contract 修订处理，不混同 TASK-044 的误报修复。
 
 ## 变更记录
 
@@ -178,3 +179,11 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 ### 2026-09-27：启动与巡检开销
 
 内部 Provider Doctor 以 executable stat 身份、参数和运行环境作为 30 秒复用键，并发共用检查；失败清除缓存，显式 Doctor 始终重新检查。启动探针只复用相同配置内容、凭据内容、可执行文件身份与权限能力的结果：V/R 启动能力相同，正式角色执行与 Candidate snapshot 仍分别隔离；M 单独探测。mtime 变化不作配置内容变化。探针使用项目外独立临时 Git workspace，避免继承目标工程的目录说明；终止未经核验时保留现场。健康检查只在本次调用内复用租约与执行记录，任何实际停止或恢复都重新读取锁内权威状态，不跨巡检周期缓存所有权。
+
+## 2026-10-01 第九轮技术验收同步
+
+当前 Project 与海工 Project 各两次 report-only 扫描 canonical 相同、`missing_data=0`，Ready 与同刻只读 `run-ready` 预览完全一致；TASK-037 Scheduler 12/12 与安全对抗 6/6×2 PASS，独立 V/R 通过。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-037 双 Project 重复 report-only 扫描 canonical 等价、`missing_data=0`，Ready 与同刻只读预览一致；受控 Scheduler/安全对抗和独立 V/R PASS，用户最终 Heavy/Phase 4 验收通过。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

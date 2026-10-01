@@ -122,7 +122,7 @@ Phase 3 T1 runner、TASK-016 验证范围规范和 TASK-019 Playwright Web Gate 
 
 - 已实现：T1 runner 使用固定 cwd、受限环境、timeout，记录退出码、stdout/stderr、artifact hash 与真实 Git HEAD；显式 Playwright Web Gate 解析原生 JSON、归档 HTML/截图/附件 Manifest，并由 Harness Report 复核；显式 task/wave、targeted/full、数据库生命周期和 AC 映射会进入 Gate Evidence。
 - 已完成：TASK-036 的 v2 Gate Plan 与 Spring Boot Maven/Gradle/Java/module 发现、Surefire/Gradle JUnit 和 JaCoCo Evidence 在 `af57702` 独立 V/R PASS；计划校验批准契约追踪，原生报告绑定同 HEAD 已验证 Gate、环境和候选内容指纹，新增或篡改报告失效。
-- 已完成：TASK-038 的本机 `products/example-app/1.0.0/` 出口、manifest/SHA256SUMS 与 Git 忽略边界在 `eca847d` 独立 V/R PASS；示例 APK 与源构建物字节哈希一致。版本目录不在 Git HEAD 中，源码为未提交工作树，不能据此推断可重构或真机验收。
+- 已完成：TASK-038 的本机 `products/` 下按工程标识和版本分层的出口、manifest/SHA256SUMS 与 Git 忽略边界在 `eca847d` 独立 V/R PASS；示例 APK 与源构建物字节哈希一致。版本目录不在 Git HEAD 中，源码为未提交工作树，不能据此推断可重构或真机验收。
 - 未实现：自动 Web 检测；Xcode/iOS、微信小程序的 T2/T3 平台预设和原生结果解析（按本设计保留为后续独立工单）。
 
 ## 变更记录
@@ -137,3 +137,7 @@ Phase 3 T1 runner、TASK-016 验证范围规范和 TASK-019 Playwright Web Gate 
 | 2026-07-26 | 增加 coverage 与数据库生命周期门禁 | 非 Heavy 只跑定向 Gate，普通验证复用长期数据库 | TASK-016 |
 | 2026-09-04 | 将 v2 Gate Planner 与 Spring Boot T2 拆为 TASK-036 | 对齐 P 契约、Controller 计划、V 执行和 R 证据复核边界 | TASK-036 |
 | 2026-09-29 | 本机成品出口完成定向验收 | TASK-038 的目录、清单、哈希和忽略规则独立 V/R PASS；保留本机证据边界 | TASK-038 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-059 已将 Spring T2 PASS 绑定目标工程测试前后相同的干净 HEAD，真实 Maven 2/2 PASS；TASK-062 修复隔离工作树的 Playwright CLI 本地依赖，最终受控 E2E 2/2 及截图归档 PASS。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。

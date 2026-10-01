@@ -1,6 +1,6 @@
 # DES-009：执行事件、可重建投影与本地观察面
 
-- 状态：已批准
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-08-12
 - 最后更新：2026-08-31
@@ -240,8 +240,9 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 |---|---|---|---|
 | [TASK-027](../04-task/TASK-027-execution-events.md) | 项目级事件协议、writer、全入口埋点、恢复与协议测试 | Phase 3 现有 Task/Harness | 已完成 |
 | [TASK-028](../04-task/TASK-028-execution-view.md) | Projection Builder、snapshot CLI、本地服务和 Web UI | TASK-027 | 已完成 |
-| [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | v2 Heavy：旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood、独立 V/R | TASK-027、TASK-028 | 已批准 |
-| [TASK-033](../04-task/TASK-033-pmvr-execution-observability.md) | v2 P/M/V/R、Conflict、Inbox、Candidate 事件与观察面 | TASK-027、TASK-028、TASK-032 | 待验证 |
+| [TASK-029](../04-task/TASK-029-execution-view-hardening.md) | v2 Heavy：旧数据 Adapter、安全/性能/浏览器 Gate、真实项目 Dogfood、独立 V/R | TASK-027、TASK-028 | 已完成 |
+| [TASK-033](../04-task/TASK-033-pmvr-execution-observability.md) | v2 P/M/V/R、Conflict、Inbox、Candidate 事件与观察面 | TASK-027、TASK-028、TASK-032 | 已完成 |
+| [TASK-048](../04-task/TASK-048-execution-view-startup-under-load.md) | 全量负载下的后台启动时限与安全清理回归 | TASK-029 集成验证 | 已完成 |
 
 ## 实际实现
 
@@ -249,6 +250,7 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 - 与设计差异：首版仅展示安全的 Artifact/Evidence 逻辑引用，不提供 `/api/artifacts/:ref` 内容读取；旧 Harness 非 Gate 阶段暂不根据弱时间点生成 derived 区间；事件存储当前在锁内原子重写完整 JSONL，增量索引与大规模性能优化留给 TASK-029。
 - 运维/迁移说明：旧项目无需迁移；启用新版本后从基线事件开始记录完整时间。
 - 关联完成工单：TASK-027（`e399565` 独立 V/R PASS）。
+- 第五轮完整测试在 `4f7fb6e` 发现视图启动时限失败；TASK-048 在 `75a9c91` 通过定向 Gate 2/2 与独立 V/R，父/子进程身份探测和健康轮询并行，marker 身份与停止时 fail closed 保留。集成 `246cecd` 七组 Heavy Gate 与 Node 322/322 PASS；最新集成 HEAD 的完整质量结果另行归档，TASK-029 Heavy 决定仍待用户。
 
 ## 变更记录
 
@@ -275,3 +277,12 @@ Round 详情额外显示“明细覆盖 / Round 总耗时 / 显式等待 / 未�
 | 2026-09-29 | 修复窄屏页眉并更新候选 | `03cb2aa` 将 390px 页眉分为两行，工程选择框与连接状态不再遮挡；TASK-028 正式 Gate 3/3 及 TASK-028/033 新截图通过，独立复核与人工视觉决定待办 | TASK-028、TASK-033 |
 | 2026-09-30 | 修复平板宽度溢出 | `6eef0ca` 在 920px 以内将波次导航置于内容上方，并精简页眉；820/900/921px 浏览器回归无页面横向溢出，正式 Gate 3/3 通过 | TASK-028、TASK-033 |
 | 2026-09-30 | 完成 TASK-028 v1 交付 | `6eef0ca` 在当前环境重新执行受管定向 Gate 3/3，技术 V/R 与两张截图哈希重绑；Codex 按用户委托作视觉决定，EV-1 与 v1 Delivery 完成。TASK-029 Heavy 仍单独验证兼容、安全和性能 | TASK-028 |
+| 2026-09-30 | TASK-033 视觉收口 | `6eef0ca` 当前截图、技术 V/R 与 Codex 委托视觉判断完成；TASK-033 已完成，TASK-029 Heavy 保持独立 | TASK-033 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-029 当前 `3be7123` Heavy 7/7、Node 326/326、独立 V/R 与当前 revision 八张截图视觉 Review PASS；TASK-037 波次 Review 真实浏览器 Gate 及七张截图、当前 revision `REVIEW-1` 均 PASS。两单最终用户 Heavy 决定仍待办。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-029 精确候选 `3be7123` 的 Heavy 7/7、独立 V/R、八张当前截图视觉 Review 与用户最终 Heavy 验收通过；设计差异与旧数据 unknown 边界按现有记录接受，关联工单已关闭。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

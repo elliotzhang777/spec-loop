@@ -53,6 +53,7 @@
 - 兼容约束：未来能力不得削弱已实现的状态、Evidence、Guard 和 Heavy 要求。
 - 执行与验收授权：已批准 Task 按各自规格、权限、Gate 计划和预算连续完成实现、自测与 V/R；纳入规格库轮次不扩大授权。候选变化只作废旧验证证据及最终验收决定，不撤销范围内执行授权。普通人工确认集中到轮次裁决，交付、视觉/Heavy/阶段验收和外部动作仍须明确决定。
 - 规格库轮次节奏：每轮盘点全部未完成 Task 及全部批准用例，按依赖推进具备条件的工作；集成冻结候选后按完整矩阵集中测试、独立 V/R 和人工裁决。失败用例归因后形成缺陷 Task，下一轮连同原未完成 Task 一起修复并重测完整适用矩阵；外部阻塞及未决事项保留原因。Task 是最小验收单位，波次仅作内部调度和证据分组，不再作为向用户逐次请求推进的单位。已有在途 Task 保留原协议与预算。
+- 连续轮次的停止门槛：以启动时全规格库未完成 Task 数为固定基线；新缺陷 Task 加入剩余数。完成当前轮次验证后，剩余数严格小于基线的 10%，或严格小于 3，才向用户提交全部剩余问题供其决定是否做完。阻塞项仍算未完成，门槛不改变 Gate、V/R 或人工验收要求。
 
 ## 特性拆分
 
@@ -65,7 +66,7 @@
 | [FEAT-005 Scheduling 与隔离](../02-feature/FEAT-005-scheduling-isolation.md) | 报告型调度、并发隔离和安全控制 | P1 | 草稿 |
 | [FEAT-006 工程 Toolchain](../02-feature/FEAT-006-engineering-toolchains.md) | 自动构建、测试并生成平台证据 | P1 | 进行中 |
 | [FEAT-007 Portfolio 与持续优化](../02-feature/FEAT-007-portfolio-capability-optimization.md) | 多项目组合、能力资产和优化治理 | P2 | 草稿 |
-| [FEAT-008 飞书进度通知与确认连接器](../02-feature/FEAT-008-feishu-progress-approval-connector.md) | 远程查看任务进度并安全完成必要人工卡点 | P1 | 已批准 |
+| [FEAT-008 飞书进度通知与确认连接器](../02-feature/FEAT-008-feishu-progress-approval-connector.md) | 历史设计与实现保留，当前不启用 | P1 | 已取消 |
 | [FEAT-009 可重建执行可视化](../02-feature/FEAT-009-execution-visualization.md) | 查看当前任务/步骤、历史耗时和 Evidence 路径 | P1 | 进行中 |
 
 ## 实际结果
@@ -90,6 +91,11 @@
 - 2026-09-29 TASK-041 候选质量兼容在 `eca847d` 独立 Light V/R PASS；公开示例配置和 CRLF 可用，真实敏感文件与尾随空格继续拒绝。
 - 2026-09-29 TASK-042 v2 Controlled V 自动冻结在 `eca847d` 独立 Light V/R PASS；缺失旧 Harness state 可安全生成 collect 证据，漂移和脏树继续拒绝。
 - 2026-09-29 TASK-043 仓库 Bash Gate 在 `4366ed8` 独立 Light V/R PASS；完整 P 契约与当前 Run 绑定，实际解释器和 PATH 固定，伪契约及假程序绕过已关闭。真实海工 Gate 和最终 Heavy 仍待各自验证。
+- 2026-09-30 TASK-046 全量质量套件并发稳定性缺陷在 `9e95565` 完成定向 Gate 与独立 V/R，形成 Candidate；同 tree 的历史完整 Heavy 为 `7f5cacd` 7/7，新的集成候选仍由 TASK-029 负责复测。
+- 2026-09-30 用户撤下飞书功能，FEAT-008 与 TASK-026 已取消，连接器保持禁用；Phase 4 最终 Heavy 改验本地确认路径。第四轮 `36c631a` 全量质量 320/321，固定等待竞态转 TASK-047，第五轮复测中。
+- 2026-09-30 第五轮 `4f7fb6e` 七组 Heavy 6/7、Node 320/321，后台视图启动超时转 TASK-048；不同失败根因误合并转 TASK-049。TASK-045 的批准 Contract 依赖修订缺少合法 M 前恢复入口，转 TASK-050 并获 P 批准。第六轮候选 `246cecd` 后续按原 full Gate 复验，旧 HEAD 结论不自动沿用。
+- 2026-10-01 第六轮：`246cecd` 七组 Heavy Gate、Node 322/322 与独立 V/R PASS；TASK-045、047～051 已按各自定向 Gate 和独立 V/R 关闭，内嵌占位缺陷归 TASK-051。TASK-049 首次 R 发现指纹数字身份与顺序问题，归 TASK-052，修复在 `b587ed0` 定向 Gate 与独立 V/R PASS。随后集成 `5c3a6d0` 的全量质量套件发现 TASK-053，转第七轮修复；TASK-029 Heavy 决定和 TASK-037 最终阶段验收仍待完成。
+- 2026-10-01 第七轮：`5c3a6d0` 全量质量 325/326 的唯一失败归 TASK-053 测试夹具；`8df95df` 受管定向 Gate 2/2、独立 V/R PASS，树相同的最新集成 `c45dea6` 全量质量 326/326、同 TASK-029 七项技术范围均通过。TASK-052/053 已关闭；第七轮 78 条 AC 为 53 PASS、17 BLOCKED、8 NOT_APPLICABLE，343 项技术用例为 342 PASS、1 BLOCKED。固定 `N=6`，目前仅 TASK-029/037 未完成，`R=2` 达到停止门槛；两项最终 Heavy/阶段决定及当前 HEAD 受管重绑仍待用户判断，见[第七轮完整矩阵](../05-delivery/2026-10-01-Phase4-第七轮完整测试矩阵.md)。
 
 ## 变更记录
 
@@ -102,3 +108,13 @@
 | 2026-08-03 | 重新签署 Phase 3 正式交付 | 加固候选通过完整 Evidence 闭环、独立 Verifier 与用户 Heavy 验收 | TASK-013 |
 | 2026-08-04 | 起草飞书正式机器人连接器 | 让用户离开本机会话后仍能获知进度并处理受控确认 | TASK-021～026 |
 | 2026-08-12 | 起草可重建执行可视化 | 让用户从项目 `.spec-loop/` 直接理解当前工作和历史耗时 | TASK-027～029 |
+| 2026-09-30 | 关闭 v2 观察面工单 | TASK-033 在 `6eef0ca` 完成技术 V/R、桌面/窄屏浏览器证据与 Codex 委托视觉判断；FEAT-009 仍待 TASK-029 Heavy | TASK-033 |
+| 2026-09-30 | 关闭 report-only v1 Ready 误报缺陷 | TASK-044 在 `78bfd70` 通过受管 targeted Gate 和独立 V/R，v1 非终态可见但不可派发；Phase 4 总体验收仍待 TASK-037 | TASK-044 |
+
+## 2026-10-01 第九轮技术验收同步
+
+第九轮 TASK-037 当前集成候选 `2ebee82` 的 Heavy Gate 8/8、Node 334/334、Playwright 2/2、双 Project 实时 Scheduler 指标与独立 V/R 均 PASS；TASK-029 `3be7123` 自身 Heavy 7/7、独立 V/R PASS。TASK-054～062 的关联缺陷已关闭，飞书保持取消；规格库当前仅 TASK-029、037 未完成，`R=2`，均待用户绑定当前 revision 的最终 Heavy/Phase 4 决定。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-029 与 TASK-037 的精确候选已获用户最终 Heavy 验收，Phase 4 阶段验收完成；第九轮 50 条 AC 为 42 PASS、8 NOT_APPLICABLE，未完成工单 `R=0`。PROD-001 覆盖 Phase 5 后续目标，因此产品整体继续进行中。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

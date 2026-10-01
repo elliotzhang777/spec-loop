@@ -86,24 +86,51 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 ## Phase 4：报告型 Scheduling 与受控自动闭环
 
-> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。2026-09-04，用户批准将剩余工单统一对齐最新版 P/M/V/R v2 架构并开始实施，范围为 TASK-027～037 的规格、实现和快速反馈检查。2026-09-26 用户批准已批准 Task 范围、权限、Gate 计划与预算内的实现和正式 V/R 连续修复复验；HEAD 变化重新绑定证据，不重复申请执行授权。2026-09-30 用户将用户级推进改为完整规格库轮次。Heavy/视觉/阶段验收及 merge、push、deploy 等动作仍需明确决定，集中进入轮次裁决清单。
+> 阶段状态：2026-10-02 已完成最终 Heavy/阶段验收；详见[阶段四交付报告](05-delivery/阶段四交付报告.md)。
 
-### 当前规格库轮次：2026-09-30 第二轮
+> 当前授权：FEAT-008 飞书进度通知与确认连接器已于 2026-08-04 获准实施；FEAT-009 可重建执行可视化的核心实现已于 2026-08-12 获准实施；FEAT-004 的 TASK-030 P/M/V/R v2 旁路内核已于 2026-08-31 获准实施。2026-09-04，用户批准将剩余工单统一对齐最新版 P/M/V/R v2 架构并开始实施，范围为 TASK-027～037 的规格、实现和快速反馈检查。2026-09-26 用户批准已批准 Task 范围、权限、Gate 计划与预算内的实现和正式 V/R 连续修复复验；HEAD 变化重新绑定证据，不重复申请执行授权。2026-09-30 用户将用户级推进改为完整规格库轮次；随后明确撤下飞书功能，TASK-026 取消，Phase 4 只保留本地确认路径。Heavy/视觉/阶段验收及 merge、push、deploy 等动作仍需明确决定，集中进入轮次裁决清单。
 
-第二轮起始扫描整个 `spec/04-task/`，共有 6 个未完成工单：原 5 个加第一轮 report-only Ready 误报缺陷 TASK-044。TASK-028 已在本轮完成 v1 Delivery，第二轮续执行又将 Proposal 占位误判建立为 TASK-045，当前仍剩 6 项。状态以各工单和[待完成看板](pending-board.md)为准。
+### 历史规格库轮次：2026-10-01 第八轮未完成工单收口
+
+第二轮起始扫描整个 `spec/04-task/`，共有 6 个未完成工单：原 5 个加第一轮 report-only Ready 误报缺陷 TASK-044。TASK-028 已在本轮完成 v1 Delivery，第二轮续执行又将 Proposal 占位误判建立为 TASK-045，TASK-033 委托视觉收口后新建 TASK-046 后当前仍剩 6 项。状态以各工单和[待完成看板](pending-board.md)为准。
 
 | 工单 | 当前状态 | 本轮可推进项 | 仍需的条件或决定 |
 |---|---|---|---|
-| [TASK-033](04-task/TASK-033-pmvr-execution-observability.md) | 待验证 | 与 TASK-028 共用稳定候选重绑技术与浏览器 Evidence | 独立视觉决定 |
-| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 进行中 | TASK-028 前置已交付，隔离组合候选技术测试通过 | 正式 Heavy Gate/V/R 和最终视觉、Heavy 决定 |
-| [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 已批准 | 核对真实配置前置和不依赖外部连接的准备项 | 真实飞书配置、外部副作用与 Heavy 决定 |
-| [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 | 准备最终组合验收清单及可验证前置 | TASK-026/029 等依赖与最终 Heavy/阶段决定 |
-| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 进行中 | `e5ddd81` 受管 targeted Harness Gate 4/4 PASS | v2 独立 M/V/R 角色链和最终 Evidence Gate |
-| [TASK-045](04-task/TASK-045-proposal-unknown-domain-term.md) | 进行中 | TASK-029 Contract P 入口误报已复现，下一轮修复与全矩阵重测 | 独立 V/R 与最终候选重绑 |
+| [TASK-029](04-task/TASK-029-execution-view-hardening.md) | 已完成 | 历史过程见本表；当前 `3be7123` 已完成最终 Heavy 验收 | [最终人工验收记录](05-delivery/2026-10-02-Phase4-最终人工验收记录.md) |
+| [TASK-026](04-task/TASK-026-feishu-heavy-dogfood.md) | 已取消 | 用户撤下飞书功能；历史代码与证据保留且连接器禁用 | 不再计入当前验收 |
+| [TASK-037](04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已完成 | 历史过程见本表；当前 `2ebee82` 已完成最终 Heavy/Phase 4 验收 | [最终人工验收记录](05-delivery/2026-10-02-Phase4-最终人工验收记录.md) |
+| [TASK-054](04-task/TASK-054-approved-existing-task-adoption.md) | 已批准、受管 P 已导入 | 隔离修复通过 Project 定向测试，已将 TASK-037 成功导入 | TASK-029 当前 Gate 后执行 Standard M/V/R |
+| [TASK-055](04-task/TASK-055-supervisor-timeout-recovery-test-circuit.md) | 已批准、受管 P 已导入 | 隔离修复 Scheduler 8/8 PASS、TASK-029 已纳入新候选 | 当前 Heavy Gate 后执行 Standard M/V/R |
+| [TASK-044](04-task/TASK-044-report-only-v1-false-ready.md) | 已完成 | `78bfd70` 受管 targeted 4/4、独立 V/R PASS，Candidate 已形成 | 本工单关闭；Phase 4 总体验收由 TASK-037 承担 |
+| [TASK-045](04-task/TASK-045-proposal-unknown-domain-term.md) | 已完成 | `8ed8b89` targeted 2/2、独立 V/R PASS；Contract v2 审计修订完成 | 本工单关闭 |
+| [TASK-046](04-task/TASK-046-quality-suite-concurrency-stability.md) | 已完成 | `7f5cacd` Heavy 7/7、Node 321/321；`9e95565` targeted 2/2、独立 V/R PASS | 新集成候选完整回归归 TASK-029 |
+| [TASK-047](04-task/TASK-047-fast-exit-identity-test-race.md) | 已完成 | `70688bb` targeted 2/2、独立 V/R PASS；集成 Heavy 7/7 | 本工单关闭 |
+| [TASK-048](04-task/TASK-048-execution-view-startup-under-load.md) | 已完成 | `75a9c91` targeted 2/2、独立 V/R PASS；集成 Heavy 7/7 | 本工单关闭 |
+| [TASK-049](04-task/TASK-049-controlled-gate-failure-fingerprint.md) | 已完成 | `b587ed0` targeted 2/2、独立 V/R PASS；第一次 R FAIL 保留 | 本工单关闭 |
+| [TASK-050](04-task/TASK-050-unstarted-v2-contract-correction.md) | 已完成 | `b25019b` targeted 2/2、独立 V/R PASS；TASK-045 Contract v2、missing_data=0 | 本工单关闭 |
+| [TASK-051](04-task/TASK-051-embedded-proposal-placeholders.md) | 已完成 | TASK-045 新 HEAD 覆盖内嵌占位缺陷，定向 Gate 和独立 V/R PASS | 本工单关闭 |
+| [TASK-052](04-task/TASK-052-controlled-gate-fingerprint-identity-order.md) | 已完成 | TASK-049 新 HEAD 定向 Gate 与独立 V/R PASS；`c45dea6` 全量质量 326/326 | 本工单关闭 |
+| [TASK-053](04-task/TASK-053-v1-report-fixture-round-placeholder.md) | 已完成 | `8df95df` 受管 Gate 2/2、独立 V/R PASS；同 tree 集成 `c45dea6` 全量质量 326/326 | 本工单关闭 |
 
 实施按依赖顺序进行，独立可执行项不等待阻塞项；集成冻结候选后集中执行适用的 targeted Gate、各批准 Heavy Gate、独立 V/R 与人工裁决。TASK-028 已按 v1 原协议交付，未迁移；原 P4-B1～B4 仅作为历史和内部资源分组。现有 Scheduler Wave 不是跨规格库轮次的一键执行器。
 
-第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮[完整矩阵](05-delivery/2026-09-30-Phase4-第二轮完整测试矩阵.md)覆盖 6 个工单、51 条 AC；隔离组合候选 `49612eb` 的 336 个技术用例/场景全部通过。[续执行记录](05-delivery/2026-09-30-Phase4-第二轮续执行记录.md)记载 TASK-028 Delivery 和 TASK-044 targeted Gate，正式其余 V/R 与人工裁决仍按前置条件推进。
+第一轮 [完整测试矩阵](05-delivery/2026-09-30-Phase4-完整轮次测试矩阵.md)覆盖原 5 个工单的 48 条目标 AC，T037-AC-3 的真实扫描失败建成 TASK-044。第二轮[完整矩阵](05-delivery/2026-09-30-Phase4-第二轮完整测试矩阵.md)覆盖 6 个工单、51 条 AC；隔离组合候选 `49612eb` 的 336 个技术用例/场景全部通过。[续执行记录](05-delivery/2026-09-30-Phase4-第二轮续执行记录.md)记载 TASK-028 Delivery 和 TASK-044 targeted Gate，续执行增加 TASK-045 三条 AC 后按[第三轮完整矩阵](05-delivery/2026-09-30-Phase4-第三轮完整测试矩阵.md)盘点 57 条，第三轮历史结论为 23 PASS、1 FAIL、33 BLOCKED。第四轮 TASK-044 的 3 条 AC 已在 `78bfd70` 通过受管 M/V/R；其他工单仍按前置条件推进。
+
+第三轮最终候选[逐用例结果](05-delivery/2026-09-30-Phase4-第三轮最终候选逐用例结果.json)记录技术 338 项：337 PASS、1 FAIL。第四轮[完整矩阵](05-delivery/2026-09-30-Phase4-第四轮完整测试矩阵.md)按飞书撤项和新 TASK-047 盘点 60 条 AC；[逐用例结果](05-delivery/2026-09-30-Phase4-第四轮最终候选逐用例结果.json)为 336 PASS、2 FAIL，分别归 TASK-047 的固定等待竞态和 TASK-045 的 Contract 历史依赖。第五轮在新 HEAD 重跑完整适用矩阵。
+
+第五轮集成 HEAD `4f7fb6e` 的 TASK-029 Heavy 仍为 6/7，Node 320/321、Playwright 2/2；第四轮快退出用例已过，新的后台视图启动超时转 [TASK-048](04-task/TASK-048-execution-view-startup-under-load.md)。不同失败根因被 Controller 合并为重复指纹转 [TASK-049](04-task/TASK-049-controlled-gate-failure-fingerprint.md)，受管 Conflict 已保留并按用户连续推进授权审计解决。第六轮在新 HEAD 重跑，旧候选的 PASS 不自动沿用。
+
+2026-09-30 用户补充连续轮次收口条件：以此刻全规格库的 6 个未完成工单为固定起点，后续缺陷工单计入剩余量；每轮完整验证后，剩余工单严格少于起始数的 10% 或严格少于 3 个时，停止自动推进并提交全部剩余问题供用户决定。TASK-026 已取消，TASK-044～053 已完成；第七轮 78 条 AC 为 53 PASS、17 BLOCKED、8 NOT_APPLICABLE，343 项逐技术用例为 342 PASS、1 BLOCKED。当前仅 TASK-029、037 未完成，`R=2`，达到绝对数停止门槛，详情见[第七轮完整矩阵](05-delivery/2026-10-01-Phase4-第七轮完整测试矩阵.md)。
+
+2026-10-01 用户将后续停止条件改为全库未完成工单 `R=0` 且适用验收全部通过，要求继续解决 TASK-029、037。第七轮曾按旧规则停止的记录保留为历史；当前 `R=2`，继续推进，不以旧数量门槛收口。
+
+第八轮 TASK-037 P onboarding 发现 TASK-054：已批准且未绑定的目标工单无法导入受管控制面，已建缺陷工单和 P Proposal；当前 `R=3`。TASK-029 的新集成候选 `03f68a0` 已完成受管 M、四条浏览器路径及当前 revision 视觉 Review，正在重跑独立 V；TASK-037 波次 Review GUI 当前代码树技术路径 PASS、真实 Spring Boot 定向 2/2 PASS，首次无持久库配置的目标工程全量失败已单独留痕，不冒充本工单 Heavy PASS。
+
+TASK-029 该轮正式 V 结束后，7 项 Gate 6 PASS、1 FAIL；全量 Node 326 项 325 PASS、1 FAIL。恢复用例与 Supervisor 熔断条件冲突，新增 [TASK-055](04-task/TASK-055-supervisor-timeout-recovery-test-circuit.md) 并保留受管 Conflict，当前 `R=4`。按完整规格库下一轮修复与复验，不以其他六项 PASS 替代全量结论。
+
+TASK-055 的 P Proposal `PROP-24`/批准 `APR-26` 已受管导入；其隔离修复 Scheduler 测试 8/8 PASS。TASK-054 隔离修复 Project 测试 10/10 PASS。两项仍需正式受管验证，当前 `R=4`。TASK-029 新 M 遇到 Codex CLI 当前账号不支持其全局配置模型，已在本 Project Provider 配置中选用实测可运行的 `gpt-6-sol` 并恢复启动探针，不改用户全局配置。
+
+随后 TASK-054 已由 `PROP-23`/`APR-25` 导入；其修复 CLI 成功将 `PROP-22`/`APR-24` 的已批准 TASK-037 原规格导入受管控制面，状态和 AC 未改。TASK-029 新候选 `3be7123` 的八张截图当前视觉 Review 已通过，正式完整 V Gate 正在运行。TASK-054、055、037 仍待各自适用正式验证，`R=4`。
 
 ### 目标
 
@@ -138,8 +165,7 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 
 - T2 平台预设按需求增加：Spring Boot、Xcode/iOS、微信小程序。
 - Connector 权限按只读 → 评论/标签 → 有限状态更新逐级开放。
-- 飞书企业自建应用机器人作为首个双向 Connector：通过长连接发送/更新总体进度卡片，并把绑定 Task、Round、revision、有效期和用户身份的结构化确认交给 Controller。
-- 飞书只做本地事实的交互投影；卡片、消息和回调不得成为第二 Task 状态源，连接器不可用时必须回退本地 `needs_user` 与确认入口。
+- 当前 Phase 4 不启用飞书连接器；已完成的历史实现保留并保持禁用。人工决定使用本地 `needs_user`、Review 与受控确认入口。
 - 默认禁止自动 merge、删除、生产数据、凭据、签名和发布修改。
 
 ### 本地只读观察面
@@ -157,9 +183,9 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 5. Connector 遵循最小权限，不自动合并、不默认写生产环境。
 6. 多个低风险真实任务 Dogfood delivered。
 7. 独立功能和安全验收 PASS，Phase 1–3 全量回归通过。
-8. 飞书正式机器人完成进度通知、失效/越权拒绝、有效确认、重复回调幂等、断线恢复和本地回退 Dogfood。
+8. 本地 `needs_user`、Review 和 Heavy 确认完成身份、幂等、重启恢复和人工决定边界 Dogfood；飞书实测不属于当前完成标准。
 
-关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)、[FEAT-008 飞书进度通知与确认连接器](02-feature/FEAT-008-feishu-progress-approval-connector.md)、[FEAT-009 可重建执行可视化](02-feature/FEAT-009-execution-visualization.md)。
+关联：[FEAT-004 受控自动闭环](02-feature/FEAT-004-controlled-automation.md)、[FEAT-005 Scheduling 与隔离](02-feature/FEAT-005-scheduling-isolation.md)、[FEAT-006 工程 Toolchain](02-feature/FEAT-006-engineering-toolchains.md)、[FEAT-009 可重建执行可视化](02-feature/FEAT-009-execution-visualization.md)。
 
 ## Phase 5：Portfolio、能力资产与持续优化治理
 
@@ -228,3 +254,11 @@ Phase 5：多项目 Portfolio、能力资产和持续优化治理
 - Phase 4 必须长期 report-only 和真实低风险运行稳定后才能开始 Phase 5。
 - 每个 Phase 建立独立 Heavy Task，包含 SPEC、AC、风险、自动测试、真实 Dogfood、独立 Verifier 和正式 Delivery。
 - 后续能力不得削弱已有 Task State、Ledger、Guard、Evidence、Heavy 门禁和恢复要求。
+
+## 2026-10-01 第九轮技术验收同步
+
+Phase 4 第九轮技术候选 `2ebee82` 已完成批准的 8/8 Heavy Gate、Node 334/334、Playwright 2/2、独立 V/R；TASK-029 独立 Heavy 候选 `3be7123` 7/7、独立 V/R。最终用户 Heavy/Phase 4 阶段决定仍待作出，Phase 5 未启动。见[第九轮完整矩阵](05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 Phase 4 最终验收
+
+用户接受 TASK-029 `3be7123` 的最终 Heavy，以及 TASK-037 `2ebee82` 的最终 Heavy 与 Phase 4 阶段结果。第九轮最终矩阵 42 PASS、0 BLOCKED、8 NOT_APPLICABLE、0 FAIL；全规格库未完成工单 `R=0`，满足用户要求的停止条件。见[最终人工验收记录](05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。Phase 5 尚未获准启动；2026-10-02 精确候选 `2ebee82` 已快进合入本地主分支，远端与外部部署状态见[阶段四交付报告](05-delivery/阶段四交付报告.md)。

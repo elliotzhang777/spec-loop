@@ -17,12 +17,12 @@ SPEC → PLAN → WORK → VERIFY → ITERATE → ACCEPTANCE → DELIVERY
 - Phase 1：Light/Standard/Heavy、文件契约、状态机、Round、AC、Evidence 和 Delivery。
 - Phase 2：Attempt、Ledger、Budget、Guard、事实 Summary 和失败恢复。
 - Phase 3：Project Loop、受控 worktree 执行、安全加固、故障恢复和完整 Harness Evidence 闭环已完成正式 Heavy 验收。
-- Phase 4（旁路预览）：P/M/V/R v2 验收内核支持批准契约、稳定 HEAD、独立 V/R、共享返工预算、Conflict Record 与 Review Inbox；旧 v1 Task 不自动迁移。
-- Phase 4（批次实施）：P4-B1 已启动；P4-B2～B4 已按最新版架构拆为 TASK-031～037，但受依赖和正式验证授权约束，尚未宣称交付。
+- Phase 4：P/M/V/R v2 验收内核支持批准契约、稳定 HEAD、独立 V/R、共享返工预算、Conflict Record 与 Review Inbox；旧 v1 Task 不自动迁移。
+- Phase 4：报告型 Scheduler、受控执行、真实 Standard/Heavy Dogfood、Spring Boot T2、本地确认和阶段 Heavy 已完成验收。
 - Web/UI：支持目标工程本地 Playwright 功能 Gate，以及绑定 Round、revision 与截图哈希的人工视觉 Review。
-- Execution View（预览）：从项目 `.spec-loop/` 重建当前 Task/步骤、历史时间线、主动/等待/未记录耗时和最长步骤；本机只读页面不会成为第二状态源。
+- Execution View：从项目 `.spec-loop/` 重建当前 Task/步骤、历史时间线、主动/等待/未记录耗时和最长步骤；本机只读页面不会成为第二状态源。
 
-当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 4 已形成 P/M/V/R 受管 invocation、report-only Scheduler、lease/fencing/资源控制和 Spring Boot T2 Gate Planner 的待验证候选；自动 push/merge/deploy 仍不在授权范围。
+当前默认 Agent Provider 是 Codex；Claude Code 与 Qoder 使用同一 Provider 扩展边界。Phase 4 验收结论与证据见[阶段四交付报告](spec/05-delivery/阶段四交付报告.md)。自动 push/merge/deploy 不属于引擎自动执行范围。
 
 ## 工程结构
 

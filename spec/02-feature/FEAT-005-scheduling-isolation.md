@@ -1,6 +1,6 @@
 # FEAT-005：Scheduling、隔离与安全控制
 
-- 状态：已批准
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-07-12
 - 最后更新：2026-09-27
@@ -21,7 +21,7 @@
 2. 所有自动代码修改必须使用 worktree、branch、base commit 和 touched files 记录。
 3. 无冲突任务可并发，冲突写资源必须串行。
 4. Pause 阻止新动作；Kill 取消执行、保留现场并要求 reconcile。
-5. Connector 按只读→评论/标签→有限状态更新逐级授权；首个双向实现为 [FEAT-008 飞书正式机器人](FEAT-008-feishu-progress-approval-connector.md)，远程决定仍必须经过本地 Guard。
+5. Connector 若另行启用，按只读→评论/标签→有限状态更新逐级授权，远程决定仍必须经过本地 Guard。用户已撤下 [FEAT-008 飞书正式机器人](FEAT-008-feishu-progress-approval-connector.md)，当前 Phase 4 只验证本地人工确认。
 6. 默认禁止 merge、删除、生产数据、凭据和发布动作。
 7. 已批准 Task 内的 M/V/R 及范围内修复连续执行；执行授权绑定各 Task 范围/预算，验证证据绑定 HEAD/计划 hash。候选变化必须重验，但不重复询问继续验证；普通确认汇总到规格库轮次裁决。
 8. 新范围、权限、Gate 计划或预算变化必须先处理授权；不可逆、生产或无法隔离的安全风险只暂停受影响范围。
@@ -42,8 +42,8 @@
 | Design | [DES-005 Scheduling、Worktree 与资源协调](../03-design/DES-005-scheduling-worktree-coordination.md) | 已批准 |
 | Task | [TASK-034 Report-only Scheduler](../04-task/TASK-034-report-only-scheduler.md) | 已完成 |
 | Task | [TASK-035 Lease、资源协调与 Pause/Kill](../04-task/TASK-035-scheduler-leases-controls.md) | 已完成 |
-| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已批准 |
-| Task | [TASK-044 Report-only v1 Ready 误报缺陷](../04-task/TASK-044-report-only-v1-false-ready.md) | 进行中，第二轮技术复测通过 |
+| Task | [TASK-037 Phase 4 最终 Heavy](../04-task/TASK-037-phase4-pmvr-heavy-dogfood.md) | 已完成 |
+| Task | [TASK-044 Report-only v1 Ready 误报缺陷](../04-task/TASK-044-report-only-v1-false-ready.md) | 已完成，`78bfd70` 受管 M/V/R 与 targeted Gate PASS |
 
 ## 实际交付
 
@@ -59,6 +59,7 @@
 - 2026-09-30 第一轮真实 report-only 扫描发现 TASK-026 v1 历史壳和 TASK-028 在途 v1 被标为 Ready，受控执行预览却无 Ready Task。该误报不改写 TASK-034 的历史 PASS，已建 TASK-044 在第二轮修复并完整复测；TASK-037 AC-3 暂记 FAIL。
 - 2026-09-30 第二轮隔离组合候选 `49612eb`：报告调度器 4/4 与完整质量套件 320/320 技术通过；当前 Project TASK-026/028 非 Ready、海工合法 v2 Ready 保留。正式 Contract/Gate/V/R 和 TASK-037 指标门槛尚未完成，不把技术自测写成最终 Feature PASS。
 - 2026-09-30 续执行：`e5ddd81` 全套质量 320/320、TASK-044 受管 targeted Harness Gate 4/4 通过；TASK-037 的 report-only 门槛已按用户委托量化，当前 Project/海工的 Ready 与受控预览一致、`missing_data=0`、重复扫描 canonical 等价。无反馈样本的采纳率为 N/A；独立 V/R 与 Phase 4 Heavy 仍待办。
+- 2026-09-30 第四轮：`78bfd70` 上 TASK-044 新增 v1 verifying/iterating 回归，受管 targeted Gate 4/4、独立 V/R PASS，Candidate 已形成并关闭该缺陷工单。FEAT-005 的 Phase 4 最终 Heavy 仍由 TASK-037 承担；当前 Project 的 Contract 数据错误使 `missing_data=1`，归 TASK-045 修订。
 
 ## 变更记录
 
@@ -68,3 +69,11 @@
 | 2026-08-04 | 将飞书正式机器人下沉为独立 Feature | 通用 Connector 规则不足以表达远程身份、卡片确认和恢复契约 | TASK-021～026 |
 | 2026-09-04 | 批准 report-only 与受控执行两段实施 | 先证明报告质量，再开放 lease 约束下的自动动作 | TASK-034、TASK-035、TASK-037 |
 | 2026-09-30 | 将用户级推进改为完整规格库轮次 | 避免逐 Task、逐波次请求决定和反复重绑候选证据 | TASK-026、028、029、033、037 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-037 当前候选的双 Project report-only 指标满足批准门槛，Ready 与只读预览一致；Scheduler 控制和安全对抗 Gate PASS、独立 V/R 通过。最终 Phase 4 人工阶段决定待办。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-037 双 Project report-only 门槛、受控 Scheduler 对抗、独立 V/R、视觉 Review 与用户最终 Heavy/Phase 4 验收通过；FEAT-005 已完成。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。

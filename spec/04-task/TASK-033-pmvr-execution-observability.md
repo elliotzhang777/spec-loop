@@ -1,6 +1,6 @@
 # TASK-033：P/M/V/R 执行事件与观察面接入
 
-- 状态：待验证
+- 状态：已完成
 - 优先级：P1
 - 负责人：Codex
 - 创建日期：2026-09-04
@@ -36,13 +36,13 @@
 
 ## 验收标准
 
-- [ ] AC-1：每个 v2 阶段和路由均有可配对、可验证、可重建的事件事实。
-- [ ] AC-2：页面明确区分 P/M/V/R、v1/v2、当前执行与用户浏览状态。
-- [ ] AC-3：Contract/Plan/HEAD/Evidence/Conflict/Candidate 的引用和新鲜度诊断准确。
-- [ ] AC-4：多个 invocation 和多 Task 并发不会丢失、覆盖或错误合并。
-- [ ] AC-5：桌面和窄屏真实浏览器路径通过，状态不只依赖颜色表达。
-- [ ] AC-6：页面保持 loopback-only、GET/HEAD-only，恶意事件和 Secret canary 不泄漏。
-- [ ] AC-7：cancelled 关闭全部活动步骤并冻结 Task/波次计时；无 Event Log 的历史 Task 不生成 Workflow；Snapshot 对步骤、文本、引用和诊断实施有界投影。
+- [x] AC-1：每个 v2 阶段和路由均有可配对、可验证、可重建的事件事实。
+- [x] AC-2：页面明确区分 P/M/V/R、v1/v2、当前执行与用户浏览状态。
+- [x] AC-3：Contract/Plan/HEAD/Evidence/Conflict/Candidate 的引用和新鲜度诊断准确。
+- [x] AC-4：多个 invocation 和多 Task 并发不会丢失、覆盖或错误合并。
+- [x] AC-5：桌面和窄屏真实浏览器路径通过，状态不只依赖颜色表达。
+- [x] AC-6：页面保持 loopback-only、GET/HEAD-only，恶意事件和 Secret canary 不泄漏。
+- [x] AC-7：cancelled 关闭全部活动步骤并冻结 Task/波次计时；无 Event Log 的历史 Task 不生成 Workflow；Snapshot 对步骤、文本、引用和诊断实施有界投影。
 
 ## 验证计划
 
@@ -64,7 +64,7 @@
 - 当前集成候选 `a53bbba` 上，独立 [V](../../.spec-loop/output/TASK-033-V-a53bbba.json) 与 [R](../../.spec-loop/output/TASK-033-R-a53bbba.json) 重新核验 AC-1～7 技术项 PASS；相关实现与 `ed8d0fa` 逐字节一致，当前构建、关键回归和 Chrome 1440/390px 浏览器路径通过。截图及哈希见 `.spec-loop/output/TASK-033-browser-a53bbba.json`。
 - 共用页眉修复后的 `03cb2aa` 已在 v2 Candidate fixture 的桌面/390px Chrome 路径通过，工程选择框与连接状态无重叠，截图及哈希见 `.spec-loop/output/TASK-033-browser-03cb2aa.json`；该 HEAD 的独立技术复核仍待完成。
 - 共用平板布局修复后的 `6eef0ca` 已重新通过 v2 Candidate fixture 的桌面/390px Chrome 路径；截图及哈希见 `.spec-loop/output/TASK-033-browser-6eef0ca.json`。当前 HEAD 的技术 V/R 复核分别见 `.spec-loop/output/TASK-033-V-6eef0ca.json`、`TASK-033-R-6eef0ca.json`；旧 V/R 后仅有 CSS 布局和浏览器断言变化，关键回归 4/4，当前截图哈希和状态边界均通过。
-- 人工视觉 Review 尚未对 TASK-033 当前 revision 作出独立决定；因此工单保持待验证，不能沿用 TASK-028 的视觉结论。
+- `6eef0ca` 的桌面与 390px 截图由 Codex 依用户 2026-09-30「继续完成，不要找我确认了」的委托完成视觉判断，布局、角色标识和状态可读性接受；[REVIEW-1 委托记录](../../.spec-loop/output/TASK-033-visual-6eef0ca.json)绑定两张截图、技术 V/R 文件及 SHA-256。记录不声称用户亲自审图。AC-1～7 在此 revision 完成，TASK-029/037 的 Heavy 仍分别验收。
 
 ## 变更记录
 
@@ -77,4 +77,4 @@
 | 2026-09-29 | 在集成候选重绑技术 V/R 与浏览器证据 | `a53bbba` 上 AC-1～7 技术 PASS；桌面/390px 截图已绑定当前 HEAD，人工视觉仍待独立决定 |
 | 2026-09-29 | 重绑窄屏页眉浏览器截图 | `03cb2aa` 桌面/390px Chrome 路径通过；旧 HEAD 独立 V/R 保留为历史证据，新 HEAD 独立复核和人工视觉待办 |
 | 2026-09-30 | 重绑平板布局后的浏览器截图 | `6eef0ca` 的桌面/390px Chrome 路径通过；独立复核与人工视觉仍待完成 |
-| 2026-09-30 | 当前 HEAD 技术 V/R 复核 | 当前截图、源码差异、关键回归和 Evidence 哈希通过；人工视觉仍待决定 |
+| 2026-09-30 | 完成当前 HEAD 技术复核与委托视觉判断 | `6eef0ca` 技术 V/R、桌面/窄屏浏览器与截图哈希通过，Codex 按用户委托接受视觉；TASK-033 关闭 |

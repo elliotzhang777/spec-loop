@@ -80,3 +80,12 @@ Project metadata 和 Project State 提供项目上下文；Task Registry 从任�
 | 2026-07-25 | 增加正式验证显式授权边界 | 避免把 Loop 启动或视觉迭代误判为正式交付 | TASK-016 |
 | 2026-07-26 | 强制定向 Gate 与长期数据库复用 | 降低普通 Task 验证耗时和环境反复创建成本 | TASK-016 |
 | 2026-08-03 | 完成 Phase 3 正式 Heavy 验收 | 加固版本的完整 Gate、独立 Verifier 和人工确认全部通过 | TASK-013 |
+| 2026-09-30 | 记录 Phase 4 回归的测试并发缺陷 | 受管 `WEXEC-VIEW` 的 321 项在高负载下有 6 个时限用例误失败；历史 Phase 3 Delivery 不改写 | [TASK-046](../04-task/TASK-046-quality-suite-concurrency-stability.md) |
+| 2026-09-30 | 关闭测试并发缺陷 | `9e95565` targeted Gate 2/2、独立 V/R PASS，形成 Candidate；完整 Heavy 7/7 保留在 tree 相同的 `7f5cacd`，新集成候选由 TASK-029 复测 | [TASK-046](../04-task/TASK-046-quality-suite-concurrency-stability.md) |
+| 2026-09-30 | 记录第四轮快速退出测试竞态 | 新集成 `36c631a` 全量质量 320/321、六个其他 Heavy Gate PASS；固定 300ms 身份探测用例 `not ok 216`，转 TASK-047 以真实 exit 事件同步 | [TASK-047](../04-task/TASK-047-fast-exit-identity-test-race.md) |
+| 2026-10-01 | 收口快速退出测试竞态 | `70688bb` 定向 Gate 2/2、独立 V/R PASS；集成 `246cecd` 七组 Heavy Gate、Node 322/322 PASS | [TASK-047](../04-task/TASK-047-fast-exit-identity-test-race.md) |
+| 2026-10-01 | 收口 v1 报告型调度夹具 | TASK-053 在 `8df95df` 定向 Gate 2/2、独立 V/R PASS；同 tree 集成 `c45dea6` 全量质量 326/326，原 325/326 失败保留 | [TASK-053](../04-task/TASK-053-v1-report-fixture-round-placeholder.md) |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-056 历史 Gate Evidence 不可覆写、TASK-059 Spring HEAD 绑定均完成，TASK-037 最终集成 8/8、Node 334/334、独立 V/R PASS；Phase 4 最终用户决定待办。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。

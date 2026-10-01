@@ -1,6 +1,6 @@
 # FEAT-009：可重建执行可视化
 
-- 状态：进行中
+- 状态：已完成
 - 负责人：Codex
 - 创建日期：2026-08-12
 - 最后更新：2026-09-04
@@ -70,14 +70,16 @@
 | Design | [DES-009 执行事件、可重建投影与本地观察面](../03-design/DES-009-execution-visualization.md) | 已批准 |
 | Task | [TASK-027 执行事件协议与埋点](../04-task/TASK-027-execution-events.md) | 已完成 |
 | Task | [TASK-028 可重建投影与本地 Web UI](../04-task/TASK-028-execution-view.md) | 已完成 |
-| Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 已批准 |
-| Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 待验证 |
+| Task | [TASK-029 兼容重建、Dogfood 与加固验收](../04-task/TASK-029-execution-view-hardening.md) | 已完成 |
+| Task | [TASK-033 P/M/V/R 执行事件与观察面接入](../04-task/TASK-033-pmvr-execution-observability.md) | 已完成 |
+| Task | [TASK-048 全量负载下后台视图启动超时](../04-task/TASK-048-execution-view-startup-under-load.md) | 已完成 |
 
 ## 实际交付
 
 - 已实现行为：已提供项目级 hash-chained 执行事件、Task/Harness/Gate/Review 埋点、可重建 snapshot、loopback-only 本地 Web 页面、实时当前步骤计时、Task 四类耗时与最长步骤提示。
-- 未实现/调整项：旧数据只投影可证明的 Gate 精确耗时，未伪造历史生命周期时间；200×200 性能 Gate、真实 Playwright 路径和 revision-bound 人工视觉 Review 留在 TASK-029/正式验收。
-- 验证结论：TASK-027 与 TASK-028 已完成，后者在 `6eef0ca` 运行环境变化后重跑正式定向 Gate 3/3、绑定技术 V/R 和 Codex 委托视觉决定，v1 Round 1 已 Delivery。TASK-033 在 `6eef0ca` 的技术 V/R、桌面/390px Chrome 及 820/900/921px 宽度回归通过，最终集成候选视觉收口仍待办。完整 Heavy Gate 仍由 TASK-029 执行，特性保持“进行中”。
+- 实现调整：旧数据只投影可证明的 Gate 精确耗时，未伪造历史生命周期时间；200×200 性能 Gate、真实 Playwright 路径和 revision-bound 视觉 Review 已在 TASK-029 正式验收。
+- 验证结论：TASK-027 与 TASK-028 已完成，后者在 `6eef0ca` 运行环境变化后重跑正式定向 Gate 3/3、绑定技术 V/R 和 Codex 委托视觉决定，v1 Round 1 已 Delivery。TASK-033 在 `6eef0ca` 的技术 V/R、桌面/390px Chrome 及 820/900/921px 宽度回归通过，Codex 依用户委托完成独立视觉判断并关闭工单。完整 Heavy Gate 仍由 TASK-029 执行，该轮历史阶段特性仍为“进行中”。
+- 第五轮 `4f7fb6e` 的完整质量套件发现后台视图启动 4.5 秒超时，归入 TASK-048；候选 `75a9c91` 的定向 Gate 2/2 与独立 V/R PASS，集成 `246cecd` 七组 Heavy Gate 和 Node 322/322 PASS。最新集成 HEAD 的质量结果单独归档；TASK-029 Heavy 人工决定仍待完成。
 - 关联完成工单：TASK-027（`e399565` 独立 V/R PASS；事件协议、入口埋点和故障恢复已定向验收）。
 
 ## 变更记录
@@ -94,3 +96,11 @@
 | 2026-08-20 | 增加“启动即看”和后台 view 生命周期 | Quant Dogfood 暴露当前入口需要额外命令、占用终端且端口不易发现 | TASK-029 |
 | 2026-08-20 | 当前工作改由未闭合步骤优先派生 | Quant 正式 Harness 运行时顶部仍指向较晚更新的 TASK-007，造成当前工作误报 | TASK-029 |
 | 2026-08-20 | 局部实时更新并统一 Ant Design 控件 | 用户反馈定时轮询整页闪烁，原生下拉和手写组件视觉与交互不一致 | TASK-028 |
+
+## 2026-10-01 第九轮技术验收同步
+
+TASK-029 当前候选 Heavy 7/7、独立 V/R、桌面/390px 视觉 Review PASS；TASK-037 集成观察面与波次 Review 浏览器 Gate、当前截图视觉 Review PASS。用户最终 Heavy 决定尚未完成，特性保持在途。见[第九轮完整矩阵](../05-delivery/2026-10-01-Phase4-第九轮完整测试矩阵.md)。
+
+## 2026-10-02 最终验收同步
+
+TASK-029 当前 `3be7123` 候选 7/7 Gate、独立 V/R、当前 revision 视觉 Review 与用户最终 Heavy 验收全部通过；FEAT-009 已完成。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。
