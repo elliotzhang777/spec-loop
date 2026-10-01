@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { lstat, mkdir, readFile, readdir, readlink, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import YAML from 'yaml';
@@ -536,10 +536,10 @@ async function assertSafePlaywrightInput(worktree:string,value:string,label:stri
   if(!actual.startsWith(worktreeReal+path.sep))throw new Error(`${label} resolves outside the managed worktree: ${value}`);
 }
 
-async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,gate:z.infer<typeof playwrightGateSchema>,config:z.infer<typeof gateConfigSchema>,startHead:string,startFingerprint:string):Promise<GateResult>{
+async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,gate:z.infer<typeof playwrightGateSchema>,config:z.infer<typeof gateConfigSchema>,startHead:string,startFingerprint:string,runNonce:string):Promise<GateResult>{
   const started=Date.now(),createdAt=new Date().toISOString();
-  const webRoot=path.resolve(control(root),'output',`${taskId}-web-${gate.id}`);
-  await rm(webRoot,{recursive:true,force:true});await mkdir(webRoot,{recursive:true});
+  const webRoot=path.resolve(control(root),'output',`${taskId}-web-${gate.id}-${runNonce}`);
+  await mkdir(webRoot);
   const resultsDir=path.join(webRoot,'test-results'),htmlDir=path.join(webRoot,'html-report'),jsonFile=path.join(webRoot,'results.json');
   if(gate.config){
     const config=path.resolve(m.worktree,gate.config),worktreeReal=await realpath(m.worktree),prefix=worktreeReal+path.sep;
@@ -599,7 +599,7 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
   const manifestContent=JSON.stringify(manifestValue,null,2)+'\n',manifestRel=path.relative(root,path.join(webRoot,'manifest.json')).split(path.sep).join('/');
   const finalCode=result.timedOut?124:(result.code===0&&validationErrors.length===0?0:(result.code||1));
   const content=`TASK ${taskId}\nKIND playwright\nCOMMAND ${JSON.stringify([process.execPath,...args])}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nEXIT ${finalCode}\nBASE ${m.base_commit}\nHEAD ${head}\nTESTS ${stats?.expected??0}\nUNEXPECTED ${stats?.unexpected??'UNKNOWN'}\nFLAKY ${stats?.flaky??'UNKNOWN'}\nSCREENSHOTS ${screenshots}\nMANIFEST ${manifestRel}\n\nVALIDATION\n${validationErrors.join('\n')}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`;
-  const artifactRel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;
+  const artifactRel=`.spec-loop/output/${taskId}-gate-${gate.id}-${runNonce}.txt`;
   await atomicWriteMany(root,[
     {file:path.join(webRoot,'manifest.json'),content:manifestContent},
     {file:path.join(root,artifactRel),content},
@@ -614,8 +614,12 @@ async function runPlaywrightGate(root:string,taskId:string,m:WorkspaceManifest,g
   });
 }
 
+export function gateSnapshotFile(root:string,taskId:string,serialized:string):string{
+  return path.join(control(root),'output',`${taskId}-gates-${sha256(serialized)}.json`);
+}
+
 export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
-  const m=await readWorkspace(root,taskId),current=await readHarnessState(root,taskId);if(current.stage!=='collected')throw new Error(`harness verify is illegal from ${current.stage}`);const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),gates=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates,results:GateResult[]=[];
+  const m=await readWorkspace(root,taskId),current=await readHarnessState(root,taskId);if(current.stage!=='collected')throw new Error(`harness verify is illegal from ${current.stage}`);const config=await readGateConfig(root),approvedGateIds=await approvedV2GateIds(root,taskId),gates=approvedGateIds?config.gates.filter((gate)=>approvedGateIds.has(gate.id)):config.gates,results:GateResult[]=[],runNonce=randomUUID();
   if(approvedGateIds&&gates.length!==approvedGateIds.size)throw new Error('one or more P-approved Gates are missing from the project Gate configuration');
   await validateGateScope(root,taskId,config,gates);
   await validatePlaywrightDeclarations(root,taskId,gates);
@@ -628,14 +632,17 @@ export async function runGates(root:string,taskId:string):Promise<GateResult[]>{
   const task=(await scanTasks(root)).find((item)=>item.task_id===taskId);if(!task)throw new Error('task not found');const taskState=await readState(task.path),approvedBash=await approvedBashGateCommands(root,taskId);
   for(const gate of gates){
     if(gate.kind==='playwright'){
-      const result=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.playwright',label:`Gate ${gate.id}`,summary:'执行目标工程真实浏览器验证路径',refs:[`.spec-loop/output/${taskId}-gates.json`]},()=>runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint),(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');
+      const result=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.playwright',label:`Gate ${gate.id}`,summary:'执行目标工程真实浏览器验证路径',refs:[`.spec-loop/output/${taskId}-web-${gate.id}-${runNonce}/manifest.json`]},()=>runPlaywrightGate(root,taskId,m,gate,config,startHead,startFingerprint,runNonce),(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');
       results.push(gateResultSchema.parse({...result,scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),environment_hash:gateRuntimeEnvironmentHash(config,taskId),ac:gate.ac}));
       continue;
     }
     await assertGateCommand(gate.command,m.worktree,approvedBash);assertDatabaseLifecycle(gate.command,config);
-    const gateResult=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.command',label:`Gate ${gate.id}`,summary:`执行确定性命令：${gate.command[0]}（稳定性 ${gate.stability_runs} 次）`,refs:[`.spec-loop/output/${taskId}-gate-${gate.id}.txt`]},async()=>{const started=Date.now(),createdAt=new Date().toISOString(),environmentHash=gateRuntimeEnvironmentHash(config,taskId),attempts=[],approvedBashGate=gate.command[0]==='bash',gateBin=approvedBashGate?'/bin/bash':gate.command[0],gateEnv={...gateEnvironment(config,taskId),...(approvedBashGate?{PATH:['/usr/bin','/bin','/usr/sbin','/sbin',path.dirname(process.execPath)].join(path.delimiter)}:{})};for(let attempt=1;attempt<=gate.stability_runs;attempt++)attempts.push(await runProcess(gateBin,gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnv,{root,taskId,kind:'gate'}));const result={code:attempts.find(item=>item.code!==0)?.code??0,timedOut:attempts.some(item=>item.timedOut),terminationVerified:attempts.every(item=>item.termination_verified),pipeDrainTimedOut:attempts.some(item=>item.pipe_drain_timed_out),outputTruncated:attempts.some(item=>item.outputTruncated),stdout:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stdout}`).join('\n'),stderr:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stderr}`).join('\n')},head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nEVIDENCE_CLASS ${gate.evidence_class}\nSTABILITY_RUNS ${gate.stability_runs}\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nTERMINATION_VERIFIED ${result.terminationVerified}\nPIPE_DRAIN_TIMED_OUT ${result.pipeDrainTimedOut}\nOUTPUT_TRUNCATED ${result.outputTruncated}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);return gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),environment_hash:environmentHash,ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,output_truncated:result.outputTruncated,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt})},(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');results.push(gateResult)
+    const gateResult=await observedProjectStep(root,{taskId,round:taskState.current_round,stepType:'gate.command',label:`Gate ${gate.id}`,summary:`执行确定性命令：${gate.command[0]}（稳定性 ${gate.stability_runs} 次）`,refs:[`.spec-loop/output/${taskId}-gate-${gate.id}-${runNonce}.txt`]},async()=>{const started=Date.now(),createdAt=new Date().toISOString(),environmentHash=gateRuntimeEnvironmentHash(config,taskId),attempts=[],approvedBashGate=gate.command[0]==='bash',gateBin=approvedBashGate?'/bin/bash':gate.command[0],gateEnv={...gateEnvironment(config,taskId),...(approvedBashGate?{PATH:['/usr/bin','/bin','/usr/sbin','/sbin',path.dirname(process.execPath)].join(path.delimiter)}:{})};for(let attempt=1;attempt<=gate.stability_runs;attempt++)attempts.push(await runProcess(gateBin,gate.command.slice(1),m.worktree,gate.timeout_seconds*1000,undefined,gateEnv,{root,taskId,kind:'gate'}));const result={code:attempts.find(item=>item.code!==0)?.code??0,timedOut:attempts.some(item=>item.timedOut),terminationVerified:attempts.every(item=>item.termination_verified),pipeDrainTimedOut:attempts.some(item=>item.pipe_drain_timed_out),outputTruncated:attempts.some(item=>item.outputTruncated),stdout:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stdout}`).join('\n'),stderr:attempts.map((item,index)=>`ATTEMPT ${index+1}\n${item.stderr}`).join('\n')},head=await git(m.worktree,['rev-parse','HEAD']),endFingerprint=await worktreeFingerprint(m.worktree);if(head!==startHead)throw new Error('gate command changed Git HEAD');if(endFingerprint!==startFingerprint)throw new Error('gate command changed the candidate worktree');const content=`TASK ${taskId}\nKIND command\nEVIDENCE_CLASS ${gate.evidence_class}\nSTABILITY_RUNS ${gate.stability_runs}\nSCOPE ${config.scope_kind??'legacy'}\nWAVE ${config.wave_id??''}\nCOVERAGE ${config.coverage}\nDATABASE_LIFECYCLE ${config.database.lifecycle}\nDATABASE_RESET ${config.database.reset}\nAC ${JSON.stringify(gate.ac??[])}\nCOMMAND ${JSON.stringify(gate.command)}\nCWD ${m.worktree}\nTIMED_OUT ${result.timedOut}\nTERMINATION_VERIFIED ${result.terminationVerified}\nPIPE_DRAIN_TIMED_OUT ${result.pipeDrainTimedOut}\nOUTPUT_TRUNCATED ${result.outputTruncated}\nEXIT ${result.code}\nBASE ${m.base_commit}\nHEAD ${head}\n\nSTDOUT\n${result.stdout}\nSTDERR\n${result.stderr}\n`,rel=`.spec-loop/output/${taskId}-gate-${gate.id}-${runNonce}.txt`;await atomicWriteMany(root,[{file:path.join(root,rel),content}]);return gateResultSchema.parse({schema_version:1,task_id:taskId,id:gate.id,kind:'command',scope_kind:config.scope_kind,wave_id:config.wave_id,coverage:config.coverage,database_lifecycle:config.database.lifecycle,evidence_class:gate.evidence_class,stability_runs:gate.stability_runs,plan_sha256:gatePlanHash(config),environment_hash:environmentHash,ac:gate.ac,command:gate.command,cwd:m.worktree,exit_code:result.code,timed_out:result.timedOut,output_truncated:result.outputTruncated,duration_ms:Date.now()-started,base_commit:m.base_commit,head,artifact:rel,sha256:sha256(content),web_evidence:null,created_at:createdAt})},(value)=>value.exit_code===0&&!value.timed_out?'success':'failure');results.push(gateResult)
   }
-  const serialized=JSON.stringify(results,null,2)+'\n';await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-gates.json`),content:serialized}]);await advance(root,taskId,'collected','verified',m,startHead,results.every(x=>x.exit_code===0)?null:'one or more gates failed',{gates:sha256(serialized)});return results;
+  const serialized=JSON.stringify(results,null,2)+'\n',snapshot=gateSnapshotFile(root,taskId,serialized);
+  if(await exists(snapshot)){if(sha256(await readFile(snapshot))!==sha256(serialized))throw new Error('Gate Evidence snapshot hash mismatch')}
+  else await atomicWriteMany(root,[{file:snapshot,content:serialized}]);
+  await atomicWriteMany(root,[{file:path.join(control(root),'output',`${taskId}-gates.json`),content:serialized}]);await advance(root,taskId,'collected','verified',m,startHead,results.every(x=>x.exit_code===0)?null:'one or more gates failed',{gates:sha256(serialized)});return results;
 }
 
 export async function verifiedGateResults(root:string,taskId:string):Promise<GateResult[]>{
@@ -700,7 +707,7 @@ async function validateGateEvidence(root:string,taskId:string,m:WorkspaceManifes
       if(!web.html_report||!web.files.some((item)=>item.file===web.html_report))throw new Error(`${g.id}: missing hashed Playwright HTML report`);
       const html=await readFile(path.join(root,web.html_report),'utf8');
       if(!/<html[\s>]/i.test(html)||!/<\/html>/i.test(html))throw new Error(`${g.id}: invalid Playwright HTML report`);
-      const resultsRoot=path.relative(root,path.join(control(root),'output',`${taskId}-web-${g.id}`,'test-results'));
+      const resultsRoot=path.relative(root,path.join(path.dirname(manifestPath),'test-results'));
       const observedScreenshots=await screenshotCount(root,web.files,resultsRoot);
       if(observedScreenshots!==web.screenshots||(playwrightDefinition.require_screenshots&&web.screenshots<1))
         throw new Error(`${g.id}: invalid or missing Playwright screenshots`);

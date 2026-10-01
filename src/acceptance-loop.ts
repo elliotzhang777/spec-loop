@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { atomicWriteMany, exists, readMarkdown, sha256, stringifyMarkdown } from './files.js';
-import { freezeControlledVerificationCandidate, readGateConfig, readWorkspace, runGates, type GateResult } from './execution.js';
+import { freezeControlledVerificationCandidate, readGateConfig, readWorkspace, runGates, gateSnapshotFile, type GateResult } from './execution.js';
 import { readProject, scanTasks, verifyTaskExecutionApproval, verifyExecutionPreflight } from './project.js';
 import { readState } from './task.js';
 import { finishExecutionStep, startExecutionStep, type ExecutionStepType } from './execution-events.js';
@@ -629,7 +629,8 @@ export async function runControlledV(root: string, taskId: string, invocationId:
   const gates = await runGates(root, taskId);
   const passed = gates.every((item) => item.exit_code === 0 && !item.timed_out);
   const failureMessage = passed ? 'all controlled Gates passed' : await describeControlledGateFailures(root, gates);
-  const gateFile = path.resolve(control(root), 'output', `${taskId}-gates.json`);
+  const gateRaw = await readFile(path.resolve(control(root), 'output', `${taskId}-gates.json`), 'utf8');
+  const gateFile = gateSnapshotFile(root, taskId, gateRaw);
   const input = vInputSchema.parse({
     task_id: taskId, contract_hash: contract.contract_hash, plan_hash: plan.plan_hash, head: plan.head,
     invocation_id: invocationId,

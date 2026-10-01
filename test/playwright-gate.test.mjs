@@ -1,3 +1,4 @@
+import {freezeControlledVerificationCandidate} from '../dist/execution.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -128,6 +129,27 @@ test('Playwright Gate runs target-local CLI, proves tests ran, and hashes browse
   result=cli(['harness','reconcile',f.root,f.taskId,'--json']);
   assert.notEqual(result.code,0);
   assert.match(result.stderr,/Playwright attachment hash mismatch/);
+});
+
+test('Playwright Gate rerun preserves earlier browser reports and screenshots',async()=>{
+  const f=await webFixture('WEBRERUN');
+  const first=cli(['harness','verify',f.root,f.taskId,'--json']);assert.equal(first.code,0,first.stderr);
+  const prior=JSON.parse(first.stdout)[0];
+  const priorManifest=await readFile(path.join(f.root,prior.web_evidence.manifest));
+  const priorReport=JSON.parse(priorManifest);
+  const priorScreenshot=priorReport.files.find(item=>item.file.endsWith('/home.png'));
+  assert.ok(priorScreenshot);
+  const screenshotBytes=await readFile(path.join(f.root,priorScreenshot.file));
+  git(path.dirname(f.candidateFile),['add','.']);
+  git(path.dirname(f.candidateFile),['commit','-m','freeze browser rerun candidate']);
+  await freezeControlledVerificationCandidate(f.root,f.taskId);
+  const second=cli(['gate','run',f.root,f.taskId,'--json']);assert.equal(second.code,0,second.stderr);
+  const current=JSON.parse(second.stdout)[0];
+  assert.notEqual(current.web_evidence.manifest,prior.web_evidence.manifest);
+  assert.notEqual(current.artifact,prior.artifact);
+  assert.deepEqual(await readFile(path.join(f.root,prior.web_evidence.manifest)),priorManifest);
+  assert.deepEqual(await readFile(path.join(f.root,priorScreenshot.file)),screenshotBytes);
+  assert.ok((await readFile(path.join(f.root,current.web_evidence.manifest))).length>0);
 });
 
 test('Playwright Gate discovers a target-local CLI in a nested web package',async()=>{
