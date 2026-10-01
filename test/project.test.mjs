@@ -190,6 +190,12 @@ test('approved v2 proposal adopts an exact approved but unbound target task', as
   const proposal=cli(['triage','propose',root,'--source','approved target task','--goal','Adopt approved target','--risk','standard','--reason','Bind an existing approved task','--contract',contractFile]);
   assert.equal(proposal.code,0,proposal.stderr);
   assert.equal(cli(['triage','approve',root,proposal.stdout.trim(),'--by','owner']).code,0);
+  for(const invalid of ['- 状态：已完成','- 状态：已批准\n- 状态：已完成']){
+    await writeFile(target,`# TASK-ADOPT-3：Adopt approved\n\n${invalid}\n- 风险等级：standard\n\n## 验收标准\n\n- [ ] AC-1：approved target remains approved\n`);
+    const rejected=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-3','--title','Adopt approved','--adopt-existing']);
+    assert.notEqual(rejected.code,0);assert.match(rejected.stderr,/only an unbound draft or approved target task may be adopted/);
+  }
+  await writeFile(target,'# TASK-ADOPT-3：Adopt approved\n\n- 状态：已批准\n- 风险等级：standard\n\n## 验收标准\n\n- [ ] AC-1：approved target remains approved\n');
   const adopted=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-3','--title','Adopt approved','--adopt-existing']);
   assert.equal(adopted.code,0,adopted.stderr);
   const content=await readFile(target,'utf8');assert.match(content,/^- 状态：已批准$/m);assert.match(content,/^- Proposal：PROP-1$/m);
