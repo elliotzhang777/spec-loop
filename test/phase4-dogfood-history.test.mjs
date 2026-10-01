@@ -25,7 +25,7 @@ test('Candidate requires an independent R event',()=>{
   const wrongActor={...run,history:history.map(entry=>entry.stage==='candidate'?{...entry,actor:'controller'}:entry)}
   assert.throws(()=>auditAutonomousRun(wrongActor,'2026-09-30T23:59:00.000Z'),/invalid candidate actor/)
 })
-test('real TASK-049 history passes and immutable TASK-029 history fails',()=>{
+test('real Standard and Heavy histories pass while immutable TASK-029 history fails',()=>{
   const gitCommon=spawnSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'})
   assert.equal(gitCommon.status,0,gitCommon.stderr)
   const root=path.dirname(gitCommon.stdout.trim())
@@ -35,7 +35,8 @@ test('real TASK-049 history passes and immutable TASK-029 history fails',()=>{
     const contract=readFileSync(path.join(folder,'ACCEPTANCE_CONTRACT_V2.md'),'utf8')
     return {run,approvedAt:contract.match(/^  approved_at: (.+)$/m)?.[1]}
   }
-  const standard=task('task-049'),heavy=task('task-029')
+  const standard=task('task-049'),heavy=task('task-058'),intervened=task('task-029')
   assert.equal(auditAutonomousRun(standard.run,standard.approvedAt).automated,true)
-  assert.throws(()=>auditAutonomousRun(heavy.run,heavy.approvedAt),/loop-time human wait/)
+  assert.equal(auditAutonomousRun(heavy.run,heavy.approvedAt).automated,true)
+  assert.throws(()=>auditAutonomousRun(intervened.run,intervened.approvedAt),/loop-time human wait/)
 })

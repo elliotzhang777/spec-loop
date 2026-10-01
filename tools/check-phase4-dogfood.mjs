@@ -110,7 +110,8 @@ async function taskEvidence(taskId, expectedRisk) {
   return {
     task_id: taskId, risk: expectedRisk, approved_by: contract.approval.approved_by,
     head: run.current_head, contract_hash: run.contract_hash, plan_hash: run.plan_hash,
-    candidate_id: candidate.candidate_id, candidate_sha256: sha256(candidateRaw), autonomy,
+    candidate_id: candidate.candidate_id, candidate_sha256: sha256(candidateRaw),
+    autonomy: { ...autonomy, history_sha256: sha256(JSON.stringify(run.history)) },
     invocations, maker_sha256: sha256(makerRaw), v, r,
     gates: { count: gates.length, sha256: sha256(gatesRaw), ids: gates.map(gate => gate.id) },
   }
