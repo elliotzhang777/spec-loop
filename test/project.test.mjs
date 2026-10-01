@@ -171,6 +171,32 @@ test('approved proposal explicitly adopts a matching named draft target task', a
   await assert.rejects(readFile(path.join(repo,'spec','04-task','TASK-ADOPT-1.md'),'utf8'));
 });
 
+test('approved v2 proposal adopts an exact approved but unbound target task', async()=>{
+  const root=await tempRoot('project-adopt-approved-'),repo=path.join(root,'repo');await mkdir(repo);
+  assert.equal(cli(['project','init',root,'--id','PROJ-ADOPT-APPROVED','--name','Adopt approved','--repository',repo]).code,0);
+  assert.equal(cli(['project','protocol',root,'--set','v2']).code,0);
+  const target=path.join(repo,'spec','04-task','TASK-ADOPT-3-approved.md');
+  await writeFile(target,'# TASK-ADOPT-3：Adopt approved\n\n- 状态：已批准\n- 风险等级：standard\n\n## 验收标准\n\n- [ ] AC-1：approved target remains approved\n');
+  const contractFile=path.join(root,'contract.json');
+  await writeFile(contractFile,JSON.stringify({
+    schema_version:2,task_id:'TASK-ADOPT-3',version:1,risk:'standard',critical_path:false,depends_on:[],
+    criteria:[{id:'AC-1',text:'approved target remains approved',risk_tags:['functional'],waivable:false}],
+    use_cases:[{id:'UC-1',ac:['AC-1'],scenario:'adopt an already approved task without changing its acceptance'}],
+    tools:[{id:'adopt-test',kind:'unit',gate_id:'adopt-test',command:['node','--test','test/project.test.mjs'],playwright:null}],
+    assertions:[{id:'AS-1',ac:['AC-1'],tool_id:'adopt-test',operator:'exit_code_zero',expected:'target remains approved'}],
+    evidence_requirements:[{id:'ER-1',ac:['AC-1'],tool_id:'adopt-test',kind:'test_report',required:true}],
+    budgets:{max_semantic_reworks:2,max_infrastructure_retries_per_stage:1,repeated_failure_limit:2},
+  },null,2));
+  const proposal=cli(['triage','propose',root,'--source','approved target task','--goal','Adopt approved target','--risk','standard','--reason','Bind an existing approved task','--contract',contractFile]);
+  assert.equal(proposal.code,0,proposal.stderr);
+  assert.equal(cli(['triage','approve',root,proposal.stdout.trim(),'--by','owner']).code,0);
+  const adopted=cli(['triage','create-task',root,proposal.stdout.trim(),'--id','TASK-ADOPT-3','--title','Adopt approved','--adopt-existing']);
+  assert.equal(adopted.code,0,adopted.stderr);
+  const content=await readFile(target,'utf8');assert.match(content,/^- 状态：已批准$/m);assert.match(content,/^- Proposal：PROP-1$/m);
+  assert.match(content,/^- Spec-Loop Task：/m);
+  assert.match(await readFile(path.join(root,'.spec-loop','tasks','task-adopt-3','ACCEPTANCE_CONTRACT_V2.md'),'utf8'),/contract_hash:/);
+});
+
 test('task creation fails closed when multiple target specs match one ID',async()=>{
   const root=await tempRoot('project-adopt-ambiguous-'),repo=path.join(root,'repo');await mkdir(repo);
   cli(['project','init',root,'--id','PROJ-ADOPT-AMBIGUOUS','--name','Adopt ambiguous','--repository',repo]);

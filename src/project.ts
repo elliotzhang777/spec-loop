@@ -351,14 +351,14 @@ function normalizeCriterion(value:string):string{return value.trim().replace(/[�
 function adoptTargetTask(content:string,taskId:string,title:string,proposalId:string,taskPath:string,level:z.infer<typeof risk>,criteria:Array<{id:string;text:string}>,protocol:TaskProtocol):string{
   const heading=content.match(/^# ([^：:]+)[：:]\s*(.+)$/m);
   if(!heading||heading[1]!==taskId||heading[2].trim()!==title)throw new Error('existing target task ID or title differs from requested task');
-  if(!/^- 状态：草稿$/m.test(content))throw new Error('only a draft target task may be adopted');
+  if(!/^- 状态：(?:草稿|已批准)$/m.test(content))throw new Error('only an unbound draft or approved target task may be adopted');
   if(/^- (?:Spec-Loop Task|Proposal)：/m.test(content))throw new Error('existing target task is already bound');
   const existing=[...content.matchAll(/^- \[ \] (AC-[1-9]\d*)[：:]\s*(.+)$/gm)].map(x=>({id:x[1],text:normalizeCriterion(x[2])}));
   const approved=criteria.map(x=>({id:x.id,text:normalizeCriterion(x.text)}));
   if(JSON.stringify(existing)!==JSON.stringify(approved))throw new Error('existing target task acceptance differs from approved proposal');
   return content
     .replace(/^- 风险等级：(?:light|standard|heavy)\n/m,'')
-    .replace(/^- 状态：草稿$/m,`- 状态：已批准\n- 风险等级：${level}\n- Spec-Loop Task：${taskPath}\n- Proposal：${proposalId}\n- 协议版本：${protocol==='v2'?'P/M/V/R v2':'v1'}`);
+    .replace(/^- 状态：(?:草稿|已批准)$/m,`- 状态：已批准\n- 风险等级：${level}\n- Spec-Loop Task：${taskPath}\n- Proposal：${proposalId}\n- 协议版本：${protocol==='v2'?'P/M/V/R v2':'v1'}`);
 }
 
 async function resolveTargetTaskFile(repository:string,targetRoot:string,taskId:string):Promise<string>{
