@@ -856,7 +856,11 @@ export async function reconcileCandidateBaseline(root: string, taskId: string, a
   const candidateHead = await git(workspace.worktree, ['rev-parse', '--verify', `${run.current_head}^{commit}`]);
   const baselineHead = await git(project.repository, ['rev-parse', '--verify', `refs/heads/${project.default_branch}^{commit}`]);
   const isAncestor = async (older: string, newer: string) => {
-    try { await exec('git', ['merge-base', '--is-ancestor', older, newer], { cwd: project.repository, maxBuffer: 1_000_000, timeout: 60_000, killSignal: 'SIGKILL' }); return true; } catch { return false; }
+    try { await exec('git', ['merge-base', '--is-ancestor', older, newer], { cwd: project.repository, maxBuffer: 1_000_000, timeout: 60_000, killSignal: 'SIGKILL' }); return true; }
+    catch (error) {
+      if ((error as { code?: unknown }).code === 1) return false;
+      throw new Error(`Candidate ancestry check failed: ${(error as Error).message}`);
+    }
   };
   const integrated = await isAncestor(candidateHead, baselineHead);
   const fastForward = !integrated && await isAncestor(baselineHead, candidateHead);

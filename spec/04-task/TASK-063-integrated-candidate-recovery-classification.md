@@ -30,7 +30,7 @@ TASK-029 候选 `3be7123` 和 TASK-037 候选 `2ebee82` 均已获用户最终 He
 
 ## 实施与定向证据
 
-在独立工作树修正 `reconcileCandidateBaseline`：候选 HEAD 等于或先于默认分支时分类为 `already_integrated`，`--apply` 为只读无操作；可快进和真实分叉分别保留 `ready_ff`、`baseline_drift`。`npm run build` PASS；`node --test test/acceptance-loop.test.mjs` 42/42 PASS。使用新 CLI 对当前工程只读预览，TASK-029/037 均为 `already_integrated`，`applied=false`，原始结果 `.spec-loop/output/TASK063-preview-after-fix.json`。独立 V/R 尚待完成。
+在独立工作树修正 `reconcileCandidateBaseline`：候选 HEAD 等于或先于默认分支时分类为 `already_integrated`，`--apply` 为只读无操作；可快进和真实分叉分别保留 `ready_ff`、`baseline_drift`。`npm run build` PASS；`node --test test/acceptance-loop.test.mjs` 42/42 PASS。使用新 CLI 对当前工程只读预览，TASK-029/037 均为 `already_integrated`，`applied=false`，原始结果 `.spec-loop/output/TASK063-preview-after-fix.json`。第一次独立 V 指出 Git `merge-base` 运行错误被误当成非祖先，AC-2 FAIL；原始记录 `.spec-loop/output/TASK063-independent-V.md`。已改为只把 Git 退出码 1 当作非祖先，其他错误 fail closed；新增同 HEAD 与 Git 退出码 128 注入用例，修复后构建和两条相关定向测试 2/2 PASS。第二次独立 V/R 尚待完成。
 
 ## 变更记录
 

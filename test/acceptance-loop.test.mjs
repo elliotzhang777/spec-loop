@@ -333,6 +333,7 @@ test('an already integrated Candidate is reported without invalidating its Evide
   const ready = await reconcileCandidateBaseline(f.root, f.taskId)
   assert.equal(ready.status, 'ready_ff')
   git(f.repository, ['merge', '--ff-only', candidate.current_head])
+  assert.equal((await reconcileCandidateBaseline(f.root, f.taskId)).status, 'already_integrated', 'equal HEAD is integrated')
   await writeFile(path.join(f.repository, 'delivery-record.md'), 'Documentation after integration\n')
   git(f.repository, ['add', '.'])
   git(f.repository, ['commit', '-m', 'archive delivery record'])
@@ -344,6 +345,18 @@ test('an already integrated Candidate is reported without invalidating its Evide
   const applied = await reconcileCandidateBaseline(f.root, f.taskId, true)
   assert.equal(applied.status, 'already_integrated')
   assert.equal(applied.applied, false)
+  assert.deepEqual(await readAcceptanceRun(f.root, f.taskId), before)
+  const bin = path.join(f.root, 'faulty-git')
+  await mkdir(bin)
+  const actualGit = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim()
+  const gitWrapper = path.join(bin, 'git')
+  await writeFile(gitWrapper, `#!/bin/sh\nif [ "$1" = "merge-base" ]; then exit 128; fi\nexec "${actualGit}" "$@"\n`)
+  await chmod(gitWrapper, 0o755)
+  const previousPath = process.env.PATH
+  process.env.PATH = `${bin}:${previousPath}`
+  try {
+    await assert.rejects(reconcileCandidateBaseline(f.root, f.taskId, true), /Candidate ancestry check failed/)
+  } finally { process.env.PATH = previousPath }
   assert.deepEqual(await readAcceptanceRun(f.root, f.taskId), before)
 })
 
