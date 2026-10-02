@@ -855,17 +855,20 @@ export async function reconcileCandidateBaseline(root: string, taskId: string, a
   const project = await readProject(root), workspace = await readWorkspace(root, taskId);
   const candidateHead = await git(workspace.worktree, ['rev-parse', '--verify', `${run.current_head}^{commit}`]);
   const baselineHead = await git(project.repository, ['rev-parse', '--verify', `refs/heads/${project.default_branch}^{commit}`]);
-  let fastForward = false;
-  try { await exec('git', ['merge-base', '--is-ancestor', baselineHead, candidateHead], { cwd: project.repository, maxBuffer: 1_000_000, timeout: 60_000, killSignal: 'SIGKILL' }); fastForward = true; } catch {}
-  const status = fastForward ? 'ready_ff' : 'baseline_drift';
+  const isAncestor = async (older: string, newer: string) => {
+    try { await exec('git', ['merge-base', '--is-ancestor', older, newer], { cwd: project.repository, maxBuffer: 1_000_000, timeout: 60_000, killSignal: 'SIGKILL' }); return true; } catch { return false; }
+  };
+  const integrated = await isAncestor(candidateHead, baselineHead);
+  const fastForward = !integrated && await isAncestor(baselineHead, candidateHead);
+  const status = integrated ? 'already_integrated' : fastForward ? 'ready_ff' : 'baseline_drift';
   const checkedAt = new Date().toISOString();
   const result = {
     schema_version: 1 as const, task_id: taskId, run_id: run.run_id, candidate_id: run.candidate_id,
     candidate_head: candidateHead, workspace_base_head: workspace.base_commit, default_branch: project.default_branch,
     baseline_head: baselineHead, status, checked_at: checkedAt, applied: false,
-    next_action: fastForward ? 'request separately authorized ff-only delivery' : 're-enter M, rebase onto the current baseline, then rerun V and R',
+    next_action: integrated ? 'candidate commit is already on the default branch; preserve Candidate and Evidence' : fastForward ? 'request separately authorized ff-only delivery' : 're-enter M, rebase onto the current baseline, then rerun V and R',
   };
-  if (!apply) return result;
+  if (!apply || integrated) return result;
   if (fastForward) throw new Error('Candidate is already ff-ready; merge/delivery requires separate authorization');
   const artifact = path.join(outputDir(root, taskId), `REBASELINE-${checkedAt.replace(/[:.]/g, '-')}.json`);
   const updated = history({

@@ -1,6 +1,6 @@
 # TASK-063：已合入候选被误判为 baseline_drift
 
-- 状态：进行中
+- 状态：待验证
 - 风险等级：standard
 - 优先级：P0
 - 负责人：Codex
@@ -27,6 +27,10 @@ TASK-029 候选 `3be7123` 和 TASK-037 候选 `2ebee82` 均已获用户最终 He
 ## 验证范围
 
 `coverage: targeted`，只修改候选基线分类和直接调用边界；定向执行 `test/acceptance-loop.test.mjs` 与必要的 Scheduler 测试。新发现的产品失败按根因单独建工单；飞书、Phase 5 Portfolio 和自动 merge/push/deploy 不在本工单范围。
+
+## 实施与定向证据
+
+在独立工作树修正 `reconcileCandidateBaseline`：候选 HEAD 等于或先于默认分支时分类为 `already_integrated`，`--apply` 为只读无操作；可快进和真实分叉分别保留 `ready_ff`、`baseline_drift`。`npm run build` PASS；`node --test test/acceptance-loop.test.mjs` 42/42 PASS。使用新 CLI 对当前工程只读预览，TASK-029/037 均为 `already_integrated`，`applied=false`，原始结果 `.spec-loop/output/TASK063-preview-after-fix.json`。独立 V/R 尚待完成。
 
 ## 变更记录
 

@@ -324,6 +324,29 @@ test('V and R accept plain Evidence filenames beside their RESULT file', async (
   }
 })
 
+test('an already integrated Candidate is reported without invalidating its Evidence', async () => {
+  const f = await fixture('acceptance-integrated-', 'TASK-INTEGRATED-1')
+  const v = await roleInput(f.root, f.taskId, 'V', 'pass', { invocation_id: 'verifier-integrated', verdict: 'pass', classification: null, failed_ac: [], message: 'candidate passed' })
+  await recordVResult(f.root, f.taskId, v)
+  const r = await roleInput(f.root, f.taskId, 'R', 'pass', { invocation_id: 'reviewer-integrated', verdict: 'pass', classification: null, failed_ac: [], message: 'candidate review passed' })
+  const candidate = await recordRResult(f.root, f.taskId, r)
+  const ready = await reconcileCandidateBaseline(f.root, f.taskId)
+  assert.equal(ready.status, 'ready_ff')
+  git(f.repository, ['merge', '--ff-only', candidate.current_head])
+  await writeFile(path.join(f.repository, 'delivery-record.md'), 'Documentation after integration\n')
+  git(f.repository, ['add', '.'])
+  git(f.repository, ['commit', '-m', 'archive delivery record'])
+  const before = await readAcceptanceRun(f.root, f.taskId)
+  const inspected = await reconcileCandidateBaseline(f.root, f.taskId)
+  assert.equal(inspected.status, 'already_integrated')
+  assert.equal(inspected.candidate_id, candidate.candidate_id)
+  assert.match(inspected.next_action, /preserve Candidate and Evidence/)
+  const applied = await reconcileCandidateBaseline(f.root, f.taskId, true)
+  assert.equal(applied.status, 'already_integrated')
+  assert.equal(applied.applied, false)
+  assert.deepEqual(await readAcceptanceRun(f.root, f.taskId), before)
+})
+
 test('Candidate baseline drift is detected read-only and explicitly requeues M/V/R without merging', async () => {
   const f = await fixture('acceptance-rebaseline-', 'TASK-REBASELINE-1')
   const v = await roleInput(f.root, f.taskId, 'V', 'pass', { invocation_id: 'verifier-rebaseline', verdict: 'pass', classification: null, failed_ac: [], message: 'candidate passed before baseline drift' })
