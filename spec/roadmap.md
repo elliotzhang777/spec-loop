@@ -262,3 +262,7 @@ Phase 4 第九轮技术候选 `2ebee82` 已完成批准的 8/8 Heavy Gate、Node
 ## 2026-10-02 Phase 4 最终验收
 
 用户接受 TASK-029 `3be7123` 的最终 Heavy，以及 TASK-037 `2ebee82` 的最终 Heavy 与 Phase 4 阶段结果。第九轮最终矩阵 42 PASS、0 BLOCKED、8 NOT_APPLICABLE、0 FAIL；全规格库未完成工单 `R=0`，满足用户要求的停止条件。见[最终人工验收记录](05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。Phase 5 尚未获准启动；2026-10-02 精确候选 `2ebee82` 已快进合入本地主分支，远端与外部部署状态见[阶段四交付报告](05-delivery/阶段四交付报告.md)。
+
+## 2026-10-02 Phase 5 进入条件核对
+
+用户要求继续推进后，先完成 Phase 4 交付后缺陷 TASK-063：已合入 Candidate 不再误报 `baseline_drift`，定向测试与独立 V/R PASS，当前未完成工单 `R=0`，见[缺陷验收矩阵](05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。Phase 5 的两工程 report-only 当日核对通过，但现有快照仅覆盖 2026-09-30、10-01、10-02，缺少长期稳定与收益证据；FEAT-007/DES-007 仍为草稿，不提前启动 Phase 5 实现。见[进入条件核对](05-delivery/2026-10-02-Phase5-进入条件核对.md)。

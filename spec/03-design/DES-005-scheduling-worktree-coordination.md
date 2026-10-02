@@ -187,3 +187,7 @@ report-only 指标、并发/冲突、Worker crash、Pause/Kill、Denylist、Conn
 ## 2026-10-02 最终验收同步
 
 TASK-037 双 Project 重复 report-only 扫描 canonical 等价、`missing_data=0`，Ready 与同刻只读预览一致；受控 Scheduler/安全对抗和独立 V/R PASS，用户最终 Heavy/Phase 4 验收通过。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。
+
+## 2026-10-02 交付后缺陷同步
+
+TASK-063 区分已合入与真分叉的 Candidate；当前项目预览中 TASK-029/037 为 `already_integrated`，其余真分叉仍可按原保护恢复，独立 V/R PASS。见[验收矩阵](../05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。

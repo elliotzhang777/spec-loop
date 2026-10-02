@@ -162,3 +162,7 @@ TASK-054 的已批准未绑定工单导入、TASK-058 的无人工介入 Heavy D
 ## 2026-10-02 最终验收同步
 
 TASK-037 精确候选 `2ebee82` 的 Heavy 8/8、真实 Standard/Heavy Dogfood、独立 V/R、当前视觉 Review 与用户最终 Heavy/Phase 4 验收通过；阶段已关闭。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。
+
+## 2026-10-02 交付后缺陷同步
+
+TASK-063 在 `reconcileCandidateBaseline` 加入 `already_integrated` 分类；Git 探针错误 fail closed，`--apply` 对已合入候选不改写 Run。独立 V/R PASS。见[验收矩阵](../05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。

@@ -77,3 +77,7 @@ TASK-037 当前候选的双 Project report-only 指标满足批准门槛，Ready
 ## 2026-10-02 最终验收同步
 
 TASK-037 双 Project report-only 门槛、受控 Scheduler 对抗、独立 V/R、视觉 Review 与用户最终 Heavy/Phase 4 验收通过；FEAT-005 已完成。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。
+
+## 2026-10-02 交付后缺陷同步
+
+TASK-063 使已合入候选的只读预览保持 Candidate/Evidence，不在显式执行时错误回 M；真分叉候选仍遵循原受控恢复门禁。见[验收矩阵](../05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。

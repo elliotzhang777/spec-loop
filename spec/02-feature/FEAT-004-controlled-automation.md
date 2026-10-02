@@ -90,3 +90,7 @@ TASK-054 已批准工单导入与 TASK-058 Standard/Heavy 无人工介入 Dogfoo
 ## 2026-10-02 最终验收同步
 
 TASK-037 当前 `2ebee82` 候选 8/8 Gate、真实 Standard/Heavy Dogfood、独立 V/R、视觉 Review 与用户最终 Heavy/Phase 4 验收通过；FEAT-004 已完成。 见[最终人工验收记录](../05-delivery/2026-10-02-Phase4-最终人工验收记录.md)。
+
+## 2026-10-02 交付后缺陷同步
+
+TASK-063 修复已合入 Candidate 的基线分类；同 HEAD、祖先、可快进、真分叉和 Git 探针故障路径已按定向检查与独立 V/R 验证。见[验收矩阵](../05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。

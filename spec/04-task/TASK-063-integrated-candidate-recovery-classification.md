@@ -1,6 +1,6 @@
 # TASK-063：已合入候选被误判为 baseline_drift
 
-- 状态：待验证
+- 状态：已完成
 - 风险等级：standard
 - 优先级：P0
 - 负责人：Codex
@@ -19,10 +19,10 @@ TASK-029 候选 `3be7123` 和 TASK-037 候选 `2ebee82` 均已获用户最终 He
 
 ## 验收标准
 
-- [ ] AC-1：默认分支等于或包含候选 HEAD 时，预览明确显示已合入状态，保留原 Candidate/Evidence，不建议回 M。
-- [ ] AC-2：已合入候选的 `--apply` 不改变受管 Run；显式波次只对真正分叉的候选执行 baseline recovery。
-- [ ] AC-3：未合入但默认分支可快进到候选时仍为 `ready_ff`；真实分叉仍为 `baseline_drift`，现有读-only 与重排保护不退化。
-- [ ] AC-4：定向控制面测试、构建、当前工程只读预览和独立 V/R 通过；不重复 Phase 4 已批准的 full Heavy Gate。
+- [x] AC-1：默认分支等于或包含候选 HEAD 时，预览明确显示已合入状态，保留原 Candidate/Evidence，不建议回 M。
+- [x] AC-2：已合入候选的 `--apply` 不改变受管 Run；显式波次只对真正分叉的候选执行 baseline recovery。
+- [x] AC-3：未合入但默认分支可快进到候选时仍为 `ready_ff`；真实分叉仍为 `baseline_drift`，现有读-only 与重排保护不退化。
+- [x] AC-4：定向控制面测试、构建、当前工程只读预览和独立 V/R 通过；不重复 Phase 4 已批准的 full Heavy Gate。
 
 ## 验证范围
 
@@ -30,10 +30,14 @@ TASK-029 候选 `3be7123` 和 TASK-037 候选 `2ebee82` 均已获用户最终 He
 
 ## 实施与定向证据
 
-在独立工作树修正 `reconcileCandidateBaseline`：候选 HEAD 等于或先于默认分支时分类为 `already_integrated`，`--apply` 为只读无操作；可快进和真实分叉分别保留 `ready_ff`、`baseline_drift`。`npm run build` PASS；`node --test test/acceptance-loop.test.mjs` 42/42 PASS。使用新 CLI 对当前工程只读预览，TASK-029/037 均为 `already_integrated`，`applied=false`，原始结果 `.spec-loop/output/TASK063-preview-after-fix.json`。第一次独立 V 指出 Git `merge-base` 运行错误被误当成非祖先，AC-2 FAIL；原始记录 `.spec-loop/output/TASK063-independent-V.md`。已改为只把 Git 退出码 1 当作非祖先，其他错误 fail closed；新增同 HEAD 与 Git 退出码 128 注入用例，修复后构建和两条相关定向测试 2/2 PASS。第二次独立 V/R 尚待完成。
+在独立工作树修正 `reconcileCandidateBaseline`：候选 HEAD 等于或先于默认分支时分类为 `already_integrated`，`--apply` 为只读无操作；可快进和真实分叉分别保留 `ready_ff`、`baseline_drift`。`npm run build` PASS；`node --test test/acceptance-loop.test.mjs` 42/42 PASS。使用新 CLI 对当前工程只读预览，TASK-029/037 均为 `already_integrated`，`applied=false`，原始结果 `.spec-loop/output/TASK063-preview-after-fix.json`。第一次独立 V 指出 Git `merge-base` 运行错误被误当成非祖先，AC-2 FAIL；原始记录 `.spec-loop/output/TASK063-independent-V.md`。已改为只把 Git 退出码 1 当作非祖先，其他错误 fail closed；新增同 HEAD 与 Git 退出码 128 注入用例，修复后构建和两条相关定向测试 2/2 PASS。第二次独立 V 在当前代码 HEAD `7ebd4973af0a211b43154c66ff7cc98b39462bf9` 对 AC-1～3 和 AC-4 技术证据均 PASS，记录 `.spec-loop/output/TASK063-independent-V2.md`；独立 R 复核两次 V、代码、全部 14 张候选的 Git 关系与证据链后 PASS，记录 `.spec-loop/output/TASK063-independent-R.md`。修复快进合入 `main` 后再次构建与只读预览 PASS：TASK-029/037 为 `already_integrated`，6 张已合入、8 张真分叉，均未执行破坏动作；结果 `.spec-loop/output/TASK063-final-main-preview.json`。设计差异：仅增加第三种已合入分类并使 Git 探针错误 fail closed，不改 Candidate Run 阶段、Gate 计划或旧漂移保护。
 
 ## 变更记录
 
 | 日期 | 变更 | 原因 |
 |---|---|---|
 | 2026-10-02 | 建立已合入候选误判缺陷 | 用户要求继续完成，真实只读预览暴露交付后状态对账风险 |
+
+最终逐 AC 结果见[交付后缺陷验收矩阵](../05-delivery/2026-10-02-Phase4-交付后缺陷验收矩阵.md)。
+
+本机修订包：[`products/spec-loop/0.1.0+7ebd497/`](../../products/spec-loop/0.1.0+7ebd497/)，原 0.1.0 包不覆盖。
